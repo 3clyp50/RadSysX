@@ -57,22 +57,16 @@ import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardBody } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { DicomViewer } from '@/components/DicomViewer';
-import Image from 'next/image';
 import { ImageSeriesUpload } from '@/components/ImageSeriesUpload';
 import { processImageSeries, uploadImageSeries, cleanupImageSeries, type ImageSeries } from '@/lib/services/imageUploadService';
 import { Toast, Toaster, type ToastProps } from '@/components/ui/toast';
-import * as cornerstone from 'cornerstone-core';
-import * as cornerstoneWADOImageLoader from 'cornerstone-wado-image-loader';
-import { 
-  initializeCornerstone, 
-  loadAndCacheImage
-} from '@/lib/utils/cornerstoneInit';
-import { canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
 import { ViewportManager } from '@/components/ViewportManager';
 import { LoadedImage } from '@/lib/types';
 import NovionAgent from "@/components/novionAgents";
 import { ViewportManager3D } from '@/components/ViewportManager3D';
+import { UiToolType, canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
+import Image from 'next/image';
+
 // Add type declarations for the Web Speech API
 
 type ViewportLayout = "1x1" | "2x2" | "3x3";
@@ -171,20 +165,7 @@ type setViewportState = "1x1" | "2x2" | "3x3";
 type ViewportType = "AXIAL" | "SAGITTAL" | "CORONAL" | "SERIES";
 
 // Tool types
-type Tool =
-  | "pan"
-  | "zoom"
-  | "distance"
-  | "area"
-  | "angle"
-  | "profile"
-  | "window"
-  | "level"
-  | "diagnose"
-  | "statistics"
-  | "segment"
-  | "compare"
-  | null;
+type Tool = UiToolType;
 
 type AIModel = "mammogram" | "brain-mri" | "chest-xray";
 
@@ -232,8 +213,8 @@ interface ViewportGridProps {
   onViewportExpand: (viewport: ViewportType) => void;
   loadedImages?: LoadedImage[];
   currentImageIndex: number;
-  activeTool: Tool;
-  onToolChange?: (tool: Tool) => void;
+  activeTool: Tool | UiToolType;
+  onToolChange?: (tool: Tool | UiToolType) => void;
   useVolumeViewer: boolean;
 }
 
@@ -702,9 +683,10 @@ function ViewportGrid({
   }
 
   return (
-    <div className={`grid gap-1 ${gridConfig[layout]} w-full h-full`}>
+    <div className={`viewport-grid ${expandedViewport ? 'grid-cols-1 grid-rows-1' : gridConfig[layout]} w-full h-full relative`}>
       {viewports.map((viewport) => (
-        <div key={viewport} className="relative min-h-60 w-full h-full">
+        <div key={viewport} 
+             className={`relative w-full h-full ${expandedViewport ? (expandedViewport === viewport ? 'block' : 'hidden') : ''}`}>
           {use3DViewer && loadedImages && loadedImages.length >= 3 && useVolumeViewer ? (
             // Only render ViewportManager3D for supported viewport types AND when we have enough images AND when volume loading is appropriate
             (viewport === 'AXIAL' || viewport === 'SAGITTAL' || viewport === 'CORONAL') ? (
@@ -715,6 +697,8 @@ function ViewportGrid({
                 activeTool={activeTool}
                 showTools={true}
                 onToolChange={onToolChange}
+                isExpanded={expandedViewport === viewport}
+                onToggleExpand={() => onViewportExpand(viewport)}
               />
             ) : (
               // For unsupported types like "SERIES", fall back to ViewportPanel
@@ -823,9 +807,12 @@ function ViewportPanel({
         currentImageIndex={currentImageIndex}
         activeTool={activeTool}
       />
-      <div className="absolute top-2 left-2 px-2 py-1 text-xs font-medium rounded 
-        bg-[#f0f2f5] dark:bg-[#2a3349] text-[#334155] dark:text-[#e2e8f0] 
-        backdrop-blur-sm border border-[#e4e7ec] dark:border-[#4a5583] shadow-sm">
+      <div className={cn(
+        "absolute top-2 left-2 px-2 py-1 text-xs font-medium rounded",
+        "bg-[#f0f2f5] dark:bg-[#2a3349] text-[#334155] dark:text-[#e2e8f0]", 
+        "backdrop-blur-sm border border-[#e4e7ec] dark:border-[#4a5583] shadow-sm",
+        "z-[100]" // Ensure the label is always on top
+      )}>
         {type}
       </div>
       <button
@@ -840,7 +827,7 @@ function ViewportPanel({
         aria-label={isExpanded ? `Collapse ${type} viewport` : `Expand ${type} viewport`}
         tabIndex={0}
       >
-        <Maximize2 className="h-4 w-4" />
+        {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
       </button>
     </div>
   );
@@ -1435,18 +1422,6 @@ function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      initializeCornerstone();
-      cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-      cornerstoneWADOImageLoader.configure({
-        beforeSend: (xhr) => {
-          // maybe add headers
-        },
-      });
-    }
-  }, []);
-
   const handleThemeChange = (newTheme: 'light' | 'dark') => setTheme(newTheme);
 
   const handleLayoutChange = (newLayout: ViewportLayout) => {
@@ -1473,7 +1448,13 @@ function App() {
   const rightWidth = panelWidth(rightPanelCollapsed);
 
   return (
-    <div className="medical-viewer w-screen h-screen overflow-hidden relative bg-white dark:bg-[#0a0d13]">
+    <div 
+      className={`medical-viewer w-screen h-screen overflow-hidden relative bg-white dark:bg-[#0a0d13] ${expandedViewport ? 'has-expanded-viewport' : ''}`}
+      style={{
+        '--left-panel-width': `${leftWidth}px`,
+        '--right-panel-width': `${rightWidth}px`
+      } as React.CSSProperties}
+    >
       {isEventLogDetached && (
         <DetachedEventLog onAttach={() => setIsEventLogDetached(false)} />
       )}

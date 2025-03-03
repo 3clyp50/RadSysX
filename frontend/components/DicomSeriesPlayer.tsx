@@ -1,19 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, ScanLine } from 'lucide-react';
-import * as cornerstone from 'cornerstone-core';
+import { RenderingEngine, Types, volumeLoader, Enums, cache, imageLoader } from '@cornerstonejs/core';
 import { createImageIdsFromLocalFiles } from '@/lib/utils/createImageIdsAndCacheMetaData';
-
-// Type augmentation for cornerstone to suppress TypeScript errors
-interface CornerstoneExtended {
-  imageCache: {
-    getImageLoadObject: (imageId: string) => { image: any };
-  };
-  loadAndCacheImage: (imageId: string) => Promise<any>;
-  resize: (element: HTMLElement) => void;
-}
-
-// Cast cornerstone to include the extended properties
-const cornerstoneExt = cornerstone as unknown as CornerstoneExtended;
 
 // Define anatomical plane types
 export type AnatomicalPlane = 'AXIAL' | 'SAGITTAL' | 'CORONAL';
@@ -50,14 +38,8 @@ export function DicomSeriesPlayer({
     CORONAL: false
   });
   
-  // References for organizing DICOM images by plane
-  const planeImagesRef = useRef<Record<AnatomicalPlane, string[]>>({
-    AXIAL: [],
-    SAGITTAL: [],
-    CORONAL: []
-  });
-  
   const viewportRef = useRef<HTMLDivElement>(null);
+  const renderingEngineRef = useRef<RenderingEngine | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const loadedImagesRef = useRef<Set<number>>(new Set());
   const imageMetadataRef = useRef<Record<string, any>>({});
@@ -77,14 +59,14 @@ export function DicomSeriesPlayer({
         
         console.log(`DicomSeriesPlayer: Initializing with ${files.length} files`);
         
-        // Check if we have a DICOMDIR file
-        const dicomdirFile = files.find(file => 
-          file.name.toUpperCase() === 'DICOMDIR' || 
-          file.name.toUpperCase().endsWith('.DICOMDIR')
-        );
+        // Create a new rendering engine if needed
+        if (!renderingEngineRef.current && viewportRef.current) {
+          renderingEngineRef.current = new RenderingEngine('dicom-series-player');
+        }
         
-        // Generate image IDs from the files
+        // Create image IDs from files using the local files function
         const ids = await createImageIdsFromLocalFiles(files);
+        setImageIds(ids);
         
         if (ids.length === 0) {
           setError('No valid DICOM images found');
@@ -93,21 +75,28 @@ export function DicomSeriesPlayer({
         }
         
         console.log(`DicomSeriesPlayer: Created ${ids.length} image IDs`);
-        setImageIds(ids);
         
-        // Enable the cornerstone element
-        if (viewportRef.current) {
-          cornerstone.enable(viewportRef.current);
+        // Set up the viewport
+        if (viewportRef.current && renderingEngineRef.current) {
+          const viewportInput = {
+            viewportId: 'DICOM_PLAYER',
+            element: viewportRef.current,
+            type: Enums.ViewportType.STACK,
+          };
           
-          // Load and analyze all images to determine their anatomical planes
-          await analyzeAndOrganizeByPlane(ids);
+          renderingEngineRef.current.enableElement(viewportInput);
           
-          // Load the first image
-          await loadAndDisplayImage(ids[0], viewportRef.current);
-          loadedImagesRef.current.add(0);
+          // Get the viewport
+          const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
           
-          // Preload the next few images
-          preloadImages(ids, 0, 5);
+          // Set the stack of images
+          await viewport.setStack(ids);
+          
+          // Set initial image
+          await viewport.setImageIdIndex(0);
+          
+          // Render
+          renderingEngineRef.current.render();
         }
         
         setIsLoading(false);
@@ -131,13 +120,10 @@ export function DicomSeriesPlayer({
         clearInterval(timerRef.current);
       }
       
-      // Disable cornerstone element
-      if (viewportRef.current) {
-        try {
-          cornerstone.disable(viewportRef.current);
-        } catch (error) {
-          console.warn('Error disabling cornerstone element:', error);
-        }
+      // Cleanup rendering engine
+      if (renderingEngineRef.current) {
+        renderingEngineRef.current.destroy();
+        renderingEngineRef.current = null;
       }
       
       // Clean up image URLs
@@ -154,277 +140,20 @@ export function DicomSeriesPlayer({
     };
   }, [files]);
   
-  // Analyze all DICOM images and organize them by anatomical plane
-  const analyzeAndOrganizeByPlane = async (imageIds: string[]) => {
-    const planeImages: Record<AnatomicalPlane, string[]> = {
-      AXIAL: [],
-      SAGITTAL: [],
-      CORONAL: []
-    };
-    
-    // We'll collect all images and their metadata for analysis
-    const imageMetadata: Array<{ id: string; metadata: any; position?: number[] }> = [];
-    
-    try {
-      // First, load all images and collect metadata
-      for (let i = 0; i < imageIds.length; i++) {
-        try {
-          // Load the image to get its metadata
-          const image = await cornerstoneExt.loadAndCacheImage(imageIds[i]);
-          const metadata = image.data;
-          
-          // Store metadata for later use
-          imageMetadataRef.current[imageIds[i]] = metadata;
-          
-          // Extract position information for sorting
-          const imagePosition = metadata?.imagePositionPatient || 
-                               metadata?.ImagePositionPatient;
-          
-          imageMetadata.push({
-            id: imageIds[i],
-            metadata,
-            position: imagePosition
-          });
-        } catch (error) {
-          console.warn(`Error loading metadata for image ${i}:`, error);
-        }
-      }
-      
-      // If we have enough images, try to determine planes
-      if (imageIds.length >= 2) {
-        // First, try to detect planes using orientation vectors
-        let planesDetermined = false;
-        
-        // Group images by their orientations if available
-        const orientationGroups: Record<string, string[]> = {};
-        
-        for (const { id, metadata } of imageMetadata) {
-          if (!metadata) continue;
-          
-          const imageOrientation = metadata.imageOrientationPatient || 
-                                 metadata.ImageOrientationPatient;
-          
-          if (imageOrientation && imageOrientation.length === 6) {
-            // Create an orientation key (simplified for grouping)
-            // We round to 1 decimal place to group similar orientations
-            const orientKey = imageOrientation
-              .map((v: number) => Math.round(v * 10) / 10)
-              .join(',');
-            
-            if (!orientationGroups[orientKey]) {
-              orientationGroups[orientKey] = [];
-            }
-            
-            orientationGroups[orientKey].push(id);
-          }
-        }
-        
-        // Now analyze each orientation group to determine its plane
-        for (const orientKey in orientationGroups) {
-          const groupIds = orientationGroups[orientKey];
-          if (groupIds.length === 0) continue;
-          
-          // Get orientation from the first image in this group
-          const firstId = groupIds[0];
-          const metadata = imageMetadataRef.current[firstId];
-          
-          if (!metadata) continue;
-          
-          const imageOrientation = metadata.imageOrientationPatient || 
-                                 metadata.ImageOrientationPatient;
-          
-          if (imageOrientation && imageOrientation.length === 6) {
-            // Extract orientation vectors
-            const rowVector = imageOrientation.slice(0, 3);
-            const colVector = imageOrientation.slice(3, 6);
-            
-            // Calculate the normal vector (cross product)
-            const normalVector = [
-              rowVector[1] * colVector[2] - rowVector[2] * colVector[1],
-              rowVector[2] * colVector[0] - rowVector[0] * colVector[2],
-              rowVector[0] * colVector[1] - rowVector[1] * colVector[0]
-            ];
-            
-            // Find the largest component of the normal vector
-            const absNormal = normalVector.map(Math.abs);
-            const maxIndex = absNormal.indexOf(Math.max(...absNormal));
-            
-            // Determine plane based on the largest component
-            let targetPlane: AnatomicalPlane = 'AXIAL';
-            if (maxIndex === 0) {
-              targetPlane = 'SAGITTAL';
-            } else if (maxIndex === 1) {
-              targetPlane = 'CORONAL';
-            } else {
-              targetPlane = 'AXIAL';
-            }
-            
-            // Sort the images in this group by position if available
-            if (targetPlane && groupIds.length > 1) {
-              const groupWithPositions = groupIds.map(id => {
-                const meta = imageMetadataRef.current[id];
-                const position = meta?.imagePositionPatient || meta?.ImagePositionPatient;
-                return { id, position };
-              });
-              
-              // If we have position information, sort by position along the normal vector axis
-              if (groupWithPositions.some(item => item.position)) {
-                groupWithPositions.sort((a, b) => {
-                  if (!a.position) return 1;
-                  if (!b.position) return -1;
-                  
-                  // Compare positions along the primary axis for this plane
-                  return a.position[maxIndex] - b.position[maxIndex];
-                });
-                
-                // Add the sorted IDs to the appropriate plane
-                planeImages[targetPlane] = groupWithPositions.map(item => item.id);
-                planesDetermined = true;
-              } else {
-                // If no position info, just add unsorted
-                planeImages[targetPlane] = [...planeImages[targetPlane], ...groupIds];
-                planesDetermined = true;
-              }
-            } else {
-              // Single image or couldn't sort - add to the plane
-              planeImages[targetPlane] = [...planeImages[targetPlane], ...groupIds];
-              planesDetermined = true;
-            }
-          }
-        }
-        
-        // If we couldn't determine planes from orientation, try other methods
-        if (!planesDetermined) {
-          // Fallback 1: Try to detect from series description
-          for (const { id, metadata } of imageMetadata) {
-            if (!metadata) continue;
-            
-            const seriesDescription = metadata.seriesDescription || 
-                                    metadata.SeriesDescription || '';
-            
-            const descLower = seriesDescription.toLowerCase();
-            if (descLower.includes('sag') || descLower.includes('sagittal')) {
-              planeImages.SAGITTAL.push(id);
-              planesDetermined = true;
-            } else if (descLower.includes('cor') || descLower.includes('coronal')) {
-              planeImages.CORONAL.push(id);
-              planesDetermined = true;
-            } else if (descLower.includes('ax') || descLower.includes('axial') || 
-                    descLower.includes('tra') || descLower.includes('transverse')) {
-              planeImages.AXIAL.push(id);
-              planesDetermined = true;
-            }
-          }
-          
-          // Fallback 2: If still no planes, try to make educated guesses
-          if (!planesDetermined && imageIds.length >= 3) {
-            // Assume the most common scenario: axial series
-            planeImages.AXIAL = [...imageIds];
-            
-            // Try to construct approximate coronal and sagittal views
-            // For simplicity, we'll just use the same images
-            // In a real application, these would be reconstructed from the volume
-            planeImages.SAGITTAL = [...imageIds];
-            planeImages.CORONAL = [...imageIds];
-            planesDetermined = true;
-          }
-        }
-      }
-      
-      // If all attempts failed or we have too few images, put all in AXIAL
-      if (planeImages.AXIAL.length === 0 && 
-          planeImages.SAGITTAL.length === 0 && 
-          planeImages.CORONAL.length === 0) {
-        planeImages.AXIAL = [...imageIds];
-      }
-      
-      // Set available planes based on whether we have images for each
-      const available = {
-        AXIAL: planeImages.AXIAL.length > 0,
-        SAGITTAL: planeImages.SAGITTAL.length > 0,
-        CORONAL: planeImages.CORONAL.length > 0
-      };
-      
-      setAvailablePlanes(available);
-      planeImagesRef.current = planeImages;
-      
-      // Notify parent about available planes
-      if (onPlanesReady) {
-        onPlanesReady(available);
-      }
-      
-      console.log('DicomSeriesPlayer: Planes organized:', {
-        AXIAL: planeImages.AXIAL.length,
-        SAGITTAL: planeImages.SAGITTAL.length,
-        CORONAL: planeImages.CORONAL.length
-      });
-      
-      // Set the current images based on the preferred plane
-      changePlane(preferredPlane, false);
-    } catch (error) {
-      console.error('Error organizing planes:', error);
-      // Keep all images in AXIAL as fallback
-      planeImages.AXIAL = [...imageIds];
-      
-      // Set available planes
-      setAvailablePlanes({
-        AXIAL: true,
-        SAGITTAL: false,
-        CORONAL: false
-      });
-      
-      planeImagesRef.current = planeImages;
-      changePlane('AXIAL', false);
-    }
-  };
-  
-  // Change the current anatomical plane
-  const changePlane = (plane: AnatomicalPlane, resetPlayback = true) => {
-    if (resetPlayback && isPlaying) {
-      setIsPlaying(false);
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-    
-    setCurrentPlane(plane);
-    
-    // Update image IDs to the selected plane
-    const planeIds = planeImagesRef.current[plane];
-    if (planeIds && planeIds.length > 0) {
-      setImageIds(planeIds);
-      setCurrentIndex(0);
-      
-      // Load and display the first image of this plane
-      if (viewportRef.current) {
-        loadAndDisplayImage(planeIds[0], viewportRef.current)
-          .then(() => {
-            loadedImagesRef.current = new Set([0]);
-            preloadImages(planeIds, 0, 5);
-            
-            if (onFrameChange) {
-              onFrameChange(0, planeIds.length);
-            }
-          })
-          .catch(err => {
-            console.error(`Error loading first image of ${plane} plane:`, err);
-          });
-      }
-    } else {
-      console.warn(`No images available for ${plane} plane`);
-    }
-  };
-  
   // Handle play/pause
   useEffect(() => {
-    if (isPlaying) {
-      timerRef.current = setInterval(() => {
-        setCurrentIndex(prev => {
-          const nextIndex = (prev + 1) % imageIds.length;
-          updateCurrentImage(nextIndex);
-          return nextIndex;
-        });
+    if (isPlaying && renderingEngineRef.current) {
+      timerRef.current = setInterval(async () => {
+        const viewport = renderingEngineRef.current?.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+        if (viewport) {
+          const nextIndex = (currentIndex + 1) % imageIds.length;
+          await viewport.setImageIdIndex(nextIndex);
+          renderingEngineRef.current?.render();
+          setCurrentIndex(nextIndex);
+          if (onFrameChange) {
+            onFrameChange(nextIndex, imageIds.length);
+          }
+        }
       }, 1000 / fps);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -437,162 +166,66 @@ export function DicomSeriesPlayer({
         timerRef.current = null;
       }
     };
-  }, [isPlaying, fps, imageIds.length]);
-  
-  // Update the displayed image when the current index changes
-  const updateCurrentImage = (index: number) => {
-    if (!viewportRef.current || imageIds.length === 0) return;
-    
-    // Ensure index is valid
-    if (index < 0 || index >= imageIds.length) {
-      console.error(`Invalid index ${index} - must be between 0 and ${imageIds.length - 1}`);
-      return;
-    }
-    
-    // Load and display the image at the current index
-    if (!loadedImagesRef.current.has(index)) {
-      loadAndDisplayImage(imageIds[index], viewportRef.current)
-        .then(() => {
-          loadedImagesRef.current.add(index);
-        })
-        .catch((err: unknown) => {
-          console.error(`Error loading image at index ${index}:`, err);
-          setError(`Failed to load image ${index + 1}/${imageIds.length}`);
-        });
-    } else {
-      // If already loaded, just display it - with robust error handling
-      try {
-        const imageId = imageIds[index];
-        if (!imageId) {
-          console.error(`No imageId found at index ${index}`);
-          return;
-        }
-        
-        const imageLoadObject = cornerstoneExt.imageCache.getImageLoadObject(imageId);
-        
-        // Check both the imageLoadObject and the image inside it
-        if (imageLoadObject && imageLoadObject.image) {
-          try {
-            cornerstone.displayImage(viewportRef.current, imageLoadObject.image);
-          } catch (displayError) {
-            console.error(`Error displaying image at index ${index}:`, displayError);
-            throw displayError; // Rethrow to trigger the reload attempt
-          }
-        } else {
-          console.warn(`Image not found in cache for index ${index}, imageId: ${imageId}`);
-          throw new Error('Image not in cache'); // Trigger the reload attempt
-        }
-      } catch (error) {
-        console.error(`Error displaying cached image at index ${index}:`, error);
-        // Try reloading the image
-        if (viewportRef.current) {
-          loadAndDisplayImage(imageIds[index], viewportRef.current)
-            .then(() => {
-              loadedImagesRef.current.add(index);
-              setError(null); // Clear any error message on successful reload
-            })
-            .catch((err: unknown) => {
-              console.error(`Error reloading image at index ${index}:`, err);
-              setError(`Failed to display image ${index + 1}/${imageIds.length}`);
-            });
-        }
-      }
-    }
-    
-    // Preload the next few images
-    preloadImages(imageIds, index, 5);
-    
-    // Notify about the frame change
-    if (onFrameChange) {
-      onFrameChange(index, imageIds.length);
-    }
-  };
-  
-  // Load and display an image with improved error handling
-  const loadAndDisplayImage = async (imageId: string, element: HTMLDivElement) => {
-    try {
-      // Validate input
-      if (!imageId) {
-        throw new Error('Invalid image ID');
-      }
-      
-      if (!element) {
-        throw new Error('Invalid viewport element');
-      }
-      
-      const image = await cornerstoneExt.loadAndCacheImage(imageId);
-      
-      // Validate the loaded image
-      if (!image) {
-        throw new Error('Image failed to load');
-      }
-      
-      // Safely display the image
-      cornerstone.displayImage(element, image);
-      cornerstoneExt.resize(element);
-      return image;
-    } catch (error) {
-      console.error('Error loading image:', error);
-      throw error;
-    }
-  };
-  
-  // Preload images for smoother playback
-  const preloadImages = (ids: string[], currentIdx: number, count: number) => {
-    for (let i = 1; i <= count; i++) {
-      const idx = (currentIdx + i) % ids.length;
-      if (!loadedImagesRef.current.has(idx)) {
-        cornerstoneExt.loadAndCacheImage(ids[idx])
-          .then(() => {
-            loadedImagesRef.current.add(idx);
-          })
-          .catch((err: unknown) => {
-            console.warn(`Error preloading image at index ${idx}:`, err);
-          });
-      }
-    }
-  };
+  }, [isPlaying, fps, imageIds.length, currentIndex]);
   
   // Playback controls
-  const togglePlayPause = () => {
-    setIsPlaying(!isPlaying);
+  const togglePlayPause = () => setIsPlaying(!isPlaying);
+  
+  const goToNext = async () => {
+    if (renderingEngineRef.current) {
+      const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+      const nextIndex = (currentIndex + 1) % imageIds.length;
+      await viewport.setImageIdIndex(nextIndex);
+      renderingEngineRef.current.render();
+      setCurrentIndex(nextIndex);
+      if (onFrameChange) {
+        onFrameChange(nextIndex, imageIds.length);
+      }
+    }
   };
   
-  const goToNext = () => {
-    setIsPlaying(false);
-    setCurrentIndex(prev => {
-      const next = (prev + 1) % imageIds.length;
-      updateCurrentImage(next);
-      return next;
-    });
-  };
-  
-  const goToPrevious = () => {
-    setIsPlaying(false);
-    setCurrentIndex(prev => {
-      const next = (prev - 1 + imageIds.length) % imageIds.length;
-      updateCurrentImage(next);
-      return next;
-    });
+  const goToPrevious = async () => {
+    if (renderingEngineRef.current) {
+      const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+      const nextIndex = (currentIndex - 1 + imageIds.length) % imageIds.length;
+      await viewport.setImageIdIndex(nextIndex);
+      renderingEngineRef.current.render();
+      setCurrentIndex(nextIndex);
+      if (onFrameChange) {
+        onFrameChange(nextIndex, imageIds.length);
+      }
+    }
   };
   
   const goToFirst = () => {
     setIsPlaying(false);
     setCurrentIndex(0);
-    updateCurrentImage(0);
+    if (renderingEngineRef.current) {
+      const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+      viewport.setImageIdIndex(0);
+      renderingEngineRef.current.render();
+    }
   };
   
   const goToLast = () => {
     setIsPlaying(false);
     const lastIndex = imageIds.length - 1;
     setCurrentIndex(lastIndex);
-    updateCurrentImage(lastIndex);
+    if (renderingEngineRef.current) {
+      const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+      viewport.setImageIdIndex(lastIndex);
+      renderingEngineRef.current.render();
+    }
   };
   
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newIndex = parseInt(e.target.value, 10);
     setCurrentIndex(newIndex);
-    updateCurrentImage(newIndex);
+    if (renderingEngineRef.current) {
+      const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+      viewport.setImageIdIndex(newIndex);
+      renderingEngineRef.current.render();
+    }
   };
   
   const handleFpsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -602,7 +235,12 @@ export function DicomSeriesPlayer({
   // Handle plane change
   const handlePlaneChange = (plane: AnatomicalPlane) => {
     if (availablePlanes[plane]) {
-      changePlane(plane);
+      setCurrentPlane(plane);
+      if (renderingEngineRef.current) {
+        const viewport = renderingEngineRef.current.getViewport('DICOM_PLAYER') as Types.IStackViewport;
+        viewport.setImageIdIndex(0);
+        renderingEngineRef.current.render();
+      }
     }
   };
   
@@ -645,8 +283,8 @@ export function DicomSeriesPlayer({
         >
           <ScanLine size={14} />
           <span>Axial</span>
-          {planeImagesRef.current.AXIAL.length > 0 && (
-            <span className="plane-image-count">{planeImagesRef.current.AXIAL.length}</span>
+          {imageIds.length > 0 && (
+            <span className="plane-image-count">{imageIds.length}</span>
           )}
         </button>
         <button 
@@ -656,8 +294,8 @@ export function DicomSeriesPlayer({
         >
           <ScanLine size={14} className="rotate-90" />
           <span>Sagittal</span>
-          {planeImagesRef.current.SAGITTAL.length > 0 && (
-            <span className="plane-image-count">{planeImagesRef.current.SAGITTAL.length}</span>
+          {imageIds.length > 0 && (
+            <span className="plane-image-count">{imageIds.length}</span>
           )}
         </button>
         <button 
@@ -667,8 +305,8 @@ export function DicomSeriesPlayer({
         >
           <ScanLine size={14} className="rotate-90" />
           <span>Coronal</span>
-          {planeImagesRef.current.CORONAL.length > 0 && (
-            <span className="plane-image-count">{planeImagesRef.current.CORONAL.length}</span>
+          {imageIds.length > 0 && (
+            <span className="plane-image-count">{imageIds.length}</span>
           )}
         </button>
       </div>

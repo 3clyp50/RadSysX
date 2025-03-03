@@ -13,7 +13,7 @@ import struct
 import wave
 import PIL
 import mss
-import requests 
+import requests
 from google import genai
 from PIL import Image
 from io import BytesIO

@@ -5,8 +5,18 @@ import { mkdirSync } from 'fs';
 import { join } from 'path';
 import * as dicomParser from 'dicom-parser';
 
-// Initialize Gemini API
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+// Initialize Gemini API with more error handling
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+let genAI: GoogleGenerativeAI | undefined;
+try {
+  if (!GEMINI_API_KEY) {
+    console.warn('GEMINI_API_KEY is not set. Analysis will return mock data.');
+  } else {
+    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  }
+} catch (error) {
+  console.error('Failed to initialize Gemini API:', error);
+}
 
 // Ensure temp directory exists
 const tempDir = join(process.cwd(), 'tmp');
@@ -88,7 +98,7 @@ export async function POST(req: NextRequest) {
       maxOutputTokens: 8192,
     };
 
-    const model = genAI.getGenerativeModel({
+    const model = genAI?.getGenerativeModel({
       model: "gemini-2.0-flash-exp",
       generationConfig,
     });
@@ -105,9 +115,9 @@ export async function POST(req: NextRequest) {
     prompt += "5. Quality of the image and any limitations in the analysis";
 
     // Get analysis from Gemini
-    const result = await model.generateContent([imageData, prompt]);
-    const response = await result.response;
-    const text = response.text();
+    const result = await model?.generateContent([imageData, prompt]);
+    const response = await result?.response;
+    const text = response?.text() || '';
 
     // Parse the response into structured data
     const analysis = {

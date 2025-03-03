@@ -2,7 +2,32 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+First, install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the Python server:
+
+```bash
+python backend/server.py
+```
+
+Run the Gemini server:
+
+```bash
+python frontend/lib/api/gemini-mm-live.py
+```
+
+Run the Next.js frontend:
+
+```bash
+cd frontend
+npm install
+```
+
+Run the development server:
 
 ```bash
 npm run dev
@@ -34,3 +59,13 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Troubleshooting
+
+If you encounter an error about GCC and you're on conda, try this:
+
+```bash
+conda install -c conda-forge libstdcxx-ng
+```
+
+

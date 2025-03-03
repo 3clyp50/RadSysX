@@ -1,16 +1,20 @@
 import { generateSeriesId } from '../utils/idGenerator';
-import * as cornerstone from 'cornerstone-core';
-import * as dicomParser from 'dicom-parser';
-import * as cornerstoneWADOImageLoader from 'cornerstone-wado-image-loader';
+import { RenderingEngine, imageLoader, metaData } from '@cornerstonejs/core';
+import dicomParser from 'dicom-parser';
+import { initializeDicomImageLoader, createImageIdsFromFiles } from '@/lib/utils/cornerstone3DInit';
 
-// Initialize cornerstone WADO image loader
-cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-cornerstoneWADOImageLoader.configure({
-  beforeSend: (xhr: XMLHttpRequest) => {
-    // Add custom headers if needed
-  }
-});
+// Add browser environment check at the top of the file
+const isBrowser = typeof window !== 'undefined';
+
+// Initialize DICOM image loader only in browser environment
+if (isBrowser) {
+  // Call the initialization function without any arguments since the configuration
+  // is handled inside the function itself
+  initializeDicomImageLoader()
+    .catch(error => {
+      console.error('Failed to initialize DICOM image loader:', error);
+    });
+}
 
 interface ImageAnalysis {
   description: string;
@@ -62,6 +66,10 @@ export interface FileFormatInfo {
 }
 
 export async function processImageSeries(files: File[]): Promise<ImageSeries> {
+  if (!isBrowser) {
+    throw new Error('Image processing can only be done in browser environment');
+  }
+
   if (!files.length) {
     throw new Error('No files provided');
   }
@@ -75,40 +83,25 @@ export async function processImageSeries(files: File[]): Promise<ImageSeries> {
   // Special handling for DICOMDIR
   if (dicomdirFile) {
     console.log('DICOMDIR file detected, setting up for 3D viewer');
-    // We'll create a special entry for the DICOMDIR file
-    const localUrl = URL.createObjectURL(dicomdirFile);
     
-    const processedImages: ProcessedImage[] = [{
-      file: dicomdirFile,
-      format: 'dicomdir',
-      localUrl,
-      imageId: `${localUrl}#${dicomdirFile.name}`,
-      metadata: {
-        modality: 'CT', // Assume CT for now
-        studyDate: new Date().toISOString().slice(0, 10),
-        seriesNumber: '1',
-        instanceNumber: '1',
-      }
-    }];
+    // We'll use our improved image ID creation
+    const allImageIds = await createImageIdsFromFiles([dicomdirFile, ...files.filter(f => f !== dicomdirFile)]);
     
-    // Also add all the other files, which are likely referenced by the DICOMDIR
-    const otherFiles = files.filter(file => file !== dicomdirFile);
-    
-    for (const file of otherFiles) {
-      const otherLocalUrl = URL.createObjectURL(file);
-      processedImages.push({
+    const processedImages: ProcessedImage[] = allImageIds.map((imageId, index) => {
+      const file = index === 0 ? dicomdirFile : files.filter(f => f !== dicomdirFile)[index - 1];
+      return {
         file,
         format: 'dicom',
-        localUrl: otherLocalUrl,
-        imageId: `${otherLocalUrl}#${file.name}`,
+        localUrl: URL.createObjectURL(file),
+        imageId,
         metadata: {
           modality: 'CT', // Assume CT for now
           studyDate: new Date().toISOString().slice(0, 10),
           seriesNumber: '1',
-          instanceNumber: processedImages.length.toString(),
+          instanceNumber: (index + 1).toString(),
         }
-      });
-    }
+      };
+    });
     
     return {
       id: generateSeriesId(),
@@ -128,9 +121,17 @@ export async function processImageSeries(files: File[]): Promise<ImageSeries> {
   // If we have multiple files, sort them by name for proper sequence
   files.sort((a, b) => a.name.localeCompare(b.name));
   
+  // Use our improved image ID creation
+  const allImageIds = await createImageIdsFromFiles(files);
+  
   const processedImages: ProcessedImage[] = [];
   
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const imageId = allImageIds[i];
+    
+    if (!imageId) continue;
+    
     try {
       const formatInfo = await determineFileFormat(file);
       const localUrl = URL.createObjectURL(file);
@@ -140,25 +141,6 @@ export async function processImageSeries(files: File[]): Promise<ImageSeries> {
       let analysis = null;
       if (formatInfo.format === 'dicom' || formatInfo.format === 'png') {
         analysis = await analyzeImage(file);
-      }
-      
-      // Generate imageId based on file format
-      // This is critical for cornerstone to load the image correctly
-      let imageId = localUrl;
-      
-      // Add file name to the blob URL to help with format detection
-      if (formatInfo.format === 'dicom') {
-        // For DICOM files, use the dicomfile prefix
-        imageId = `${localUrl}#${file.name}`;
-        console.log(`Created DICOM image ID for ${file.name}: ${imageId}`);
-      } else if (formatInfo.format === 'png' || formatInfo.format === 'jpg') {
-        // For standard image formats, pass as is with filename
-        imageId = `${localUrl}#${file.name}`;
-        console.log(`Created standard image ID for ${file.name}: ${imageId}`);
-      } else if (formatInfo.format === 'nifti') {
-        // For NIFTI files
-        imageId = `${localUrl}#${file.name}`;
-        console.log(`Created NIFTI image ID for ${file.name}: ${imageId}`);
       }
       
       processedImages.push({
@@ -384,6 +366,10 @@ async function readDicomMetadata(file: File): Promise<any> {
 }
 
 export async function uploadImageSeries(series: ImageSeries): Promise<boolean> {
+  if (!isBrowser) {
+    throw new Error('Image upload can only be done in browser environment');
+  }
+
   try {
     // Upload each image in chunks
     const chunkSize = 50;
@@ -432,6 +418,8 @@ export async function uploadImageSeries(series: ImageSeries): Promise<boolean> {
 }
 
 export function cleanupImageSeries(series: ImageSeries) {
+  if (!isBrowser) return;
+  
   if (series?.images) {
     series.images.forEach(image => {
       if (image.localUrl) {

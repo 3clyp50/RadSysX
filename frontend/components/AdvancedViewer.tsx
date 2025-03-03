@@ -32,7 +32,7 @@ import {
 } from "@cornerstonejs/tools"
 import * as cornerstone from 'cornerstone-core';
 import * as dicomParser from 'dicom-parser';
-import { mapUiToolToCornerstone, type UiToolType } from "@/lib/utils/cornerstoneInit"
+import { mapUiToolToCornerstone3D, type UiToolType } from "@/lib/utils/cornerstone3DInit"
 import cornerstoneWADOImageLoader from 'cornerstone-wado-image-loader';
 
 // Declaration of the dicomImageLoaderInit function type
@@ -237,8 +237,7 @@ export function AdvancedViewer({
     deactivateAllTools();
     
     // Use our mapping function to get the appropriate tool name
-    const toolNames = mapUiToolToCornerstone(tool);
-    const toolName = toolNames.cornerstone3D; // Use the 3D version for this viewer
+    const toolName = mapUiToolToCornerstone3D(tool);
     console.log(`Mapped UI tool ${tool} to Cornerstone tool: ${toolName}`);
     
     // Activate the selected tool
@@ -350,83 +349,6 @@ export function AdvancedViewer({
           throw error; // Re-throw to be caught by the outer handler
         }
         
-        // Define tool group variables at a higher scope
-        let toolGroup1, toolGroup2;
-        
-        console.log('Adding tools to Cornerstone3D');
-        // Add tools to Cornerstone3D - check if tool has already been added
-        try {
-          // Check if tool is already registered to avoid the "already added globally" error
-          const toolAlreadyAdded = ToolGroupManager.getToolGroup(toolGroupId) !== undefined;
-          
-          if (!toolAlreadyAdded) {
-            // Register all required tools for our UI
-            addTool(PanTool);
-            addTool(ZoomTool);
-            addTool(WindowLevelTool);
-            addTool(LengthTool);
-            addTool(RectangleROITool);
-            addTool(EllipticalROITool);
-            addTool(AngleTool);
-            addTool(ProbeTool);
-            addTool(StackScrollTool);
-            addTool(MagnifyTool);
-            addTool(BrushTool);
-            addTool(SegmentationDisplayTool);
-          }
-          
-          // Remove existing tool groups if they exist
-          try {
-            if (ToolGroupManager.getToolGroup(toolGroupId)) {
-              ToolGroupManager.destroyToolGroup(toolGroupId);
-            }
-            if (ToolGroupManager.getToolGroup(toolGroupId2)) {
-              ToolGroupManager.destroyToolGroup(toolGroupId2);
-            }
-          } catch (e) {
-            console.log('Tool groups did not exist yet, creating new ones');
-          }
-
-          // Create new tool groups
-          toolGroup1 = ToolGroupManager.createToolGroup(toolGroupId);
-          toolGroup2 = ToolGroupManager.createToolGroup(toolGroupId2);
-
-          if (!toolGroup1 || !toolGroup2) {
-            throw new Error('Failed to create tool groups');
-          }
-          
-          // Store toolGroup1 in the ref for later use
-          toolGroupRef.current = toolGroup1;
-
-          // Add all the tools to the tool group
-          toolGroup1.addTool('Pan');
-          toolGroup1.addTool('Zoom');
-          toolGroup1.addTool('WindowLevel');
-          toolGroup1.addTool('Length');
-          toolGroup1.addTool('RectangleROI');
-          toolGroup1.addTool('EllipticalROI');
-          toolGroup1.addTool('Angle');
-          toolGroup1.addTool('Probe');
-          toolGroup1.addTool('StackScroll');
-          toolGroup1.addTool('Magnify');
-          toolGroup1.addTool('SphereBrush');
-          toolGroup1.addTool('SegmentationDisplay');
-          
-          // If an activeTool is specified, activate it
-          if (activeTool) {
-            setActiveTool(activeTool);
-          } else {
-            // Default active tool - make Pan active by default
-            toolGroup1.setToolActive('Pan', {
-              bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }]
-            });
-          }
-        } catch (error) {
-          console.error('Error setting up tools:', error);
-          // Continue setup despite tool errors - we can still try to load images
-        }
-
-        console.log('Loading image data');
         // Get Cornerstone imageIds for the source data
         let imageIds;
         
@@ -449,9 +371,6 @@ export function AdvancedViewer({
           });
         }
 
-        // Define a volume in memory
-        console.log('Creating volume');
-        
         // Check if imageIds are for non-DICOM images (PNG/JPG)
         const isPngOrJpgImage = imageIds.length > 0 && imageIds[0].startsWith('pngimage:');
         
@@ -503,15 +422,86 @@ export function AdvancedViewer({
         console.log('Setting up viewports');
         renderingEngine.setViewports(viewportInputArray)
 
-        // Only add viewports to tool groups if they were successfully created
-        if (toolGroup1) {
-          toolGroup1.addViewport(viewportId1, renderingEngineId)
-          toolGroup1.addViewport(viewportId2, renderingEngineId)
+        // Define tool group variables at a higher scope
+        let toolGroup1, toolGroup2;
+        
+        console.log('Adding tools to Cornerstone3D');
+        // Add tools to Cornerstone3D - check if tool has already been added
+        try {
+          // Check if tool is already registered to avoid the "already added globally" error
+          const toolAlreadyAdded = ToolGroupManager.getToolGroup(toolGroupId) !== undefined;
+          
+          if (!toolAlreadyAdded) {
+            // Register all required tools for our UI
+            addTool(PanTool);
+            addTool(ZoomTool);
+            addTool(WindowLevelTool);
+            addTool(LengthTool);
+            addTool(RectangleROITool);
+            addTool(EllipticalROITool);
+            addTool(AngleTool);
+            addTool(ProbeTool);
+            addTool(StackScrollTool);
+            addTool(MagnifyTool);
+            addTool(BrushTool);
+            addTool(SegmentationDisplayTool);
+          }
+        } catch (error) {
+          console.error('Error registering tools:', error);
+          // Continue setup despite tool errors - we can still try to load images
         }
         
-        if (toolGroup2) {
-          toolGroup2.addViewport(viewportId3, renderingEngineId)
+        // Remove existing tool groups if they exist
+        try {
+          if (ToolGroupManager.getToolGroup(toolGroupId)) {
+            ToolGroupManager.destroyToolGroup(toolGroupId);
+          }
+          if (ToolGroupManager.getToolGroup(toolGroupId2)) {
+            ToolGroupManager.destroyToolGroup(toolGroupId2);
+          }
+        } catch (e) {
+          console.log('Tool groups did not exist yet, creating new ones');
         }
+
+        // Create new tool groups with the rendering engine ID
+        toolGroup1 = ToolGroupManager.createToolGroup(toolGroupId);
+        toolGroup2 = ToolGroupManager.createToolGroup(toolGroupId2);
+
+        if (!toolGroup1 || !toolGroup2) {
+          throw new Error('Failed to create tool groups');
+        }
+        
+        // Store toolGroup1 in the ref for later use
+        toolGroupRef.current = toolGroup1;
+
+        // Add all the tools to the tool group
+        toolGroup1.addTool('Pan');
+        toolGroup1.addTool('Zoom');
+        toolGroup1.addTool('WindowLevel');
+        toolGroup1.addTool('Length');
+        toolGroup1.addTool('RectangleROI');
+        toolGroup1.addTool('EllipticalROI');
+        toolGroup1.addTool('Angle');
+        toolGroup1.addTool('Probe');
+        toolGroup1.addTool('StackScroll');
+        toolGroup1.addTool('Magnify');
+        toolGroup1.addTool('SphereBrush');
+        toolGroup1.addTool('SegmentationDisplay');
+        
+        // If an activeTool is specified, activate it
+        if (activeTool) {
+          setActiveTool(activeTool);
+        } else {
+          // Default active tool - make Pan active by default
+          toolGroup1.setToolActive('Pan', {
+            bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }]
+          });
+        }
+
+        // Add viewports to tool groups with the rendering engine ID
+        toolGroup1.addViewport(viewportId1, renderingEngineId);
+        toolGroup1.addViewport(viewportId2, renderingEngineId);
+        toolGroup2.addViewport(viewportId3, renderingEngineId);
 
         // Set the volume to load
         await volume.load()

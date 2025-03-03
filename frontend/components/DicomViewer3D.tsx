@@ -1,10 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Maximize2, Minimize2, AlertCircle } from 'lucide-react';
 import { 
-  initializeCornerstone3D, 
-  createRenderingEngine,
   createViewport,
   createToolGroup,
   setToolActive,
@@ -12,11 +10,13 @@ import {
   loadAndDisplayImageStack,
   loadAndDisplayVolume,
   is2DImage,
-  cleanupCornerstone3D,
   canLoadAsVolume,
   type UiToolType
 } from '@/lib/utils/cornerstone3DInit';
 import { RenderingEngine, Enums } from '@cornerstonejs/core';
+import * as cornerstone3D from '@cornerstonejs/core';
+import { cn } from '@/lib/utils';
+import { cornerstoneService } from '@/lib/services/cornerstoneService';
 
 // Use the UI tool type from the cornerstone3D initialization
 type Tool = UiToolType;
@@ -24,7 +24,7 @@ type Tool = UiToolType;
 interface DicomViewer3DProps {
   imageId?: string;
   imageIds?: string[];
-  viewportType: 'AXIAL' | 'SAGITTAL' | 'CORONAL' | '3D';
+  viewportType: 'AXIAL' | 'SAGITTAL' | 'CORONAL' | '3D' | 'SERIES';
   isActive?: boolean;
   isExpanded?: boolean;
   onActivate?: () => void;
@@ -32,6 +32,17 @@ interface DicomViewer3DProps {
   onImageLoaded?: (success: boolean, is2DImage: boolean) => void;
   activeTool?: Tool;
   suppressErrors?: boolean;
+  hideExpandButton?: boolean;
+}
+
+// Add a viewport state interface and state setter
+interface ViewportState {
+  isLoaded: boolean;
+  is3D: boolean;
+  imageCount: number;
+  viewportType: Enums.ViewportType;
+  currentImageIndex: number;
+  orientation?: Enums.OrientationAxis;
 }
 
 /**
@@ -48,7 +59,8 @@ export function DicomViewer3D({
   onToggleExpand,
   onImageLoaded,
   activeTool = 'pan',
-  suppressErrors = false
+  suppressErrors = false,
+  hideExpandButton = false
 }: DicomViewer3DProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const [isEnabled, setIsEnabled] = useState(false);
@@ -65,47 +77,174 @@ export function DicomViewer3D({
   // Track if this is a 2D or 3D image
   const [is3D, setIs3D] = useState(false);
   
-  const cleanImageId = (id: string): string => {
-    // Remove any hash fragment from the blob URL
-    const hashIndex = id.indexOf('#');
-    return hashIndex !== -1 ? id.substring(0, hashIndex) : id;
-  };
+  // At the component level, add the state
+  const [viewportState, setViewportState] = useState<ViewportState>({
+    isLoaded: false,
+    is3D: false,
+    imageCount: 0,
+    viewportType: Enums.ViewportType.STACK,
+    currentImageIndex: 0
+  });
   
-  // Process image IDs to ensure they're in the right format
-  const processImageIds = (ids: string[]): string[] => {
-    return ids.map(id => {
-      // Process each ID to ensure proper format
-      const parts = id.split('#');
-      const actualImageId = parts[0];
-      const filename = parts[1] || '';
+  // Effect to handle viewport resize when expansion state changes
+  useEffect(() => {
+    if (!isEnabled || !elementRef.current) return;
+    
+    // Resize the viewport when expansion state changes
+    try {
+      console.log(`DicomViewer3D: Expansion state changed to ${isExpanded ? 'expanded' : 'normal'}`);
       
-      // Clean the actualImageId
-      const cleanedId = cleanImageId(actualImageId);
+      const resizeViewport = () => {
+        if (!cornerstoneService.hasRenderingEngine(renderingEngineId.current)) {
+          console.log(`DicomViewer3D: Cannot resize - rendering engine ${renderingEngineId.current} no longer exists`);
+          return;
+        }
+        
+        console.log(`DicomViewer3D: Resizing viewport ${viewportId.current}`);
+        
+        // Force a layout update before resizing
+        if (elementRef.current) {
+          elementRef.current.style.width = isExpanded ? '100%' : '';
+          elementRef.current.style.height = isExpanded ? '100%' : '';
+        }
+        
+        // Wrap in try-catch to handle potential destroyed engines
+        try {
+          // Trigger resize
+          const engine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
+          if (!engine) {
+            console.log(`DicomViewer3D: Cannot resize - rendering engine ${renderingEngineId.current} not found`);
+            return;
+          }
+          
+          engine.resize();
+          
+          // Additional resize after a short delay
+          setTimeout(() => {
+            try {
+              // Check if the engine still exists
+              const currentEngine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
+              if (!currentEngine) return;
+              
+              if (elementRef.current) {
+                const canvas = elementRef.current.querySelector('canvas');
+                if (canvas) {
+                  canvas.style.width = isExpanded ? '100%' : '';
+                  canvas.style.height = isExpanded ? '100%' : '';
+                }
+              }
+              currentEngine.resize();
+              console.log(`DicomViewer3D: Delayed resize completed`);
+            } catch (err) {
+              console.error('Error during delayed resize:', err);
+            }
+          }, 100);
+          
+          // Final resize after layout stabilizes
+          setTimeout(() => {
+            try {
+              // Check if the engine still exists
+              const currentEngine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
+              if (!currentEngine) return;
+              
+              currentEngine.resize();
+              console.log(`DicomViewer3D: Final resize completed`);
+            } catch (err) {
+              console.error('Error during final resize:', err);
+            }
+          }, 300);
+        } catch (err) {
+          console.error('Error during initial resize:', err);
+        }
+      };
       
-      // Determine the final image id to load
-      if (filename && filename.toLowerCase().endsWith('.dcm')) {
-        // For DICOM files, explicitly use the wadouri scheme
-        return `wadouri:${cleanedId}`;
-      } else if (
-        filename && 
-        (filename.toLowerCase().endsWith('.png') || 
-         filename.toLowerCase().endsWith('.jpg') || 
-         filename.toLowerCase().endsWith('.jpeg'))
-      ) {
-        // For standard image formats
-        return `imageLoader:${cleanedId}`;
+      // Immediate resize attempt
+      resizeViewport();
+      
+      // Add a resize observer to handle any container size changes
+      const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.target === elementRef.current) {
+            resizeViewport();
+          }
+        }
+      });
+      
+      if (elementRef.current) {
+        resizeObserver.observe(elementRef.current);
       }
       
-      // Return the cleaned ID as is if no specific format detected
-      return cleanedId;
-    });
+      return () => {
+        resizeObserver.disconnect();
+      };
+    } catch (error) {
+      console.error('DicomViewer3D: Error setting up viewport resize:', error);
+    }
+  }, [isExpanded, isEnabled]);
+  
+  const cleanImageId = (id: string): string => {
+    // If it already has a proper prefix like wadouri: or wadors:, return as is
+    if (id.startsWith('wadouri:') || id.startsWith('wadors:') || 
+        id.startsWith('https:') || id.startsWith('http:') ||
+        id.startsWith('nifti:')) {
+      return id;
+    }
+    
+    // If it has a hash, it's likely a URL with a filename
+    if (id.includes('#')) {
+      const [url, filename] = id.split('#');
+      // Check file extension to determine format
+      if (filename.toLowerCase().endsWith('.dcm')) {
+        return `wadouri:${url}`;
+      } else if (filename.toLowerCase().endsWith('.nii') || filename.toLowerCase().endsWith('.nii.gz')) {
+        return `nifti:${url}`;
+      } else {
+        // For other image types
+        return `https:${url}`;
+      }
+    }
+    
+    // Default to wadouri: for unknown formats
+    return `wadouri:${id}`;
+  };
+  
+  const processImageIds = (ids: string[]): string[] => {
+    // Ensure we have image IDs
+    if (!ids || ids.length === 0) {
+      setError('No image IDs provided');
+      return [];
+    }
+    
+    // Process and clean each image ID
+    const processedIds = ids.map(id => {
+      // Skip empty IDs
+      if (!id) return null;
+      
+      try {
+        return cleanImageId(id);
+      } catch (e) {
+        console.error('Error processing image ID:', e);
+        return null;
+      }
+    }).filter(Boolean) as string[];
+    
+    if (processedIds.length === 0) {
+      setError('No valid image IDs found');
+    } else {
+      console.log(`Processed ${processedIds.length} image IDs`);
+      // Log the first few for debugging
+      processedIds.slice(0, 3).forEach(id => console.log(`- Image ID: ${id}`));
+    }
+    
+    return processedIds;
   };
   
   // Initialize cornerstone on mount
   useEffect(() => {
     const initialize = async () => {
       try {
-        await initializeCornerstone3D();
+        // Use the cornerstoneService for initialization
+        await cornerstoneService.initialize();
       } catch (error) {
         console.error('Error initializing Cornerstone3D:', error);
         setError('Failed to initialize Cornerstone3D');
@@ -120,7 +259,10 @@ export function DicomViewer3D({
     // Cleanup on unmount
     return () => {
       try {
-        cleanupCornerstone3D(renderingEngineId.current, [toolGroupId.current]);
+        // Use the cornerstoneService to release the rendering engine
+        if (cornerstoneService.hasRenderingEngine(renderingEngineId.current)) {
+          cornerstoneService.releaseRenderingEngine(renderingEngineId.current);
+        }
       } catch (err) {
         console.error('Error cleaning up Cornerstone3D resources:', err);
       }
@@ -162,176 +304,256 @@ export function DicomViewer3D({
     }
   }, [activeTool, isEnabled, currentTool]);
   
-  // Set up viewport and load images when ready
+  // Add a new resize event listener effect
+  useEffect(() => {
+    if (!isEnabled || !elementRef.current) return;
+    
+    // This will handle window resize events to properly resize the viewport
+    const handleResize = () => {
+      // Use a small delay to ensure the DOM has updated sizes
+      setTimeout(async () => {
+        try {
+          if (!cornerstoneService.hasRenderingEngine(renderingEngineId.current)) {
+            console.log(`DicomViewer3D: Cannot resize - engine ${renderingEngineId.current} not available`);
+            return;
+          }
+          
+          const engine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
+          if (!engine) {
+            console.log(`DicomViewer3D: Cannot resize - engine ${renderingEngineId.current} not found`);
+            return;
+          }
+          
+          // Resize the rendering engine
+          console.log(`DicomViewer3D: Resizing rendering engine ${renderingEngineId.current}`);
+          engine.resize();
+          engine.render();
+        } catch (error) {
+          console.warn('DicomViewer3D: Error during resize:', error);
+        }
+      }, 100);
+    };
+
+    // Add resize listener
+    window.addEventListener('resize', handleResize);
+    
+    // Call once to ensure proper initial size
+    handleResize();
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isEnabled]);
+  
+  // Update the setupViewport function to properly handle rendering failures
+  const setupViewport = useCallback(async () => {
+    if (!elementRef.current || !imageIds || imageIds.length === 0) {
+      console.log('DicomViewer3D: No images to display');
+      return;
+    }
+    
+    // First, ensure Cornerstone is properly initialized
+    try {
+      await cornerstoneService.initialize();
+    } catch (initError) {
+      console.error('DicomViewer3D: Failed to initialize Cornerstone:', initError);
+      setError('Failed to initialize viewer. Please try again.');
+      setLoading(false);
+      if (onImageLoaded) onImageLoaded(false, false);
+      return;
+    }
+    
+    try {
+      // Process image IDs
+      let processedImageIds = processImageIds(imageId ? [imageId] : imageIds);
+      
+      // Clear any existing canvas elements in the container for a fresh start
+      if (elementRef.current) {
+        const existingCanvases = elementRef.current.querySelectorAll('canvas');
+        existingCanvases.forEach(canvas => canvas.remove());
+        console.log(`DicomViewer3D: Cleared ${existingCanvases.length} existing canvas elements`);
+      }
+      
+      // Get rendering engine from service instead of creating directly
+      const engine = await cornerstoneService.getRenderingEngine(renderingEngineId.current, viewportType);
+      
+      // Force a small delay to ensure the element is properly sized in the DOM
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Create the viewport with our settings
+      const elementId = elementRef.current?.id || `element-viewport-${Date.now()}`;
+      if (elementRef.current && !elementRef.current.id) {
+        elementRef.current.id = elementId;
+      }
+      
+      // Ensure the element has proper styles for rendering
+      if (elementRef.current) {
+        elementRef.current.style.position = 'relative';
+        elementRef.current.style.width = '100%';
+        elementRef.current.style.height = '100%';
+        elementRef.current.style.overflow = 'hidden';
+        elementRef.current.style.background = '#000';
+      }
+      
+      // Get the correct viewport type based on dimensionality
+      const is3DData = processedImageIds.length > 1 && await canLoadAsVolume(processedImageIds);
+      const csViewportType = is3DData ? Enums.ViewportType.ORTHOGRAPHIC : Enums.ViewportType.STACK;
+      
+      // Update our state tracking the dimensionality
+      setIs3D(is3DData);
+      
+      // Handle different viewport orientations
+      let orientation;
+      switch (viewportType) {
+        case 'AXIAL': orientation = Enums.OrientationAxis.AXIAL; break;
+        case 'SAGITTAL': orientation = Enums.OrientationAxis.SAGITTAL; break;
+        case 'CORONAL': orientation = Enums.OrientationAxis.CORONAL; break;
+        default: orientation = undefined;
+      }
+      
+      // Try to load the images
+      let loadSuccess = false;
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      while (!loadSuccess && retryCount <= maxRetries) {
+        try {
+          // Create the viewport
+          const viewport = createViewport(
+            engine,
+            elementId,
+            viewportId.current,
+            csViewportType,
+            {
+              orientation,
+              background: [0, 0, 0],
+            }
+          );
+          
+          // Create a tool group and add the viewport to it
+          const toolGroup = createToolGroup(toolGroupId.current, [viewportId.current], renderingEngineId.current);
+          
+          // Set the default tool active
+          const defaultTool = activeTool || 'pan';
+          const toolName = mapUiToolToCornerstone3D(defaultTool);
+          if (toolName) {
+            setToolActive(toolGroupId.current, toolName, { mouseButton: 1 });
+            setCurrentTool(defaultTool);
+          }
+          
+          // Load the image(s)
+          if (csViewportType === Enums.ViewportType.STACK) {
+            console.log(`DicomViewer3D: Loading as STACK (2D) with ${processedImageIds.length} images`);
+            
+            // Load as stack for 2D images
+            loadSuccess = await loadAndDisplayImageStack(
+              elementRef.current!,
+              processedImageIds,
+              viewportId.current,
+              renderingEngineId.current
+            );
+          } else {
+            console.log(`DicomViewer3D: Loading as VOLUME (3D) with ${processedImageIds.length} images`);
+            
+            // Load as volume for 3D images
+            const volumeId = `volume-${Date.now()}`;
+            loadSuccess = await loadAndDisplayVolume(
+              elementRef.current!,
+              processedImageIds,
+              viewportId.current,
+              volumeId,
+              csViewportType,
+              renderingEngineId.current
+            );
+          }
+          
+          if (loadSuccess) {
+            console.log(`DicomViewer3D: Successfully loaded images for viewport ${viewportId.current}`);
+            
+            // Force a render to ensure the image is displayed
+            engine.render();
+            
+            // Update state and callback
+            setLoading(false);
+            if (onImageLoaded) onImageLoaded(true, !is3DData);
+            
+            // Update view state for parent component tracking
+            setViewportState({
+              isLoaded: true,
+              is3D: is3DData,
+              imageCount: processedImageIds.length,
+              viewportType: csViewportType,
+              currentImageIndex: 0,
+              orientation
+            });
+            
+            console.log(`DicomViewer3D: Viewport state updated`, {
+              isLoaded: true,
+              is3D: is3DData,
+              imageCount: processedImageIds.length,
+            });
+            
+            break; // Exit the retry loop on success
+          } else {
+            console.warn(`DicomViewer3D: Failed to load images, retry ${retryCount+1}/${maxRetries+1}`);
+            retryCount++;
+            
+            // Small delay before retry
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (loadError) {
+          console.error(`DicomViewer3D: Error during load attempt ${retryCount+1}:`, loadError);
+          retryCount++;
+          
+          // Small delay before retry
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      if (!loadSuccess) {
+        setError(`Failed to load images after ${maxRetries+1} attempts`);
+        setLoading(false);
+        if (onImageLoaded) onImageLoaded(false, false);
+      }
+    } catch (error) {
+      console.error('DicomViewer3D: Error in viewport setup:', error);
+      setError('Failed to set up viewport');
+      setLoading(false);
+      if (onImageLoaded) onImageLoaded(false, false);
+    }
+  }, [imageId, imageIds, viewportType, activeTool, onImageLoaded, processImageIds, canLoadAsVolume]);
+  
+  // Set up the viewport when image IDs are available
   useEffect(() => {
     if (!elementRef.current) return;
     
-    // If we're suppressing errors for non-relevant views, don't initialize
-    if (suppressErrors) {
-      console.log('DicomViewer3D: Skipping initialization for suppressed view');
-      if (onImageLoaded) {
-        onImageLoaded(false, false);
-      }
-      return;
-    }
+    // Don't re-run if already attempted loading (successful or not)
+    if (didAttemptLoading && !isActive) return;
     
-    // Gather all image IDs to show
-    let allImageIds: string[] = [];
+    setDidAttemptLoading(true);
+    setError(null);
+    setLoading(true);
+    setIsEnabled(false);
     
-    // If imageIds array is provided, use it
-    if (imageIds && imageIds.length > 0) {
-      allImageIds = imageIds;
-    } 
-    // Otherwise, use single imageId if provided
-    else if (imageId) {
-      allImageIds = [imageId];
-    }
-    
-    if (allImageIds.length === 0) {
-      console.log('DicomViewer3D: No images to display');
-      setDidAttemptLoading(false);
-      return;
-    }
-    
-    // Process the image IDs to ensure they're in the correct format
-    const processedImageIds = processImageIds(allImageIds);
-
-    const setupViewport = async () => {
-      setLoading(true);
-      setError(null);
-      setDidAttemptLoading(true);
-      
-      try {
-        // Create a cornerstone rendering engine
-        const renderingEngine = createRenderingEngine(renderingEngineId.current);
-        
-        // Determine viewport type based on the requested orientation
-        let csViewportType: Enums.ViewportType;
-        let orientation: Enums.OrientationAxis | undefined;
-        
-        // Handle different viewport orientations
-        switch (viewportType) {
-          case 'AXIAL':
-            csViewportType = Enums.ViewportType.ORTHOGRAPHIC;
-            orientation = Enums.OrientationAxis.AXIAL;
-            break;
-          case 'SAGITTAL':
-            csViewportType = Enums.ViewportType.ORTHOGRAPHIC;
-            orientation = Enums.OrientationAxis.SAGITTAL;
-            break;
-          case 'CORONAL':
-            csViewportType = Enums.ViewportType.ORTHOGRAPHIC;
-            orientation = Enums.OrientationAxis.CORONAL;
-            break;
-          case '3D':
-            csViewportType = Enums.ViewportType.VOLUME_3D;
-            orientation = undefined;
-            break;
-          default:
-            csViewportType = Enums.ViewportType.STACK;
-            orientation = undefined;
-        }
-        
-        // FIXED: Use the canLoadAsVolume utility to safely determine if we can load as a volume
-        // This prevents infinite recursion for single slices or incompatible data
-        const canUseVolumeLoading = processedImageIds.length >= 3 && 
-                                  await canLoadAsVolume(processedImageIds);
-        
-        if (!canUseVolumeLoading) {
-          // Force stack mode for non-volume data
-          console.log('DicomViewer3D: Cannot load as volume, using STACK viewport');
-          csViewportType = Enums.ViewportType.STACK;
-          orientation = undefined;
-          setIs3D(false);
-        } else {
-          // Can use volume loading for this dataset
-          console.log('DicomViewer3D: Can load as volume, using 3D viewport');
-          setIs3D(true);
-        }
-        
-        // Create the viewport
-        const elementId = elementRef.current?.id || `element-${viewportId.current}`;
-        if (elementRef.current && !elementRef.current.id) {
-          // If element doesn't have an ID, set one
-          elementRef.current.id = elementId;
-        }
-        
-        const viewport = createViewport(
-          renderingEngine,
-          elementId,
-          viewportId.current,
-          csViewportType,
-          {
-            orientation,
-            background: [0, 0, 0],
-          }
-        );
-        
-        // Create a tool group and add the viewport to it
-        const toolGroup = createToolGroup(toolGroupId.current, [viewportId.current]);
-        
-        // Set the default tool active
-        const defaultTool = activeTool || 'pan';
-        const toolName = mapUiToolToCornerstone3D(defaultTool);
-        if (toolName) {
-          setToolActive(toolGroupId.current, toolName, { mouseButton: 1 });
-          setCurrentTool(defaultTool);
-        }
-        
-        // Load the image(s)
-        if (csViewportType === Enums.ViewportType.STACK) {
-          // Load as stack for 2D images
-          await loadAndDisplayImageStack(
-            elementRef.current!,
-            processedImageIds,
-            viewportId.current,
-            renderingEngineId.current
-          );
-        } else {
-          // Load as volume for 3D images
-          const volumeId = `volume-${Date.now()}`;
-          await loadAndDisplayVolume(
-            elementRef.current!,
-            processedImageIds,
-            viewportId.current,
-            volumeId,
-            csViewportType,
-            renderingEngineId.current
-          );
-        }
-        
-        console.log('DicomViewer3D: Successfully loaded and displayed images');
+    // Call our setupViewport function
+    setupViewport()
+      .then(() => {
+        setLoading(false);
         setIsEnabled(true);
-        setLoading(false);
-        
-        // Check if this is a 2D image
-        const is2DImageResult = is2DImage(imageIds[0]);
-        
         if (onImageLoaded) {
-          onImageLoaded(true, is2DImageResult);
+          onImageLoaded(true, false);
         }
-      } catch (error) {
-        console.error('DicomViewer3D: Error setting up viewport:', error);
-        setError('Failed to load image');
+      })
+      .catch((err) => {
+        console.error('DicomViewer3D: Error setting up viewport:', err);
+        setError(err.message || 'Failed to load image');
         setLoading(false);
-        
         if (onImageLoaded) {
           onImageLoaded(false, false);
         }
-      }
-    };
-    
-    setupViewport();
-    
-    // Cleanup function
-    return () => {
-      try {
-        cleanupCornerstone3D(renderingEngineId.current, [toolGroupId.current]);
-      } catch (err) {
-        console.error('Error cleaning up Cornerstone3D resources:', err);
-      }
-    };
-  }, [imageId, imageIds, viewportType, suppressErrors, onImageLoaded]);
+      });
+  }, [elementRef, imageId, imageIds.join(','), isActive, viewportType, activeTool, setupViewport, onImageLoaded]);
   
   // Handle click to activate
   const handleActivate = () => {
@@ -343,41 +565,97 @@ export function DicomViewer3D({
   // Handle toggle expand
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
+    console.log('DicomViewer3D: EXPAND BUTTON CLICKED', {
+      viewportType,
+      currentIsExpanded: isExpanded,
+      elementId: elementRef.current?.id,
+      hasCanvas: !!elementRef.current?.querySelector('canvas'),
+      viewportDimensions: elementRef.current?.getBoundingClientRect()
+    });
+    
+    // Force canvas resize before toggling
+    if (elementRef.current) {
+      const canvas = elementRef.current.querySelector('canvas');
+      if (canvas) {
+        console.log('DicomViewer3D: Canvas dimensions before resize:', {
+          width: canvas.style.width,
+          height: canvas.style.height,
+          offsetWidth: canvas.offsetWidth,
+          offsetHeight: canvas.offsetHeight,
+          clientWidth: canvas.clientWidth,
+          clientHeight: canvas.clientHeight
+        });
+        canvas.style.width = !isExpanded ? '100%' : '';
+        canvas.style.height = !isExpanded ? '100%' : '';
+        console.log('DicomViewer3D: Canvas dimensions after resize:', {
+          width: canvas.style.width,
+          height: canvas.style.height,
+          offsetWidth: canvas.offsetWidth,
+          offsetHeight: canvas.offsetHeight,
+          clientWidth: canvas.clientWidth,
+          clientHeight: canvas.clientHeight
+        });
+      } else {
+        console.warn('DicomViewer3D: No canvas element found in viewport');
+      }
+    }
+    
     if (onToggleExpand) {
+      console.log('DicomViewer3D: Calling parent onToggleExpand');
       onToggleExpand();
+    } else {
+      console.warn('DicomViewer3D: No onToggleExpand handler provided');
     }
   };
   
+  // Add viewport state logging effect
+  useEffect(() => {
+    console.log('DicomViewer3D: Viewport state updated', {
+      viewportType,
+      isExpanded,
+      isActive,
+      elementId: elementRef.current?.id,
+      hasCanvas: !!elementRef.current?.querySelector('canvas'),
+      viewportDimensions: elementRef.current?.getBoundingClientRect()
+    });
+  }, [viewportType, isExpanded, isActive]);
+  
   return (
     <div 
-      className={`viewport-panel ${isActive ? 'active' : ''}`}
+      className={cn(
+        "viewport-panel relative",
+        isActive && "active",
+        isExpanded && "expanded"
+      )}
       onClick={handleActivate}
     >
-      <div className="viewport-label">
-        {viewportType}
-        {is3D ? ' (3D)' : ''}
-      </div>
+      <div 
+        id={`element-${viewportId.current}`}
+        ref={elementRef}
+        className={cn(
+          "w-full h-full dicom-viewport",
+          suppressErrors && "cornerstone-error-suppressed"
+        )}
+        style={{ 
+          height: '100%',
+          width: '100%'
+        }}
+      />
       
-      {onToggleExpand && (
+      {onToggleExpand && !hideExpandButton && (
         <button
           className="viewport-expand-button"
           onClick={handleToggleExpand}
           aria-label={isExpanded ? "Minimize viewport" : "Expand viewport"}
         >
           {isExpanded ? (
-            <Minimize2 className="w-4 h-4" />
+            <Minimize2 className="h-4 w-4" />
           ) : (
-            <Maximize2 className="w-4 h-4" />
+            <Maximize2 className="h-4 w-4" />
           )}
         </button>
       )}
-      
-      <div 
-        id={`element-${viewportId.current}`}
-        ref={elementRef}
-        className={`w-full h-full dicom-viewport relative ${suppressErrors ? 'cornerstone-error-suppressed' : ''}`}
-        style={{ minHeight: '400px' }}
-      />
       
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/30 text-white">
