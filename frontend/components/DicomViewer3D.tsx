@@ -3,14 +3,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Maximize2, Minimize2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { cornerstoneService } from '@/lib/services/cornerstoneService';
+import { cornerstoneService, getCornerstoneInitState } from '@/lib/services/cornerstoneService';
 import * as cornerstoneTools from '@cornerstonejs/tools';
-import { RenderingEngine, Enums, cache } from '@cornerstonejs/core';
+import { RenderingEngine, Enums, cache, volumeLoader, setVolumesForViewports, metaData, imageLoader } from '@cornerstonejs/core';
 import * as cornerstone3D from '@cornerstonejs/core';
 import { ToolGroupManager, Enums as csToolsEnums } from '@cornerstonejs/tools';
 import type { Types } from '@cornerstonejs/core';
-import { UiToolType, mapUiToolToCornerstone3D } from '@/lib/utils/cornerstone3DInit';
+import { UiToolType, mapUiToolToCornerstone3D, canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
 import { volumeLoaderService } from '@/lib/services/cornerstone/volumeLoader';
+import dicomParser from 'dicom-parser';
 
 // Define the mouse button bindings
 const MouseBindings = {
@@ -65,21 +66,7 @@ declare global {
 const ViewportError = ({message, onRetry}: {message: string, onRetry?: () => void}) => (
   <div className="absolute inset-0 flex items-center justify-center bg-black/80">
     <div className="flex flex-col items-center space-y-4 max-w-md">
-      <div className="text-red-500 mb-2">
-        <svg 
-          className="h-12 w-12" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={2} 
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
-          />
-        </svg>
-      </div>
+      <AlertCircle className="h-12 w-12 text-red-500 mb-2" />
       <h3 className="text-lg font-semibold text-center">Image Loading Error</h3>
       <p className="text-center text-slate-200">{message}</p>
       {onRetry && (
@@ -100,6 +87,53 @@ interface InitializationOptions {
   orientation?: Enums.OrientationAxis;
   background?: [number, number, number];
 }
+
+// Add this function after the imports
+const createToolGroup = async (toolGroupId: string, viewportId: string, renderingEngineId: string) => {
+  try {
+    // Clean up existing tool group if it exists
+    const existingToolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId);
+    if (existingToolGroup) {
+      cornerstoneTools.ToolGroupManager.destroyToolGroup(toolGroupId);
+    }
+
+    // Create new tool group
+    const toolGroup = cornerstoneTools.ToolGroupManager.createToolGroup(toolGroupId);
+    if (!toolGroup) {
+      throw new Error(`Failed to create tool group ${toolGroupId}`);
+    }
+
+    // Add tools to the tool group
+    const tools = [
+      { name: 'Pan', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Zoom', mode: csToolsEnums.ToolModes.Active },
+      { name: 'WindowLevel', mode: csToolsEnums.ToolModes.Active },
+      { name: 'StackScroll', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Length', mode: csToolsEnums.ToolModes.Active },
+      { name: 'RectangleROI', mode: csToolsEnums.ToolModes.Active },
+      { name: 'EllipticalROI', mode: csToolsEnums.ToolModes.Active },
+      { name: 'CircleROI', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Angle', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Probe', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Brush', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Magnify', mode: csToolsEnums.ToolModes.Active },
+      { name: 'Crosshairs', mode: csToolsEnums.ToolModes.Active }
+    ];
+
+    // Add each tool to the tool group
+    for (const tool of tools) {
+      toolGroup.addTool(tool.name, { mode: tool.mode });
+    }
+
+    // Add viewport to tool group
+    toolGroup.addViewport(viewportId, renderingEngineId);
+
+    return toolGroup;
+  } catch (error) {
+    console.error('Error creating tool group:', error);
+    throw error;
+  }
+};
 
 /**
  * New DicomViewer component that uses Cornerstone3D instead of legacy Cornerstone
@@ -134,29 +168,25 @@ export function DicomViewer3D({
     imageCount: 0,
     currentImageIndex: 0
   });
-  
+  const [viewport, setViewport] = useState<Types.IStackViewport | Types.IVolumeViewport | null>(null);
+  const [renderingEngine, setRenderingEngine] = useState<RenderingEngine | null>(null);
+  const viewportId = useRef(`viewport-${Math.random().toString(36).substring(2, 11)}`);
+  const renderingEngineId = `engine-${Math.random().toString(36).substring(2, 11)}`;
+
   // Add refs for tracking component state
   const isMounted = useRef(true);
   const isInitialized = useRef(false);
-  const viewportId = useRef(`viewport-${Math.random().toString(36).substr(2, 9)}`);
-  const renderingEngineId = useRef(`engine-${Date.now()}`);
   const toolGroupId = useRef(`toolgroup-${Math.random().toString(36).substr(2, 9)}`);
   const engineCreated = useRef(false);
   const currentImageIdsRef = useRef<string[]>([]);
   const lastLoadedImageIds = useRef<string[]>([]);
   const hasAttemptedInitialRender = useRef(false);
-  let initTimer: ReturnType<typeof setTimeout>;
-  
-  // Add new state for tracking volume loading
-  const [volumeLoadingAttempted, setVolumeLoadingAttempted] = useState(false);
-  const [volumeLoadingFailed, setVolumeLoadingFailed] = useState(false);
-  const currentVolumeId = useRef<string | null>(null);
-  
+
   // Track current image IDs with a ref to avoid dependency array issues
   useEffect(() => {
     currentImageIdsRef.current = imageIds;
   }, [imageIds]);
-  
+
   // Update the cleanupViewport function
   const cleanupViewport = useCallback(async () => {
     try {
@@ -164,73 +194,59 @@ export function DicomViewer3D({
       
       console.log(`DicomViewer3D: Starting cleanup of viewport ${viewportId.current}`);
       
-      // First check if we have a rendering engine
-      const engine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
-      if (!engine) {
-        console.log(`DicomViewer3D: No rendering engine found for cleanup`);
-        return;
-      }
-      
-      // Clean up the tool group first
+      // Clean up tool group first
       try {
         const toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId.current);
         if (toolGroup) {
-          // Get all tools and set them to disabled
+          // Disable all tools
           const tools = Object.keys(toolGroup.toolOptions || {});
-          tools.forEach(toolName => {
+          for (const toolName of tools) {
             try {
               toolGroup.setToolDisabled(toolName);
             } catch (e) {
-              console.warn(`DicomViewer3D: Error disabling tool ${toolName}:`, e);
+              console.warn(`Error disabling tool ${toolName}:`, e);
             }
-          });
-          
-          // Then destroy the tool group
-          try {
-            cornerstoneTools.ToolGroupManager.destroyToolGroup(toolGroupId.current);
-          } catch (e) {
-            console.warn(`DicomViewer3D: Error destroying tool group:`, e);
           }
+          
+          cornerstoneTools.ToolGroupManager.destroyToolGroup(toolGroupId.current);
         }
       } catch (tgError) {
-        console.warn(`DicomViewer3D: Error cleaning up tool group:`, tgError);
+        console.warn(`Error cleaning up tool group:`, tgError);
       }
       
       // Clean up the viewport
       try {
-        engine.disableElement(viewportId.current);
-        engineCreated.current = false;
+        const engine = cornerstone3D.getRenderingEngine(renderingEngineId);
+        if (engine) {
+          await engine.disableElement(viewportId.current);
+          engineCreated.current = false;
+          console.log(`DicomViewer3D: Disabled viewport ${viewportId.current}`);
+        } else {
+          console.log(`DicomViewer3D: No rendering engine found for cleanup`);
+        }
       } catch (vpError) {
-        console.warn(`DicomViewer3D: Error disabling viewport:`, vpError);
+        console.warn(`Error disabling viewport:`, vpError);
       }
     } catch (error) {
-      console.error(`DicomViewer3D: Error in cleanupViewport:`, error);
+      console.error(`Error in cleanupViewport:`, error);
     }
   }, []);
-  
+
   // Effect to handle viewport resize when expansion state changes
   useEffect(() => {
     if (!isEnabled || !elementRef.current || !isMounted.current) return;
-    
+
     const handleResize = () => {
       try {
         if (!elementRef?.current || !isMounted.current) return;
         
-        const engine = cornerstone3D.getRenderingEngine(renderingEngineId.current);
-        if (!engine) {
-          // Log but don't set an error when engine is not available during resize
-          console.log(`DicomViewer3D: Cannot resize - engine ${renderingEngineId.current} not available`);
-          return;
-        }
+        const engine = cornerstone3D.getRenderingEngine(renderingEngineId);
+        if (!engine) return;
         
-        // Resize the viewport
         engine.resize();
-        
-        // If we have a valid engine and can resize, we've definitely moved past the initial load
         setIsInitialLoad(false);
       } catch (error) {
-        // Silently log resize errors but don't show them in the UI
-        console.warn('DicomViewer3D: Resize error:', error);
+        console.warn('Resize error:', error);
       }
     };
     
@@ -241,530 +257,288 @@ export function DicomViewer3D({
       window.removeEventListener('resize', handleResize);
     };
   }, [isEnabled, isExpanded]);
-  
-  const cleanImageId = (id: string): string => {
-    // If it already has a proper prefix like wadouri: or wadors:, return as is
-    if (id.startsWith('wadouri:') || id.startsWith('wadors:') || 
-        id.startsWith('https:') || id.startsWith('http:') ||
-        id.startsWith('nifti:')) {
-      return id;
-    }
-    
-    // If it has a hash, it's likely a URL with a filename
-    if (id.includes('#')) {
-      const [url, filename] = id.split('#');
-      // Check file extension to determine format
-      if (filename.toLowerCase().endsWith('.dcm')) {
-        return `wadouri:${url}`;
-      } else if (filename.toLowerCase().endsWith('.nii') || filename.toLowerCase().endsWith('.nii.gz')) {
-        return `nifti:${url}`;
-      } else {
-        // For other image types
-        return `https:${url}`;
-      }
-    }
-    
-    // Default to wadouri: for unknown formats
-    return `wadouri:${id}`;
-  };
-  
-  const processImageIds = (ids: string[]): string[] => {
-    // Ensure we have image IDs
-    if (!ids || ids.length === 0) {
-      setError('No image IDs provided');
-      return [];
-    }
-    
-    // Process and clean each image ID
-    const processedIds = ids.map(id => {
-      // Skip empty IDs
-      if (!id) return null;
-      
-      try {
-        return cleanImageId(id);
-      } catch (e) {
-        console.error('Error processing image ID:', e);
-        return null;
-      }
-    }).filter(Boolean) as string[];
-    
-    if (processedIds.length === 0) {
-      setError('No valid image IDs found');
-    } else {
-      console.log(`Processed ${processedIds.length} image IDs`);
-      // Log the first few for debugging
-      processedIds.slice(0, 3).forEach(id => console.log(`- Image ID: ${id}`));
-    }
-    
-    return processedIds;
-  };
-  
-  // Update the initialization effect
-  useEffect(() => {
-    if (isInitialized.current) {
-      return;
-    }
 
-    const initialize = async () => {
-      if (!isMounted.current || isInitialized.current) return;
-      
+  // Effect to handle initialization
+  useEffect(() => {
+    let isCancelled = false;
+    const initializationId = Math.random().toString(36).substr(2, 9);
+
+    const initializeViewer = async () => {
       try {
-        // Set id on element
-        if (elementRef.current) {
-          const elementId = `element-${viewportId.current}`;
-          elementRef.current.id = elementId;
+        // Ensure cornerstone service is initialized first
+        await cornerstoneService.ensureInitialized();
+        
+        console.log('DicomViewer3D: Starting initialization with', { imageIds: imageIds.length, viewportType, isActive, initializationId });
+        
+        // Skip initialization if not active or no images
+        if (!isActive || !imageIds.length) {
+          console.log('DicomViewer3D: Skipping initialization - inactive or no images');
+          return;
+        }
+        
+        // Reset state
+        setLoading(true);
+        setError(null);
+        setDidAttemptLoading(true);
+
+        // First check if we can load this as a volume
+        const isSingleImage = imageIds.length === 1;
+        let useStackMode = isSingleImage;
+
+        if (!isSingleImage) {
+          try {
+            const canUseVolume = await canLoadAsVolume(imageIds);
+            console.log('DicomViewer3D: Volume capability check:', { canUseVolume, viewportType });
+            useStackMode = !canUseVolume;
+          } catch (error) {
+            console.warn('DicomViewer3D: Error checking volume capability:', error);
+            useStackMode = true;
+          }
         }
 
-        // Initialize Cornerstone with proper error handling
-        await cornerstoneService.initialize();
-        
-        isInitialized.current = true;
-        setIsEnabled(true);
-        console.log('DicomViewer3D: Initialization complete');
+        if (useStackMode) {
+          try {
+            console.log('DicomViewer3D: Using stack mode for', { isSingleImage, viewportType });
+
+            const { viewport: newViewport, renderingEngine: newEngine } = await cornerstoneService.loadAndDisplayImageStack(
+              elementRef.current!,
+              imageIds,
+              renderingEngineId,
+              viewportId.current
+            );
+            
+            if (isCancelled) return;
+            
+            setViewport(newViewport);
+            setRenderingEngine(newEngine);
+            setLoading(false);
+            setError(null);
+            setIsEnabled(true);
+            engineCreated.current = true;
+            
+            if (onImageLoaded) {
+              onImageLoaded(true, true);
+            }
+          } catch (error) {
+            if (isCancelled) return;
+            console.error('DicomViewer3D: Error loading in stack mode:', error);
+            setError('Failed to load image');
+            setLoading(false);
+            if (onImageLoaded) {
+              onImageLoaded(false, true);
+            }
+          }
+          return;
+        }
+
+        // For volume viewing, proceed with volume initialization
+        try {
+          console.log('DicomViewer3D: Setting up volume viewing');
+          const volumeId = `volume-${Date.now()}`;
+          
+          // Create the volume
+          const volume = await volumeLoader.createAndCacheVolume(volumeId, {
+            imageIds
+          });
+
+          if (isCancelled) return;
+
+          // Create rendering engine
+          const renderingEngine = new RenderingEngine(renderingEngineId);
+          
+          // Configure viewport
+          const viewportInput: Types.PublicViewportInput = {
+            viewportId: viewportId.current,
+            element: elementRef.current as HTMLDivElement,
+            type: Enums.ViewportType.ORTHOGRAPHIC,
+            defaultOptions: {
+              background: [0, 0, 0],
+              orientation: viewportType === 'AXIAL' 
+                ? Enums.OrientationAxis.AXIAL
+                : viewportType === 'SAGITTAL'
+                  ? Enums.OrientationAxis.SAGITTAL
+                  : Enums.OrientationAxis.CORONAL
+            }
+          };
+
+          // Enable viewport
+          renderingEngine.enableElement(viewportInput);
+          
+          // Get viewport
+          const viewport = renderingEngine.getViewport(viewportId.current);
+
+          if (isCancelled) return;
+
+          // Load the volume
+          await volume.load();
+
+          if (isCancelled) return;
+
+          // Set up volumes in the viewport
+          await setVolumesForViewports(renderingEngine, [
+            {
+              volumeId,
+              callback: ({ volumeActor }) => {
+                volumeActor.getProperty().setInterpolationTypeToLinear();
+                return volumeActor;
+              },
+            },
+          ], [viewportId.current]);
+
+          viewport.render();
+          
+          setViewport(viewport as Types.IVolumeViewport);
+          setRenderingEngine(renderingEngine);
+          setLoading(false);
+          setError(null);
+          setIsEnabled(true);
+          engineCreated.current = true;
+
+          if (onImageLoaded) {
+            onImageLoaded(true, false);
+          }
+        } catch (error) {
+          if (isCancelled) return;
+          console.error('DicomViewer3D: Error setting up volume viewing:', error);
+          setError('Failed to initialize volume viewer');
+          setLoading(false);
+          if (onImageLoaded) {
+            onImageLoaded(false, false);
+          }
+        }
       } catch (error) {
-        console.error('Error initializing Cornerstone3D:', error);
+        if (isCancelled) return;
+        console.error('DicomViewer3D: Initialization error:', error);
         setError('Failed to initialize viewer');
+        setLoading(false);
         if (onImageLoaded) {
           onImageLoaded(false, false);
         }
       }
     };
 
-    // Add a small delay before initialization
-    initTimer = setTimeout(() => {
-      if (isMounted.current) {
-        initialize();
-      }
-    }, 100);
+    initializeViewer();
 
     return () => {
-      if (initTimer) clearTimeout(initTimer);
+      isCancelled = true;
+      console.log('DicomViewer3D: Cancelling initialization', initializationId);
     };
-  }, [onImageLoaded]);
-  
-  // Update the tool change effect
+  }, [elementRef, imageIds, viewportType, isActive, onImageLoaded]);
+
+  // Reset isInitialLoad after first mount
   useEffect(() => {
-    if (!isEnabled || !elementRef.current) return;
-    if (activeTool === currentTool) return;
-    
-    try {
-      console.log(`DicomViewer3D: Tool change requested from ${currentTool} to ${activeTool}`);
-      
-      // Map UI tool to Cornerstone3D tool
-      const toolName = mapUiToolToCornerstone3D(activeTool);
-      
-      console.log(`DicomViewer3D: Mapped UI tool ${activeTool} to Cornerstone3D tool ${toolName}`);
-      
-      if (toolName) {
-        const toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId.current);
-        if (toolGroup) {
-          // First, set all tools to disabled
-          const tools = Object.keys(toolGroup.toolOptions || {});
-          tools.forEach(name => {
-            if (name !== toolName) {
-              toolGroup.setToolDisabled(name);
-            }
-          });
-          
-          // Then activate the requested tool
-          toolGroup.setToolActive(toolName, {
-            bindings: [
-              {
-                mouseButton: MouseBindings.Primary
-              }
-            ]
-          });
-          setCurrentTool(activeTool);
-          console.log(`DicomViewer3D: Successfully activated tool ${toolName}`);
-        } else {
-          console.warn(`DicomViewer3D: No tool group found for ${toolGroupId.current}`);
-        }
-      } else {
-        console.warn(`DicomViewer3D: No valid tool name mapped for ${activeTool}, keeping current tool ${currentTool}`);
-      }
-    } catch (error) {
-      console.error('DicomViewer3D: Error setting active tool:', error);
-      // Try to fall back to a default tool
-      try {
-        const fallbackTool = 'pan';
-        const fallbackToolName = mapUiToolToCornerstone3D(fallbackTool);
-        const toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId.current);
-        if (toolGroup) {
-          toolGroup.setToolActive(fallbackToolName, {
-            bindings: [
-              {
-                mouseButton: MouseBindings.Primary
-              }
-            ]
-          });
-          setCurrentTool(fallbackTool);
-          console.log(`DicomViewer3D: Fallback to tool ${fallbackToolName} after error`);
-        }
-      } catch (fallbackError) {
-        console.error('DicomViewer3D: Error setting fallback tool:', fallbackError);
-      }
-    }
-  }, [activeTool, isEnabled, currentTool]);
-  
-  // Update the setupViewport function
-  const setupViewport = useCallback(async () => {
-    if (!isMounted.current || !isInitialized.current) {
-      return;
-    }
+    return () => {
+      setIsInitialLoad(false);
+    };
+  }, []);
 
-    try {
-      const elementId = elementRef.current?.id;
-      if (!elementId) {
-        throw new Error('Element not found');
-      }
-
-      setError(null);
-      setLoading(true);
-
-      // Process image IDs
-      const processedImageIds = await processImageIds(currentImageIdsRef.current);
-      
-      if (processedImageIds.length === 0) {
-        setError('No valid images provided');
-        setLoading(false);
-        if (onImageLoaded) onImageLoaded(false, false);
-        return;
-      }
-
-      // Validate images
-      const validationResult = await cornerstoneService.validateImages(processedImageIds);
-      if (!validationResult.valid) {
-        setError('Invalid image format');
-        setLoading(false);
-        if (onImageLoaded) onImageLoaded(false, false);
-        return;
-      }
-
-      // Check if we can load as volume
-      let isVolumeData = false;
-      if (processedImageIds.length > 2) {
-        try {
-          await cornerstoneService.validateImages([processedImageIds[0]]);
-          isVolumeData = await volumeLoaderService.canLoadAsVolume(processedImageIds);
-          console.log(`Volume loading check result: ${isVolumeData ? 'CAN' : 'CANNOT'} load as volume`);
-        } catch (error) {
-          console.warn('Error checking volume capability:', error);
-          isVolumeData = false;
-        }
-      }
-
-      // Clean up existing viewport
-      await cleanupViewport();
-      
-      // Get rendering engine
-      const renderingEngine = await cornerstoneService.getRenderingEngine(
-        renderingEngineId.current,
-        isVolumeData ? 'VOLUME' : 'STACK'
-      );
-
-      if (!renderingEngine || !isMounted.current) {
-        throw new Error('Failed to create rendering engine');
-      }
-
-      // Create viewport
-      const viewportInput: Types.PublicViewportInput = {
-        viewportId: viewportId.current,
-        element: elementRef.current as HTMLDivElement,
-        type: isVolumeData ? Enums.ViewportType.ORTHOGRAPHIC : Enums.ViewportType.STACK,
-        defaultOptions: {
-          background: [0, 0, 0] as [number, number, number],
-          orientation: getViewportOrientation(viewportType)
-        }
-      };
-
-      renderingEngine.enableElement(viewportInput);
-      
-      // Load images
-      if (isVolumeData) {
-        try {
-          const volumeId = `volume-${Date.now()}`;
-          currentVolumeId.current = volumeId;
-          
-          const volume = await cornerstone3D.volumeLoader.createAndCacheVolume(volumeId, {
-            imageIds: processedImageIds
-          });
-
-          const viewport = renderingEngine.getViewport(viewportId.current) as Types.IVolumeViewport;
-          await viewport.setVolumes([
-            {
-              volumeId,
-              callback: ({ volumeActor }: { volumeActor: Types.VolumeActor }) => {
-                volumeActor.getProperty().setInterpolationTypeToLinear();
-                return volumeActor;
-              }
-            }
-          ]);
-
-          await volume.load();
-          viewport.render();
-          
-          setIs3D(true);
-          setVolumeLoadingAttempted(true);
-          setVolumeLoadingFailed(false);
-        } catch (volumeError) {
-          console.error('Volume loading failed:', volumeError);
-          setVolumeLoadingFailed(true);
-          // Fall back to stack viewport
-          await loadAsStack(renderingEngine, processedImageIds);
-        }
-      } else {
-        await loadAsStack(renderingEngine, processedImageIds);
-      }
-
-      setLoading(false);
-      if (onImageLoaded) {
-        onImageLoaded(true, !isVolumeData);
-      }
-    } catch (error) {
-      console.error('Error in viewport setup:', error);
-      setError(`Setup error: ${error instanceof Error ? error.message : String(error)}`);
-      setLoading(false);
-      if (onImageLoaded) onImageLoaded(false, false);
-    }
-  }, [imageId, viewportType, onImageLoaded, processImageIds, cleanupViewport]);
-  
-  // Add helper function for stack loading
-  const loadAsStack = async (renderingEngine: RenderingEngine, imageIds: string[]) => {
-    const viewport = renderingEngine.getViewport(viewportId.current) as Types.IStackViewport;
-    await viewport.setStack(imageIds);
-    viewport.render();
-    setIs3D(false);
-  };
-
-  // Add helper function for viewport orientation
-  const getViewportOrientation = (type: string): Enums.OrientationAxis => {
-    switch (type) {
-      case 'SAGITTAL':
-        return Enums.OrientationAxis.SAGITTAL;
-      case 'CORONAL':
-        return Enums.OrientationAxis.CORONAL;
-      case 'AXIAL':
-      default:
-        return Enums.OrientationAxis.AXIAL;
-    }
-  };
-  
-  // Set up viewport when it is active
-  useEffect(() => {
-    if (!elementRef?.current || !isActive || !isInitialized.current || !isMounted.current) {
-      return;
-    }
-    
-    console.log('DicomViewer3D: Setting up viewport - isActive:', isActive);
-    
-    // Check if we have image IDs
-    const currentImages = currentImageIdsRef.current;
-    const hasImages = (currentImages && currentImages.length > 0) || !!imageId;
-    
-    if (!hasImages) {
-      console.log('DicomViewer3D: No images to load, skipping rendering engine creation');
-      // Reset states without attempting to load
-      setLoading(false);
-      setIsInitialLoad(true);
-      setDidAttemptLoading(false);
-      setError(null);
-      engineCreated.current = false;
-      if (onImageLoaded) onImageLoaded(false, false);
-      return;
-    }
-    
-    // Set up the viewport
-    setupViewport();
-  }, [isActive, imageId, setupViewport, onImageLoaded]);
-  
   // Handle click to activate
   const handleActivate = () => {
     if (onActivate) {
       onActivate();
     }
   };
-  
+
   // Handle toggle expand
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log('DicomViewer3D: EXPAND BUTTON CLICKED', {
-      viewportType,
-      currentIsExpanded: isExpanded,
-      elementId: elementRef.current?.id,
-      hasCanvas: !!elementRef.current?.querySelector('canvas'),
-      viewportDimensions: elementRef.current?.getBoundingClientRect()
-    });
-    
-    // Force canvas resize before toggling
-    if (elementRef.current) {
-      const canvas = elementRef.current.querySelector('canvas');
-      if (canvas) {
-        console.log('DicomViewer3D: Canvas dimensions before resize:', {
-          width: canvas.style.width,
-          height: canvas.style.height,
-          offsetWidth: canvas.offsetWidth,
-          offsetHeight: canvas.offsetHeight,
-          clientWidth: canvas.clientWidth,
-          clientHeight: canvas.clientHeight
-        });
-        canvas.style.width = !isExpanded ? '100%' : '';
-        canvas.style.height = !isExpanded ? '100%' : '';
-        console.log('DicomViewer3D: Canvas dimensions after resize:', {
-          width: canvas.style.width,
-          height: canvas.style.height,
-          offsetWidth: canvas.offsetWidth,
-          offsetHeight: canvas.offsetHeight,
-          clientWidth: canvas.clientWidth,
-          clientHeight: canvas.clientHeight
-        });
-      } else {
-        console.warn('DicomViewer3D: No canvas element found in viewport');
-      }
-    }
     
     if (onToggleExpand) {
-      console.log('DicomViewer3D: Calling parent onToggleExpand');
       onToggleExpand();
-    } else {
-      console.warn('DicomViewer3D: No onToggleExpand handler provided');
     }
   };
-  
-  // Add viewport state logging effect
+
+  // Update the useEffect for tool changes
   useEffect(() => {
-    console.log('DicomViewer3D: Viewport state updated', {
-      viewportType,
-      isExpanded,
-      isActive,
-      elementId: elementRef.current?.id,
-      hasCanvas: !!elementRef.current?.querySelector('canvas'),
-      viewportDimensions: elementRef.current?.getBoundingClientRect()
-    });
-  }, [viewportType, isExpanded, isActive]);
-  
-  // Add a function for forcing a reload
-  const forceReload = useCallback(() => {
-    console.log('DicomViewer3D: Force reload requested');
-    
-    // Clean up the viewport first
-    cleanupViewport();
-    
-    // Clear the lastLoadedImageIds ref to force a reload
-    lastLoadedImageIds.current = [];
-    
-    // Reset the loading state
-    setDidAttemptLoading(false);
-    setLoading(false);
-    setError(null);
-    
-    // Reset viewport state
-    setViewportState({
-      isLoaded: false,
-      is3D: false,
-      viewportType: Enums.ViewportType.STACK,
-      imageCount: 0,
-      currentImageIndex: 0
-    });
-    
-    // Add a small delay before allowing reload
-    setTimeout(() => {
-      console.log('DicomViewer3D: Ready for reload');
-    }, 100);
-  }, [cleanupViewport]);
-  
-  // Expose functions via ref
-  useEffect(() => {
-    if (viewerRef && 'current' in viewerRef) {
-      viewerRef.current = {
-        forceReload
-      };
-    }
-  }, [viewerRef, forceReload]);
-  
+    const updateTool = async () => {
+      if (!isEnabled || !engineCreated.current) return;
+
+      try {
+        console.log(`DicomViewer3D: Tool change requested from ${currentTool} to ${activeTool}`);
+        
+        // Get the tool group
+        let toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId.current);
+        
+        // If no tool group exists, create one
+        if (!toolGroup) {
+          console.log(`DicomViewer3D: Creating new tool group ${toolGroupId.current}`);
+          toolGroup = await createToolGroup(
+            toolGroupId.current,
+            viewportId.current,
+            renderingEngineId
+          );
+        }
+
+        // Map the UI tool to Cornerstone3D tool name
+        const cornerstoneToolName = mapUiToolToCornerstone3D(activeTool);
+        console.log(`DicomViewer3D: Mapped UI tool ${activeTool} to Cornerstone3D tool ${cornerstoneToolName}`);
+
+        // Deactivate current tool if it exists
+        if (currentTool) {
+          const currentCornerstoneToolName = mapUiToolToCornerstone3D(currentTool);
+          toolGroup.setToolPassive(currentCornerstoneToolName);
+        }
+
+        // Activate new tool
+        toolGroup.setToolActive(cornerstoneToolName, {
+          bindings: [{ mouseButton: MouseBindings.Primary }]
+        });
+
+        setCurrentTool(activeTool);
+      } catch (error) {
+        console.error('Error updating tool:', error);
+      }
+    };
+
+    updateTool();
+  }, [activeTool, isEnabled, engineCreated.current]);
+
   return (
     <div 
+      ref={elementRef}
       className={cn(
-        "viewport-panel relative",
-        isActive && "active",
-        isExpanded && "expanded"
+        'relative w-full h-full bg-black',
+        !isEnabled && 'cursor-not-allowed opacity-50'
       )}
       onClick={handleActivate}
     >
-      <div 
-        id={`element-${viewportId.current}`}
-        ref={elementRef}
-        className={cn(
-          "w-full h-full dicom-viewport",
-          suppressErrors && "cornerstone-error-suppressed"
-        )}
-        style={{ 
-          height: '100%',
-          width: '100%',
-          position: 'relative'
-        }}
-      />
-      
-      {onToggleExpand && !hideExpandButton && (
+      {/* Error display */}
+      {error && !suppressErrors && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-75 text-white">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-6 h-6" />
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Loading indicator */}
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-75">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+        </div>
+      )}
+
+      {/* Expand/collapse button */}
+      {!hideExpandButton && (
         <button
-          className="viewport-expand-button"
           onClick={handleToggleExpand}
-          aria-label={isExpanded ? "Minimize viewport" : "Expand viewport"}
+          className="absolute top-2 right-2 p-1 rounded-lg bg-black bg-opacity-50 text-white hover:bg-opacity-75 transition-opacity"
         >
-          {isExpanded ? (
-            <Minimize2 size={16} />
-          ) : (
-            <Maximize2 size={16} />
-          )}
+          {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
       )}
-      
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 text-white">
-          <div className="flex flex-col items-center">
-            <div className="animate-spin h-8 w-8 border-4 border-t-transparent border-[#4cedff] rounded-full mb-2"></div>
-            <p>Loading image...</p>
-          </div>
-        </div>
-      )}
-      
-      {error && !suppressErrors && (
-        <ViewportError 
-          message={error} 
-          onRetry={() => {
-            setError(null);
-            if (hasAttemptedInitialRender.current) {
-              setupViewport();
-            }
-          }} 
-        />
-      )}
-      
-      {/* Show "No image selected" message if:
-       * 1. We're not loading AND
-       * 2. Either we haven't attempted loading OR this is the initial load state
-       */}
-      {!loading && (!didAttemptLoading || isInitialLoad) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-white">
-          <div className="flex flex-col items-center p-4 max-w-[80%] text-center">
-            <p className="font-medium">No image selected</p>
-            <p className="text-sm mt-2">Load a series to view images in this viewport.</p>
-          </div>
-        </div>
-      )}
-      
-      <div className="viewport-gradient" />
-      
-      {/* Suppress any cornerstone errors */}
-      {suppressErrors && (
-        <style jsx>{`
-          .cornerstone-error-suppressed .cornerstone-canvas-error,
-          .cornerstone-error-suppressed .cornerstone-errored,
-          .cornerstone-error-suppressed [class*='error'] {
-            display: none !important;
-          }
-        `}</style>
-      )}
+
+      {/* Hide scrollbars */}
+      <style jsx global>{`
+        .cornerstone-canvas-wrapper {
+          overflow: hidden !important;
+        }
+        .cornerstone-canvas-wrapper::-webkit-scrollbar {
+          display: none !important;
+        }
+      `}</style>
     </div>
   );
-} 
+}

@@ -6,13 +6,42 @@ import { cornerstoneService } from '@/lib/services/cornerstoneService';
 // Add browser environment check at the top of the file
 const isBrowser = typeof window !== 'undefined';
 
-// Initialize Cornerstone service only in browser environment
-if (isBrowser) {
-  // Initialize using the cornerstone service
-  cornerstoneService.initialize()
-    .catch(error => {
-      console.error('Failed to initialize Cornerstone service:', error);
-    });
+// Initialize state tracking
+let isInitializing = false;
+let initializationPromise: Promise<void> | null = null;
+
+// Ensure Cornerstone is initialized before any operations
+async function ensureCornerstoneInitialized(): Promise<void> {
+  if (!isBrowser) return;
+
+  if (cornerstoneService.isInitialized()) {
+    return;
+  }
+
+  if (initializationPromise) {
+    return initializationPromise;
+  }
+
+  if (isInitializing) {
+    // Wait for existing initialization
+    while (isInitializing) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return;
+  }
+
+  isInitializing = true;
+  try {
+    initializationPromise = cornerstoneService.initialize();
+    await initializationPromise;
+    console.log('Cornerstone service initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize Cornerstone service:', error);
+    throw error;
+  } finally {
+    isInitializing = false;
+    initializationPromise = null;
+  }
 }
 
 interface ImageAnalysis {
@@ -463,6 +492,9 @@ export async function createImageIdsFromFiles(files: File[]): Promise<string[]> 
     return [];
   }
 
+  // Ensure Cornerstone is initialized
+  await ensureCornerstoneInitialized();
+
   // Check for DICOMDIR file
   const dicomdirFile = files.find(file => 
     file.name.toUpperCase() === 'DICOMDIR' || 
@@ -470,36 +502,70 @@ export async function createImageIdsFromFiles(files: File[]): Promise<string[]> 
   );
 
   if (dicomdirFile) {
-    // For DICOMDIR, return both the DICOMDIR file and all other DICOM files
+    // For DICOMDIR, verify it's a valid DICOM file first
+    const isDicomdir = await verifyDicomFormat(dicomdirFile);
+    if (!isDicomdir) {
+      console.warn('DICOMDIR file is not a valid DICOM file');
+      return [];
+    }
+
+    // Create blob URLs for all files
     const dicomdirUrl = URL.createObjectURL(dicomdirFile);
-    
-    // Process all other files as they are likely referenced by the DICOMDIR
     const otherFiles = files.filter(file => file !== dicomdirFile);
     
-    return [
-      `wadouri:${dicomdirUrl}`,
-      ...otherFiles.map(file => {
-        const objectUrl = URL.createObjectURL(file);
-        return `wadouri:${objectUrl}`;
+    // Verify each file is a valid DICOM file
+    const validDicomFiles = await Promise.all(
+      otherFiles.map(async file => {
+        const isDicom = await verifyDicomFormat(file);
+        return isDicom ? file : null;
       })
+    );
+
+    const imageIds = [
+      `wadouri:${dicomdirUrl}`,
+      ...validDicomFiles
+        .filter((file): file is File => file !== null)
+        .map(file => `wadouri:${URL.createObjectURL(file)}`)
     ];
+
+    console.log('Created image IDs for DICOMDIR series:', imageIds);
+    return imageIds;
   }
 
   // Handle multiple DICOM files (without DICOMDIR)
-  const dicomFiles = files.filter(file => 
+  const potentialDicomFiles = files.filter(file => 
     file.name.toLowerCase().endsWith('.dcm') || 
     file.name.toLowerCase().includes('.dcm') ||
     file.type === 'application/dicom'
   );
 
-  if (dicomFiles.length > 0) {
-    // Sort files for proper sequence if they are numbered
-    dicomFiles.sort((a, b) => a.name.localeCompare(b.name));
+  if (potentialDicomFiles.length > 0) {
+    // Verify each file is a valid DICOM file
+    const validDicomFiles = await Promise.all(
+      potentialDicomFiles.map(async file => {
+        const isDicom = await verifyDicomFormat(file);
+        if (!isDicom) {
+          console.warn(`File ${file.name} is not a valid DICOM file`);
+          return null;
+        }
+        return file;
+      })
+    );
+
+    const filteredDicomFiles = validDicomFiles.filter((file): file is File => file !== null);
     
-    return dicomFiles.map(file => {
-      const objectUrl = URL.createObjectURL(file);
-      return `wadouri:${objectUrl}`;
-    });
+    if (filteredDicomFiles.length > 0) {
+      // Sort files for proper sequence if they are numbered
+      filteredDicomFiles.sort((a, b) => a.name.localeCompare(b.name));
+      
+      const imageIds = filteredDicomFiles.map(file => {
+        const objectUrl = URL.createObjectURL(file);
+        return `wadouri:${objectUrl}`;
+      });
+
+      console.log('Created image IDs for DICOM series:', imageIds);
+      return imageIds;
+    }
   }
 
   // Handle standard image files
@@ -511,15 +577,17 @@ export async function createImageIdsFromFiles(files: File[]): Promise<string[]> 
   );
 
   if (imageFiles.length > 0) {
-    return imageFiles.map(file => {
+    const imageIds = imageFiles.map(file => {
       const objectUrl = URL.createObjectURL(file);
-      return `wadouri:${objectUrl}`;
+      // Use regular image loader for non-DICOM images
+      return file.type.startsWith('image/') ? objectUrl : `wadouri:${objectUrl}`;
     });
+
+    console.log('Created image IDs for standard images:', imageIds);
+    return imageIds;
   }
 
-  // Default: treat all files as potential DICOM files
-  return files.map(file => {
-    const objectUrl = URL.createObjectURL(file);
-    return `wadouri:${objectUrl}`;
-  });
+  // If no valid files found
+  console.warn('No valid image files found');
+  return [];
 }

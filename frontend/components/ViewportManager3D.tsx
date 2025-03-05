@@ -1,16 +1,17 @@
 "use client";
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DicomViewer3D } from './DicomViewer3D';
 import { Toggle, type ToggleProps } from '@/components/ui/Toggle';
 import { Layers, Maximize, Minimize, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-// Import the UiToolType from the original source
-import { UiToolType } from '@/lib/utils/cornerstone3DInit';
+import { UiToolType, canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
 import { ImageToolController } from './ImageToolController';
 import { cornerstoneService } from '@/lib/services/cornerstoneService';
+import { RenderingEngine, Enums } from '@cornerstonejs/core';
+import * as cornerstoneTools from '@cornerstonejs/tools';
 
 // Component to show when viewer has error
 function ViewerFallback() {
@@ -53,6 +54,55 @@ interface ViewportManager3DProps {
   onImageLoaded?: (success: boolean, is2D?: boolean) => void;
 }
 
+const RENDERING_ENGINE_ID = 'main-engine';
+
+// Helper function to map UI tools to Cornerstone3D tools
+function mapUiToolToCornerstone3D(tool: UiToolType): string {
+  const toolMap: Record<string, string> = {
+    pan: 'Pan',
+    zoom: 'Zoom',
+    windowLevel: 'WindowLevel',
+    distance: 'Length',
+    area: 'RectangleROI',
+    profile: 'Probe',
+    diagnose: 'RectangleROI',
+    statistics: 'RectangleROI',
+    segment: 'SphereBrush',
+    compare: 'Crosshairs'
+  };
+  return toolMap[tool] || 'Pan';
+}
+
+// Helper function to create a tool group
+async function createToolGroup(groupId: string, viewportId: string, renderingEngineId: string) {
+  const toolGroup = cornerstoneTools.ToolGroupManager.createToolGroup(groupId);
+  
+  if (!toolGroup) {
+    throw new Error('Failed to create tool group');
+  }
+  
+  // Add tools to group
+  const tools = [
+    'Pan',
+    'Zoom',
+    'WindowLevel',
+    'Length',
+    'RectangleROI',
+    'Probe',
+    'SphereBrush',
+    'Crosshairs'
+  ];
+  
+  tools.forEach(tool => {
+    toolGroup.addTool(tool);
+  });
+  
+  // Add viewport to tool group
+  toolGroup.addViewport(viewportId, renderingEngineId);
+  
+  return toolGroup;
+}
+
 export function ViewportManager3D({
   imageId,
   imageIds = [],
@@ -84,24 +134,172 @@ export function ViewportManager3D({
   // Check if the viewport should be disabled
   const isDisabled = allImageIds.length === 0;
 
-  // Effect to handle initial viewport type and image loading
+  // Add ref for rendering engine
+  const renderingEngineRef = useRef<RenderingEngine | null>(null);
+
+  // Effect to handle viewport setup
   useEffect(() => {
-    if (allImageIds.length > 0 && !isInitialized) {
-      // Initialize cornerstone service once when we first get images
-      const initializeViewer = async () => {
-        try {
-          await cornerstoneService.initialize();
-          setIsInitialized(true);
-          console.log('ViewportManager3D: Initializing with images:', allImageIds);
-        } catch (error) {
-          console.error('ViewportManager3D: Failed to initialize Cornerstone3D', error);
-          setError('Failed to initialize viewer');
+    if (!isInitialized || !allImageIds.length) return;
+
+    let isCancelled = false;
+    const setupId = Math.random().toString(36).substr(2, 9);
+
+    const setupViewports = async () => {
+      try {
+        console.log(`ViewportManager3D: Starting viewport setup ${setupId}`);
+
+        // Create or get rendering engine
+        if (!renderingEngineRef.current) {
+          renderingEngineRef.current = new RenderingEngine(RENDERING_ENGINE_ID);
+          console.log('ViewportManager3D: Created new rendering engine');
         }
-      };
-      
-      initializeViewer();
+
+        // Check if setup was cancelled
+        if (isCancelled) {
+          console.log(`ViewportManager3D: Setup ${setupId} cancelled after engine creation`);
+          return;
+        }
+
+        // Check if we have a single image or multiple images
+        const isSingleImage = allImageIds.length === 1;
+        console.log('ViewportManager3D: Image count:', allImageIds.length);
+
+        if (isSingleImage) {
+          console.log('ViewportManager3D: Single image detected, using 2D mode');
+          try {
+            // Load the image first to verify it can be loaded
+            await cornerstoneService.validateImages(allImageIds);
+            
+            // Check if setup was cancelled
+            if (isCancelled) {
+              console.log(`ViewportManager3D: Setup ${setupId} cancelled after image validation`);
+              return;
+            }
+
+            setIs2D(true);
+            setUse3DViewer(false);
+            
+            if (onImageLoaded) {
+              onImageLoaded(true, true);
+            }
+          } catch (error) {
+            if (isCancelled) return;
+            console.error('ViewportManager3D: Failed to validate single image:', error);
+            setError('Failed to load image');
+            setHasError(true);
+            if (onImageLoaded) {
+              onImageLoaded(false, true);
+            }
+          }
+          return;
+        }
+
+        // For multiple images, check if we can load as volume
+        try {
+          const isVolumeLoadable = await canLoadAsVolume(allImageIds);
+          
+          // Check if setup was cancelled
+          if (isCancelled) {
+            console.log(`ViewportManager3D: Setup ${setupId} cancelled after volume check`);
+            return;
+          }
+
+          console.log('ViewportManager3D: Volume loading check:', isVolumeLoadable);
+
+          // Update state based on volume capability
+          setIs2D(!isVolumeLoadable);
+          setUse3DViewer(isVolumeLoadable);
+
+          // Notify parent
+          if (onImageLoaded) {
+            onImageLoaded(true, !isVolumeLoadable);
+          }
+        } catch (error) {
+          if (isCancelled) return;
+          console.error('ViewportManager3D: Error checking volume capability:', error);
+          // Default to 2D mode on error
+          setIs2D(true);
+          setUse3DViewer(false);
+          setError('Failed to check volume capability');
+          setHasError(true);
+          
+          if (onImageLoaded) {
+            onImageLoaded(false, true);
+          }
+        }
+      } catch (error) {
+        if (isCancelled) return;
+        console.error('ViewportManager3D: Setup error:', error);
+        setError('Failed to set up viewer');
+        setHasError(true);
+      }
+    };
+
+    setupViewports().catch(error => {
+      if (!isCancelled) {
+        console.error('ViewportManager3D: Setup error:', error);
+        setError('Failed to set up viewer');
+        setHasError(true);
+      }
+    });
+
+    // Cleanup function
+    return () => {
+      isCancelled = true;
+      console.log(`ViewportManager3D: Cancelling setup ${setupId}`);
+    };
+  }, [isInitialized, allImageIds, onImageLoaded]);
+
+  // Effect to handle Cornerstone initialization
+  useEffect(() => {
+    let isCancelled = false;
+    const initId = Math.random().toString(36).substr(2, 9);
+
+    const initializeViewer = async () => {
+      try {
+        // Skip initialization if no images
+        if (!allImageIds.length) {
+          setIsInitialized(true);
+          return;
+        }
+
+        console.log(`ViewportManager3D: Starting initialization ${initId}`);
+        await cornerstoneService.initialize();
+        
+        if (isCancelled) {
+          console.log(`ViewportManager3D: Initialization ${initId} cancelled`);
+          return;
+        }
+
+        setIsInitialized(true);
+        console.log('ViewportManager3D: Cornerstone3D initialized');
+      } catch (error) {
+        if (isCancelled) return;
+        console.error('ViewportManager3D: Failed to initialize Cornerstone3D', error);
+        setError('Failed to initialize viewer');
+        setHasError(true);
+        
+        if (onImageLoaded) {
+          onImageLoaded(false, true);
+        }
+      }
+    };
+
+    if (!isInitialized) {
+      initializeViewer().catch(error => {
+        if (!isCancelled) {
+          console.error('ViewportManager3D: Initialization error:', error);
+          setError('Failed to initialize viewer');
+          setHasError(true);
+        }
+      });
     }
-  }, [allImageIds, isInitialized]);
+
+    return () => {
+      isCancelled = true;
+      console.log(`ViewportManager3D: Cancelling initialization ${initId}`);
+    };
+  }, [isInitialized, allImageIds.length, onImageLoaded]);
 
   // Effect to update viewport type
   useEffect(() => {
@@ -118,7 +316,6 @@ export function ViewportManager3D({
     
     // Don't show errors if there are no images or during initial load
     if (allImageIds.length === 0) {
-      // Don't report an error if no images are loaded yet
       setHasError(false);
       setIs2D(is2DImage);
       
@@ -127,7 +324,20 @@ export function ViewportManager3D({
       }
       return;
     }
+
+    // For single images, always treat as 2D regardless of success
+    if (allImageIds.length === 1) {
+      setHasError(false);
+      setIs2D(true);
+      setUse3DViewer(false);
+      
+      if (onImageLoaded) {
+        onImageLoaded(true, true);
+      }
+      return;
+    }
     
+    // For multiple images, handle based on success and is2DImage flag
     setHasError(!success);
     setIs2D(is2DImage);
     
@@ -212,6 +422,76 @@ export function ViewportManager3D({
       </div>
     );
   }
+
+  // Cleanup effect - moved up with other effects
+  useEffect(() => {
+    return () => {
+      // Cleanup rendering engine
+      if (renderingEngineRef.current) {
+        try {
+          console.log('ViewportManager3D: Destroying rendering engine');
+          renderingEngineRef.current.destroy();
+          renderingEngineRef.current = null;
+        } catch (error) {
+          console.error('ViewportManager3D: Error destroying rendering engine:', error);
+        }
+      }
+
+      // Reset state
+      setIsInitialized(false);
+      setIs2D(false);
+      setUse3DViewer(false);
+      setHasError(false);
+      setError(null);
+
+      console.log('ViewportManager3D: Cleanup complete');
+    };
+  }, []); // Empty dependency array since this is cleanup
+
+  // Update the tool effect dependency array
+  useEffect(() => {
+    const updateTool = async () => {
+      if (!isDisabled || !renderingEngineRef.current) return;
+
+      try {
+        console.log(`DicomViewer3D: Tool change requested from ${currentTool} to ${activeTool}`);
+        
+        // Get the tool group
+        let toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(toolGroupId);
+        
+        // If no tool group exists, create one
+        if (!toolGroup) {
+          console.log(`DicomViewer3D: Creating new tool group ${toolGroupId}`);
+          toolGroup = await createToolGroup(
+            toolGroupId,
+            activeViewport,
+            RENDERING_ENGINE_ID
+          );
+        }
+
+        // Map the UI tool to Cornerstone3D tool name
+        const cornerstoneToolName = mapUiToolToCornerstone3D(activeTool);
+        console.log(`DicomViewer3D: Mapped UI tool ${activeTool} to Cornerstone3D tool ${cornerstoneToolName}`);
+
+        // Deactivate current tool if it exists
+        if (currentTool) {
+          const currentCornerstoneToolName = mapUiToolToCornerstone3D(currentTool);
+          toolGroup.setToolPassive(currentCornerstoneToolName);
+        }
+
+        // Activate new tool using the correct enum
+        toolGroup.setToolActive(cornerstoneToolName, {
+          bindings: [{ mouseButton: cornerstoneTools.Enums.MouseBindings.Primary }]
+        });
+
+        setCurrentTool(activeTool);
+      } catch (error) {
+        console.error('Error updating tool:', error);
+      }
+    };
+
+    updateTool();
+  }, [activeTool, isDisabled]); // Remove renderingEngineRef.current from dependency array
 
   return (
     <div className={cn("viewport-manager grid grid-cols-1 md:grid-cols-3 gap-2", className)}>

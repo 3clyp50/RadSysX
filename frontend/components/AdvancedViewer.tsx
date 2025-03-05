@@ -81,8 +81,8 @@ interface AdvancedViewerProps {
   wadoRsRoot?: string;
   localFiles?: File[];
   onError?: () => void;
-  activeTool?: ToolType;
-  enableSync?: boolean; // Add option to enable synchronization
+  activeTool?: UiToolType;
+  enableSync?: boolean;
 }
 
 export function AdvancedViewer({ 
@@ -91,7 +91,7 @@ export function AdvancedViewer({
   wadoRsRoot,
   localFiles,
   onError,
-  activeTool = null,
+  activeTool = 'pan' as UiToolType,
   enableSync = true
 }: AdvancedViewerProps) {
   const elementRef1 = useRef<HTMLDivElement>(null)
@@ -189,38 +189,33 @@ export function AdvancedViewer({
       
       // Map UI tool name to actual cornerstone3D tool name
       switch (tool) {
-        case "pan":
+        case 'pan':
           toolGroupRef.current.setToolActive("Pan", { bindings: [binding] });
           break;
-        case "zoom":
+        case 'zoom':
           toolGroupRef.current.setToolActive("Zoom", { bindings: [binding] });
           break;
-        case "window":
-        case "level":
+        case 'windowLevel':
           toolGroupRef.current.setToolActive("WindowLevel", { bindings: [binding] });
           break;
-        case "distance":
+        case 'length':
           toolGroupRef.current.setToolActive("Length", { bindings: [binding] });
           break;
-        case "area":
+        case 'rectangleROI':
           toolGroupRef.current.setToolActive("RectangleROI", { bindings: [binding] });
           break;
-        case "angle":
+        case 'angle':
           toolGroupRef.current.setToolActive("Angle", { bindings: [binding] });
           break;
-        case "profile":
+        case 'probe':
           toolGroupRef.current.setToolActive("Probe", { bindings: [binding] });
           break;
-        case "segment":
+        case 'brush':
           toolGroupRef.current.setToolActive("SphereBrush", { bindings: [binding] });
           break;
-        case "compare":
-        case "diagnose":
-        case "statistics":
         default:
           // For unsupported tools, default to Pan
           toolGroupRef.current.setToolActive("Pan", { bindings: [binding] });
-          break;
       }
     }
   };

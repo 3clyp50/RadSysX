@@ -66,6 +66,13 @@ import NovionAgent from "@/components/novionAgents";
 import { ViewportManager3D } from '@/components/ViewportManager3D';
 import { UiToolType, canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
+
+// Dynamically import the DicomViewer component with no SSR
+const DicomViewer3D = dynamic(
+  () => import('@/components/DicomViewer3D').then(mod => mod.DicomViewer3D),
+  { ssr: false }
+);
 
 // Add type declarations for the Web Speech API
 
@@ -165,7 +172,22 @@ type setViewportState = "1x1" | "2x2" | "3x3";
 type ViewportType = "AXIAL" | "SAGITTAL" | "CORONAL" | "SERIES";
 
 // Tool types
-type Tool = UiToolType;
+type Tool = 
+  | 'pan'
+  | 'zoom'
+  | 'windowLevel'
+  | 'stackScroll'
+  | 'length'
+  | 'angle'
+  | 'rectangleROI'
+  | 'ellipticalROI'
+  | 'circleROI'
+  | 'bidirectional'
+  | 'probe'
+  | 'brush'
+  | 'eraser'
+  | 'magnify'
+  | 'crosshairs';
 
 type AIModel = "mammogram" | "brain-mri" | "chest-xray";
 
@@ -249,22 +271,14 @@ function LeftToolbar({ isExpanded, onExpandedChange, activeTool, setActiveTool, 
   const { toast } = useToast();
 
   const handleToolClick = (tool: Tool) => {
-    console.log(`handleToolClick called with tool: ${tool}, current activeTool: ${activeTool}`);
-    
     if (activeTool === tool && tool) {
-      console.log(`Deactivating current tool: ${tool}`);
       if (setActiveTool) {
-        setActiveTool(null);
+        setActiveTool('pan' as Tool);
       }
       setToolHistory((prev) => [...prev.filter(t => t !== tool)]);
     } else if (tool) {
-      const prevTool = activeTool;
-      console.log(`Activating new tool: ${tool}, previous tool: ${prevTool}`);
       if (setActiveTool) {
         setActiveTool(tool);
-        console.log(`setActiveTool called with: ${tool}`);
-      } else {
-        console.warn(`setActiveTool function is not available`);
       }
       setToolHistory((prev) => [...prev.filter(t => t !== tool), tool]);
     }
@@ -316,29 +330,29 @@ function LeftToolbar({ isExpanded, onExpandedChange, activeTool, setActiveTool, 
             <CustomToolButton
               icon={Move}
               label="Pan"
-              active={activeTool === "pan"}
-              onClick={() => handleToolClick("pan")}
+              active={activeTool === 'pan'}
+              onClick={() => handleToolClick('pan')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={ZoomIn}
               label="Zoom"
-              active={activeTool === "zoom"}
-              onClick={() => handleToolClick("zoom")}
+              active={activeTool === 'zoom'}
+              onClick={() => handleToolClick('zoom')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={Sun}
-              label="Window"
-              active={activeTool === "window"}
-              onClick={() => handleToolClick("window")}
+              label="Window Level"
+              active={activeTool === 'windowLevel'}
+              onClick={() => handleToolClick('windowLevel')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={ContrastIcon}
-              label="Level"
-              active={activeTool === "level"}
-              onClick={() => handleToolClick("level")}
+              label="Stack Scroll"
+              active={activeTool === 'stackScroll'}
+              onClick={() => handleToolClick('stackScroll')}
               className="flex justify-center items-center"
             />
           </div>
@@ -349,30 +363,30 @@ function LeftToolbar({ isExpanded, onExpandedChange, activeTool, setActiveTool, 
           <div className="tool-grid">
             <CustomToolButton
               icon={Ruler}
-              label="Distance"
-              active={activeTool === "distance"}
-              onClick={() => handleToolClick("distance")}
+              label="Length"
+              active={activeTool === 'length'}
+              onClick={() => handleToolClick('length')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={Square}
-              label="Area"
-              active={activeTool === "area"}
-              onClick={() => handleToolClick("area")}
+              label="Rectangle ROI"
+              active={activeTool === 'rectangleROI'}
+              onClick={() => handleToolClick('rectangleROI')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={Gauge}
               label="Angle"
-              active={activeTool === "angle"}
-              onClick={() => handleToolClick("angle")}
+              active={activeTool === 'angle'}
+              onClick={() => handleToolClick('angle')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={ScanLine}
-              label="Profile"
-              active={activeTool === "profile"}
-              onClick={() => handleToolClick("profile")}
+              label="Probe"
+              active={activeTool === 'probe'}
+              onClick={() => handleToolClick('probe')}
               className="flex justify-center items-center"
             />
           </div>
@@ -383,30 +397,30 @@ function LeftToolbar({ isExpanded, onExpandedChange, activeTool, setActiveTool, 
           <div className="tool-grid">
             <CustomToolButton
               icon={Stethoscope}
-              label="Diagnose"
-              active={activeTool === "diagnose"}
-              onClick={() => handleToolClick("diagnose")}
+              label="Elliptical ROI"
+              active={activeTool === 'ellipticalROI'}
+              onClick={() => handleToolClick('ellipticalROI')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={LineChart}
-              label="Statistics"
-              active={activeTool === "statistics"}
-              onClick={() => handleToolClick("statistics")}
+              label="Circle ROI"
+              active={activeTool === 'circleROI'}
+              onClick={() => handleToolClick('circleROI')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={Crop}
-              label="Segment"
-              active={activeTool === "segment"}
-              onClick={() => handleToolClick("segment")}
+              label="Brush"
+              active={activeTool === 'brush'}
+              onClick={() => handleToolClick('brush')}
               className="flex justify-center items-center"
             />
             <CustomToolButton
               icon={ArrowLeftRight}
-              label="Compare"
-              active={activeTool === "compare"}
-              onClick={() => handleToolClick("compare")}
+              label="Crosshairs"
+              active={activeTool === 'crosshairs'}
+              onClick={() => handleToolClick('crosshairs')}
               className="flex justify-center items-center"
             />
           </div>
@@ -1409,7 +1423,7 @@ function App() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [loadedImages, setLoadedImages] = useState<LoadedImage[]>([]);
   const [expandedViewport, setExpandedViewport] = useState<ViewportType | null>(null);
-  const [activeTool, setActiveTool] = useState<Tool>(null);
+  const [activeTool, setActiveTool] = useState<Tool>('pan');
   const [isNovionModalOpen, setIsNovionModalOpen] = useState(false);
   const [useVolumeViewer, setUseVolumeViewer] = useState(false);
 

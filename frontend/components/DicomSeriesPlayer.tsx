@@ -129,9 +129,15 @@ export function DicomSeriesPlayer({
       // Clean up image URLs
       imageIds.forEach(imageId => {
         try {
-          const urlMatch = imageId.match(/^wadouri:(.+)#/);
-          if (urlMatch && urlMatch[1]) {
-            URL.revokeObjectURL(urlMatch[1]);
+          if (typeof imageId === 'string') {
+            // Handle different URL formats
+            const urlMatch = imageId.match(/^(wadouri:|wadors:|https?:)(.+?)(?:#|$)/);
+            if (urlMatch && urlMatch[2]) {
+              const blobUrl = urlMatch[2];
+              if (blobUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(blobUrl);
+              }
+            }
           }
         } catch (e) {
           console.warn('Error revoking URL:', e);

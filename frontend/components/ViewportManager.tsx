@@ -5,11 +5,22 @@ import { useState, lazy, Suspense, useEffect } from 'react';
 import { LoadedImage } from '@/lib/types';
 import { Toggle, type ToggleProps } from '@/components/ui/Toggle';
 import { Box, ImageIcon, Loader2, AlertTriangle, Info } from 'lucide-react';
-import { DicomViewer3D } from './DicomViewer3D';
-import { ViewportManager3D } from './ViewportManager3D';
 import { UiToolType } from '@/lib/utils/cornerstone3DInit';
 import { canLoadAsVolume } from '@/lib/utils/cornerstone3DInit';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
+
+// Dynamically import DicomViewer3D with no SSR
+const DicomViewer3D = dynamic(
+  () => import('./DicomViewer3D').then(mod => ({ default: mod.DicomViewer3D })),
+  { ssr: false }
+);
+
+// Dynamically import ViewportManager3D with no SSR
+const ViewportManager3D = dynamic(
+  () => import('./ViewportManager3D').then(mod => ({ default: mod.ViewportManager3D })),
+  { ssr: false }
+);
 
 // Error boundary fallback component for AdvancedViewer
 function AdvancedViewerFallback({ onReset }: { onReset: () => void }) {
@@ -79,6 +90,36 @@ interface ViewportManagerProps {
   activeTool?: Tool;
 }
 
+// Add type for dynamic components
+interface DynamicDicomViewer3DProps {
+  imageId?: string;
+  imageIds?: string[];
+  viewportType: 'AXIAL' | 'SAGITTAL' | 'CORONAL' | '3D' | 'SERIES';
+  isActive?: boolean;
+  isExpanded?: boolean;
+  onActivate?: () => void;
+  onToggleExpand?: () => void;
+  onImageLoaded?: (success: boolean, is2DImage: boolean) => void;
+  activeTool?: UiToolType;
+  suppressErrors?: boolean;
+  hideExpandButton?: boolean;
+}
+
+interface DynamicViewportManager3DProps {
+  imageIds: string[];
+  viewportType: 'AXIAL' | 'SAGITTAL' | 'CORONAL';
+  activeTool?: UiToolType;
+  showTools: boolean;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  className?: string;
+  onImageLoaded?: (success: boolean, is2D?: boolean) => void;
+}
+
+// Type assertions for dynamic components
+const TypedDicomViewer3D = DicomViewer3D as React.ComponentType<DynamicDicomViewer3DProps>;
+const TypedViewportManager3D = ViewportManager3D as React.ComponentType<DynamicViewportManager3DProps>;
+
 export function ViewportManager({
   loadedImages,
   currentImageIndex,
@@ -94,41 +135,79 @@ export function ViewportManager({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [advancedViewerError, setAdvancedViewerError] = useState(false);
   const [is2DImage, setIs2D] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  // Use useEffect to detect client-side rendering
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Get the current image details
   const currentImage = loadedImages?.[currentImageIndex];
   const allImageIds = loadedImages?.map(img => img.imageId) || [];
   
-  // Function to determine if an image is 2D based on file format
-  const is2DImageFormat = (image?: LoadedImage) => {
-    if (!image) return false;
+  // Function to determine if an image is 2D based on file format and count
+  const is2DImageFormat = (images?: LoadedImage[]) => {
+    if (!images || images.length === 0) return false;
+    
+    // Single image is always treated as 2D
+    if (images.length === 1) {
+      console.log('ViewportManager: Single image detected, treating as 2D');
+      return true;
+    }
     
     // Check if it's a standard 2D image format
-    const fileName = image.file.name.toLowerCase();
+    const firstImage = images[0];
+    const fileName = firstImage.file.name.toLowerCase();
     const is2DFormat = fileName.endsWith('.png') || 
-                       fileName.endsWith('.jpg') || 
-                       fileName.endsWith('.jpeg') || 
-                       fileName.endsWith('.gif') || 
-                       fileName.endsWith('.bmp') ||
-                       image.format === 'png' ||
-                       image.format === 'jpg' ||
-                       image.format === 'jpeg';
-                       
+                      fileName.endsWith('.jpg') || 
+                      fileName.endsWith('.jpeg') || 
+                      fileName.endsWith('.gif') || 
+                      fileName.endsWith('.bmp') ||
+                      firstImage.format === 'png' ||
+                      firstImage.format === 'jpg' ||
+                      firstImage.format === 'jpeg';
+                      
     return is2DFormat;
   };
 
   // Effect to check image type when images change
   useEffect(() => {
-    if (currentImage) {
-      const is2D = is2DImageFormat(currentImage);
-      setIs2D(is2D);
-      
-      // If it's a 2D image, force 2D viewer mode
-      if (is2D) {
+    const checkImageType = async () => {
+      if (!loadedImages || loadedImages.length === 0) {
+        setIs2D(false);
+        setUseAdvancedViewer(false);
+        return;
+      }
+
+      try {
+        // First check if we have a single image or 2D format
+        const is2D = is2DImageFormat(loadedImages);
+        console.log('ViewportManager: Image type check:', { is2D, imageCount: loadedImages.length });
+
+        if (is2D) {
+          setIs2D(true);
+          setUseAdvancedViewer(false);
+          return;
+        }
+
+        // For multiple DICOM images, check if they can form a volume
+        if (loadedImages.length > 1) {
+          const canLoadVolume = await canLoadAsVolume(allImageIds);
+          console.log('ViewportManager: Volume check result:', canLoadVolume);
+          setUseAdvancedViewer(canLoadVolume);
+          setIs2D(!canLoadVolume);
+        }
+      } catch (error) {
+        console.error('ViewportManager: Error checking image type:', error);
+        // On error, default to 2D viewing
+        setIs2D(true);
         setUseAdvancedViewer(false);
       }
-    }
-  }, [currentImage]);
+    };
+
+    checkImageType();
+  }, [loadedImages, allImageIds]);
 
   const handleImageLoaded = (success: boolean) => {
     setImageLoadSuccess(success);
@@ -159,6 +238,15 @@ export function ViewportManager({
 
   const isDisabled = !loadedImages?.length;
   const shouldSuppressErrors = is2DImage && viewportType !== 'AXIAL' && !useAdvancedViewer;
+
+  // Modify the return statement to only render when on client side
+  if (!isClient) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-t-transparent border-[#4cedff] rounded-full"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full flex flex-col">
@@ -208,7 +296,7 @@ export function ViewportManager({
           </Suspense>
         </div>
       ) : (
-        <ViewportManager3D
+        <TypedViewportManager3D
           imageIds={allImageIds}
           viewportType={viewportType}
           activeTool={activeTool}

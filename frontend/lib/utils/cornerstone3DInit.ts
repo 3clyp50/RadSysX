@@ -1,9 +1,14 @@
+'use client';
+
 // Cornerstone3D Initialization Module
 
 // Core libraries
 import * as cornerstone3D from '@cornerstonejs/core';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import dicomParser from 'dicom-parser';
 import { cornerstoneService } from '@/lib/services/cornerstoneService';
+import type { Types } from '@cornerstonejs/core';
+import { metaData } from '@cornerstonejs/core';
 
 // Cornerstone3D core modules
 const {
@@ -13,7 +18,6 @@ const {
   setVolumesForViewports,
   imageLoader,
   cache,
-  metaData,
   utilities
 } = cornerstone3D;
 
@@ -38,45 +42,110 @@ const {
 } = cornerstoneTools;
 
 // Define custom tool types
-type BaseToolType = 
-  | "pan"
-  | "zoom"
-  | "distance"
-  | "area"
-  | "angle"
-  | "profile"
-  | "window"
-  | "level"
-  | "diagnose"
-  | "statistics"
-  | "segment"
-  | "compare"
-  | "rectangleRoi"
-  | "ellipticalRoi"
-  | "circleRoi"
-  | "brush"
-  | "circleScissor"
-  | "rectangleScissor"
-  | "sphereScissor"
-  | "eraser"
-  | "threshold"
-  | "magnify"
-  | "stackScroll"
-  | "crosshairs"
-  | "volumeRotate";
+export type UiToolType = 
+  | 'pan'
+  | 'zoom'
+  | 'windowLevel'
+  | 'stackScroll'
+  | 'length'
+  | 'angle'
+  | 'rectangleROI'
+  | 'ellipticalROI'
+  | 'circleROI'
+  | 'bidirectional'
+  | 'probe'
+  | 'brush'
+  | 'eraser'
+  | 'magnify'
+  | 'crosshairs';
 
-// UI Tool type that matches the application's existing tool types
-export type UiToolType = BaseToolType | null;
-
-// Tool mapping type that excludes null
-type ToolMapType = Record<BaseToolType, string>;
+// Define types for DICOM image loader
+interface DicomImageLoaderModule {
+  external?: {
+    cornerstone?: any;
+    dicomParser?: any;
+  };
+  configure?: (config: any) => void;
+  webWorkerManager?: {
+    initialize: (config: any) => Promise<void>;
+  };
+  wadouri?: {
+    loadImage: any;
+  };
+  wadors?: {
+    loadImage: any;
+  };
+}
 
 /**
  * Initialize the Cornerstone3D libraries with proper error handling
  */
 export async function initializeCornerstone3D(): Promise<void> {
   try {
+    // Only initialize in browser environment
+    if (typeof window === 'undefined') {
+      console.log('Skipping Cornerstone3D initialization in SSR');
+      return;
+    }
+
+    // Initialize Cornerstone Core first
+    await cornerstone3D.init();
+    console.log('Cornerstone Core initialized');
+
+    // Initialize Cornerstone Tools
+    await cornerstoneTools.init();
+    console.log('Cornerstone Tools initialized');
+
+    // Dynamically import DICOM image loader
+    const dicomImageLoaderModule = await import('@cornerstonejs/dicom-image-loader');
+    const loader = dicomImageLoaderModule.default as DicomImageLoaderModule;
+    
+    // Initialize DICOM image loader
+    if (loader) {
+      // Set external dependencies
+      loader.external = loader.external || {};
+      loader.external.cornerstone = cornerstone3D;
+      loader.external.dicomParser = dicomParser;
+
+      // Configure the image loader
+      if (loader.configure) {
+        loader.configure({
+          useWebWorkers: true,
+          decodeConfig: {
+            convertFloatPixelDataToInt: false,
+            use16BitDataType: true,
+          },
+          strict: false
+        });
+      }
+
+      // Initialize web workers
+      if (loader.webWorkerManager) {
+        await loader.webWorkerManager.initialize({
+          maxWebWorkers: Math.min(navigator.hardwareConcurrency || 4, 4),
+          startWebWorkersOnDemand: true,
+          taskConfiguration: {
+            decodeTask: {
+              initializeCodecsOnStartup: true,
+              strict: false
+            },
+          },
+        });
+      }
+
+      // Register image loaders
+      if (loader.wadouri) {
+        cornerstone3D.imageLoader.registerImageLoader('wadouri', loader.wadouri.loadImage);
+      }
+      if (loader.wadors) {
+        cornerstone3D.imageLoader.registerImageLoader('wadors', loader.wadors.loadImage);
+      }
+    }
+
+    // Initialize the cornerstone service
     await cornerstoneService.initialize();
+
+    console.log('Cornerstone3D initialized successfully');
   } catch (error) {
     console.error('Failed to initialize Cornerstone3D:', error);
     throw error;
@@ -175,119 +244,112 @@ export function createToolGroup(
 }
 
 /**
- * Enhanced volume loading capability check
+ * Map UI tool types to Cornerstone3D tool names
  */
-export const canLoadAsVolume = async (imageIds: string[]): Promise<boolean> => {
+export function mapUiToolToCornerstone3D(tool: UiToolType): string {
+  const toolMap: Record<UiToolType, string> = {
+    pan: 'Pan',
+    zoom: 'Zoom',
+    windowLevel: 'WindowLevel',
+    stackScroll: 'StackScroll',
+    length: 'Length',
+    angle: 'Angle',
+    rectangleROI: 'RectangleROI',
+    ellipticalROI: 'EllipticalROI',
+    circleROI: 'CircleROI',
+    bidirectional: 'Bidirectional',
+    probe: 'Probe',
+    brush: 'Brush',
+    eraser: 'Eraser',
+    magnify: 'Magnify',
+    crosshairs: 'Crosshairs'
+  };
+
+  return toolMap[tool] || 'Pan';
+}
+
+/**
+ * Check if a series of images can be loaded as a volume
+ */
+export async function canLoadAsVolume(imageIds: string[]): Promise<boolean> {
+  if (!imageIds || imageIds.length < 3) {
+    return false;
+  }
+
   try {
-    if (imageIds.length < 3) {
+    // Ensure cornerstone is initialized
+    await cornerstoneService.initialize();
+
+    // Get metadata for the first image
+    const metadata = metaData.get('imagePlaneModule', imageIds[0]);
+    
+    if (!metadata) {
+      console.warn('No metadata found for image');
       return false;
     }
 
-    // Load the first image to check metadata
-    await imageLoader.loadAndCacheImage(imageIds[0]);
+    // Check required metadata
+    const hasRequiredMetadata = 
+      metadata.imageOrientationPatient &&
+      metadata.imagePositionPatient &&
+      metadata.rowCosines &&
+      metadata.columnCosines &&
+      metadata.rowPixelSpacing &&
+      metadata.columnPixelSpacing &&
+      metadata.sliceThickness;
 
-    // Check for required volume metadata
-    const hasSpacing = !!metaData.get('imagePixelSpacing', imageIds[0]) || 
-                      !!metaData.get('pixelSpacing', imageIds[0]);
-    const hasOrientation = !!metaData.get('imageOrientationPatient', imageIds[0]);
-    const hasPosition = !!metaData.get('imagePositionPatient', imageIds[0]);
-    const hasThickness = !!metaData.get('sliceThickness', imageIds[0]);
-
-    // Log metadata availability for debugging
-    console.log('Volume loading metadata check:', {
-      hasSpacing,
-      hasOrientation,
-      hasPosition,
-      hasThickness,
-      imageCount: imageIds.length
-    });
-
-    return hasSpacing && hasOrientation && hasPosition && hasThickness;
-  } catch (error) {
-    console.error('Error checking volume loading capability:', error);
-    return false;
-  }
-};
-
-/**
- * Map UI tool types to Cornerstone3D tool names with improved error handling
- */
-export function mapUiToolToCornerstone3D(tool: UiToolType): string {
-  try {
-    if (tool === null) {
-      return PanTool.toolName;
+    if (!hasRequiredMetadata) {
+      console.warn('Missing required metadata for volume loading');
+      return false;
     }
 
-    const toolMap: ToolMapType = {
-      "pan": PanTool.toolName,
-      "zoom": ZoomTool.toolName,
-      "window": WindowLevelTool.toolName,
-      "level": WindowLevelTool.toolName,
-      "distance": LengthTool.toolName,
-      "area": RectangleROITool.toolName,
-      "rectangleRoi": RectangleROITool.toolName,
-      "ellipticalRoi": EllipticalROITool.toolName,
-      "circleRoi": CircleROITool.toolName,
-      "angle": AngleTool.toolName,
-      "profile": ProbeTool.toolName,
-      "segment": BrushTool.toolName,
-      "brush": BrushTool.toolName,
-      "magnify": MagnifyTool.toolName,
-      "stackScroll": StackScrollTool.toolName,
-      "crosshairs": CrosshairsTool.toolName,
-      "volumeRotate": "VolumeRotateMouseWheel", // Use string literal since the tool isn't directly imported
-      "circleScissor": "CircleScissor",
-      "rectangleScissor": "RectangleScissor",
-      "sphereScissor": "SphereScissor",
-      "eraser": "Eraser",
-      "threshold": "Threshold",
-      "diagnose": ProbeTool.toolName,
-      "statistics": ProbeTool.toolName,
-      "compare": ProbeTool.toolName
-    };
-
-    return toolMap[tool] || PanTool.toolName;
+    return true;
   } catch (error) {
-    console.error('Error mapping tool:', error);
-    return PanTool.toolName;
+    console.error('Error checking volume capability:', error);
+    return false;
   }
 }
 
 /**
- * Clean up Cornerstone3D resources with enhanced error handling
+ * Clean up Cornerstone3D resources
  */
-export function cleanupCornerstone3D(renderingEngineId: string, toolGroupIds: string[] = []) {
+export async function cleanupCornerstone3D(renderingEngineId: string, toolGroupIds: string[] = []): Promise<void> {
   try {
+    const [core, tools] = await Promise.all([
+      import('@cornerstonejs/core'),
+      import('@cornerstonejs/tools')
+    ]);
+
     // Clean up tool groups
-    toolGroupIds.forEach(toolGroupId => {
+    for (const toolGroupId of toolGroupIds) {
       try {
-        const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
+        const toolGroup = tools.ToolGroupManager.getToolGroup(toolGroupId);
         if (toolGroup) {
           // Disable all tools before destroying
-          const tools = Object.keys(toolGroup.toolOptions || {});
-          tools.forEach(toolName => {
+          const toolNames = Object.keys(toolGroup.toolOptions || {});
+          for (const toolName of toolNames) {
             try {
               toolGroup.setToolDisabled(toolName);
             } catch (toolError) {
               console.warn(`Error disabling tool ${toolName}:`, toolError);
             }
-          });
-          ToolGroupManager.destroyToolGroup(toolGroupId);
+          }
+          tools.ToolGroupManager.destroyToolGroup(toolGroupId);
         }
       } catch (toolError) {
         console.warn(`Error cleaning up tool group ${toolGroupId}:`, toolError);
       }
-    });
-    
+    }
+
     // Clean up rendering engine
-    const renderingEngine = cornerstone3D.getRenderingEngine(renderingEngineId);
+    const renderingEngine = core.getRenderingEngine(renderingEngineId);
     if (renderingEngine) {
-      renderingEngine.destroy();
+      await renderingEngine.destroy();
       console.log(`Cleaned up Cornerstone3D resources for renderingEngine: ${renderingEngineId}`);
     }
 
     // Clear image cache
-    cache.purgeCache();
+    core.cache.purgeCache();
   } catch (error) {
     console.error('Error cleaning up Cornerstone3D resources:', error);
   }
@@ -311,4 +373,29 @@ export async function validateImageIds(imageIds: string[]): Promise<{
       issues: [error instanceof Error ? error.message : 'Unknown error validating images']
     };
   }
-} 
+}
+
+/**
+ * Set a tool as active
+ */
+export async function setToolActive(toolGroupId: string, toolName: UiToolType, options: any = {}): Promise<void> {
+  try {
+    const tools = await import('@cornerstonejs/tools');
+    const toolGroup = tools.ToolGroupManager.getToolGroup(toolGroupId);
+    if (!toolGroup) {
+      throw new Error(`Tool group ${toolGroupId} not found`);
+    }
+
+    const cornerstoneToolName = mapUiToolToCornerstone3D(toolName);
+    toolGroup.setToolActive(cornerstoneToolName, {
+      bindings: [{ mouseButton: 1 }],
+      ...options
+    });
+  } catch (error) {
+    console.error(`Error setting tool ${toolName} as active:`, error);
+    throw error;
+  }
+}
+
+// Export types
+export type { Types }; 

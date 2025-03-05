@@ -1,40 +1,232 @@
-import * as cornerstone3D from '@cornerstonejs/core';
-import * as cornerstoneTools from '@cornerstonejs/tools';
-import * as dicomImageLoader from '@cornerstonejs/dicom-image-loader';
-import dicomParser from 'dicom-parser';
-import { RenderingEngine, cache, volumeLoader, imageLoader, Types, utilities, CONSTANTS } from '@cornerstonejs/core';
+// Add browser environment check
+const isBrowser = typeof window !== 'undefined';
+
+// Import types
+import type { Types } from '@cornerstonejs/core';
+
+// Define ImageLoaderConfig interface
+interface ImageLoaderConfig {
+  useWebWorkers: boolean;
+  decodeConfig: {
+    convertFloatPixelDataToInt: boolean;
+    use16BitDataType: boolean;
+  };
+  strict: boolean;
+}
 
 // Track rendering engines by ID
 interface RenderingEngineTracker {
-  [key: string]: RenderingEngine;
+  [key: string]: any;
 }
 
-// Extend the dicom image loader type
-interface ExtendedDicomImageLoader {
-  configure: (config: any) => void;
-  webWorkerManager: {
-    initialize: (config: any) => void;
+// Define viewport type
+interface Viewport {
+  id: string;
+  hasBeenDestroyed?: boolean;
+}
+
+// Add type definitions at the top of the file
+interface DicomImageLoaderModule {
+  init: (options?: {
+    maxWebWorkers?: number;
+    startWebWorkersOnDemand?: boolean;
+    taskConfiguration?: {
+      decodeTask?: {
+        initializeCodecsOnStartup?: boolean;
+        strict?: boolean;
+        useWebAssembly?: boolean;
+      };
+    };
+  }) => void;
+  wadouri?: {
+    loadImage: (imageId: string) => { promise: Promise<unknown> };
   };
-  external: {
-    cornerstone: any;
-    dicomParser: any;
-  };
-  wadouri: {
-    loadImage: Types.ImageLoaderFn;
-    loadFileRequest: Types.ImageLoaderFn;
+  wadors?: {
+    loadImage: (imageId: string) => { promise: Promise<unknown> };
   };
 }
 
-class CornerstoneService {
-  private static instance: CornerstoneService;
-  private isInitialized: boolean = false;
-  private initializationPromise: Promise<void> | null = null;
-  private renderingEngines: RenderingEngineTracker = {};
-  private initializationLock = false;
+interface CornerstoneModules {
+  core: any;
+  tools: any;
+  imageLoader: DicomImageLoaderModule;
+  parser: any;
+}
 
-  private constructor() {}
+// Track initialization state
+interface InitializationState {
+  isInitializing: boolean;
+  isInitialized: boolean;
+  error: Error | null;
+  initPromise: Promise<void> | null;
+}
 
-  static getInstance(): CornerstoneService {
+// Singleton state tracker
+const initState: InitializationState = {
+  isInitializing: false,
+  isInitialized: false,
+  error: null,
+  initPromise: null
+};
+
+// Base class for both real and mock services
+abstract class CornerstoneServiceBase {
+  protected initialized = false;
+  protected initializationPromise: Promise<void> | null = null;
+  protected renderingEngines: RenderingEngineTracker = {};
+  protected tools: any = {};
+  protected core: any = null;
+  protected imageLoader: any = null;
+
+  // Module references - these will be loaded once and cached
+  protected static modules: CornerstoneModules;
+
+  abstract initialize(): Promise<void>;
+  abstract getRenderingEngine(id: string, viewType: string): Promise<any>;
+  abstract releaseRenderingEngine(id: string, force?: boolean): Promise<void>;
+  abstract hasRenderingEngine(id: string): boolean;
+  abstract validateImages(imageIds: string[]): Promise<{ valid: boolean; validatedIds: string[]; issues: string[] }>;
+  abstract loadAndDisplayImageStack(
+    element: HTMLDivElement,
+    imageIds: string[],
+    renderingEngineId: string,
+    viewportId: string
+  ): Promise<{ viewport: Types.IStackViewport | null; renderingEngine: any }>;
+  abstract loadAndDisplayVolume(
+    element: HTMLDivElement,
+    imageIds: string[],
+    renderingEngineId: string,
+    viewportId: string
+  ): Promise<any>;
+  abstract is2DImage(imageId: string): Promise<boolean>;
+
+  // Add isInitialized method
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  // Add ensureInitialized method
+  async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+  }
+
+  protected async loadModules(): Promise<void> {
+    if (!isBrowser) return;
+
+    try {
+      // Load all modules in parallel but wait for all to complete
+      const [core, tools, parser] = await Promise.all([
+        import('@cornerstonejs/core'),
+        import('@cornerstonejs/tools'),
+        import('dicom-parser')
+      ]);
+
+      // Import DICOM image loader
+      const imageLoader = await import('@cornerstonejs/dicom-image-loader');
+
+      if (!imageLoader.default || typeof imageLoader.default.init !== 'function') {
+        throw new Error('Failed to load DICOM image loader module');
+      }
+
+      // Initialize the DICOM image loader
+      await imageLoader.default.init();
+
+      // Register the WADO-URI and WADO-RS image loaders
+      if (imageLoader.default.wadouri) {
+        core.imageLoader.registerImageLoader('wadouri', imageLoader.default.wadouri.loadImage as any);
+        // Register WADO-URI metadata provider
+        core.metaData.addProvider((imageLoader.default.wadouri as any).metaDataProvider);
+        console.log('WADOURI image loader and metadata provider registered');
+      }
+      
+      if (imageLoader.default.wadors) {
+        core.imageLoader.registerImageLoader('wadors', imageLoader.default.wadors.loadImage as any);
+        // Register WADO-RS metadata provider
+        core.metaData.addProvider((imageLoader.default.wadors as any).metaDataProvider);
+        console.log('WADORS image loader and metadata provider registered');
+      }
+
+      // Store modules
+      CornerstoneServiceBase.modules = {
+        core,
+        tools,
+        imageLoader: imageLoader.default,
+        parser: parser.default
+      };
+
+      // Store instance properties
+      this.core = core;
+      this.tools = tools;
+      this.imageLoader = imageLoader.default;
+
+      console.log('Cornerstone modules loaded:', {
+        core: !!core,
+        tools: !!tools,
+        imageLoader: !!imageLoader,
+        parser: !!parser
+      });
+    } catch (error) {
+      console.error('Failed to load Cornerstone modules:', error);
+      throw error;
+    }
+  }
+
+  protected async registerTools(): Promise<void> {
+    if (!isBrowser) return;
+
+    const { tools } = CornerstoneServiceBase.modules;
+    
+    this.tools = {
+      PanTool: tools.PanTool,
+      WindowLevelTool: tools.WindowLevelTool,
+      StackScrollTool: tools.StackScrollTool,
+      ZoomTool: tools.ZoomTool,
+      BrushTool: tools.BrushTool,
+      RectangleROITool: tools.RectangleROITool,
+      LengthTool: tools.LengthTool,
+      AngleTool: tools.AngleTool,
+      EllipticalROITool: tools.EllipticalROITool,
+      CircleROITool: tools.CircleROITool,
+      BidirectionalTool: tools.BidirectionalTool,
+      ProbeTool: tools.ProbeTool,
+    };
+
+    // Register each tool
+    Object.entries(this.tools).forEach(([name, Tool]) => {
+      if (Tool) {
+        tools.addTool(Tool);
+      }
+    });
+  }
+}
+
+// Create a mock service for server-side rendering
+class MockCornerstoneService extends CornerstoneServiceBase {
+  async initialize(): Promise<void> {}
+  async getRenderingEngine(): Promise<null> { return null; }
+  async releaseRenderingEngine(): Promise<void> {}
+  hasRenderingEngine(): boolean { return false; }
+  async validateImages() { return { valid: false, validatedIds: [], issues: ['Server-side rendering'] }; }
+  async loadAndDisplayImageStack() { return { viewport: null, renderingEngine: null }; }
+  async loadAndDisplayVolume() { return null; }
+  async is2DImage() { return true; }
+}
+
+// Real implementation
+class CornerstoneService extends CornerstoneServiceBase {
+  private static instance: CornerstoneService | null = null;
+
+  protected constructor() {
+    super();
+  }
+
+  static getInstance(): CornerstoneServiceBase {
+    if (!isBrowser) {
+      return new MockCornerstoneService();
+    }
+    
     if (!CornerstoneService.instance) {
       CornerstoneService.instance = new CornerstoneService();
     }
@@ -42,98 +234,69 @@ class CornerstoneService {
   }
 
   async initialize(): Promise<void> {
-    if (this.isInitialized) {
+    if (!isBrowser) {
+      throw new Error('CornerstoneService cannot be initialized in server environment');
+    }
+
+    // Return existing initialization if complete
+    if (this.initialized) {
       return;
     }
 
-    if (this.initializationPromise) {
-      return this.initializationPromise;
+    // Return existing promise if initialization is in progress
+    if (initState.initPromise) {
+      return initState.initPromise;
     }
 
-    if (this.initializationLock) {
-      return new Promise((resolve) => {
-        const checkInit = () => {
-          if (this.isInitialized) {
-            resolve();
-          } else {
-            setTimeout(checkInit, 100);
-          }
-        };
-        checkInit();
-      });
+    // Start new initialization
+    initState.isInitializing = true;
+    initState.initPromise = this._initialize();
+
+    try {
+      await initState.initPromise;
+      initState.isInitialized = true;
+      this.initialized = true;
+    } catch (error) {
+      initState.error = error as Error;
+      throw error;
+    } finally {
+      initState.isInitializing = false;
     }
 
-    this.initializationLock = true;
-
-    this.initializationPromise = (async () => {
-      try {
-        // Initialize Cornerstone Core first
-        await cornerstone3D.init();
-        console.log('Cornerstone Core initialized');
-
-        // Initialize Cornerstone Tools
-        await cornerstoneTools.init();
-        console.log('Cornerstone Tools initialized');
-
-        // Initialize DICOM Image Loader
-        const extendedLoader = dicomImageLoader as unknown as ExtendedDicomImageLoader;
-
-        // Configure DICOM image loader before initialization
-        extendedLoader.configure({
-          useWebWorkers: true,
-          decodeConfig: {
-            convertFloatPixelDataToInt: false,
-            use16BitDataType: true,
-          },
-        });
-
-        // Initialize web workers
-        await new Promise<void>((resolve) => {
-          extendedLoader.webWorkerManager.initialize({
-            maxWebWorkers: Math.min(navigator.hardwareConcurrency || 4, 4),
-            startWebWorkersOnDemand: true,
-            taskConfiguration: {
-              decodeTask: {
-                initializeCodecsOnStartup: true,
-                usePDFJS: false,
-                strict: false,
-              },
-            },
-            onInitialized: () => resolve(),
-          });
-        });
-
-        // Set external dependencies
-        extendedLoader.external.cornerstone = cornerstone3D;
-        extendedLoader.external.dicomParser = dicomParser;
-
-        // Register image loaders
-        imageLoader.registerImageLoader('wadouri', extendedLoader.wadouri.loadImage);
-        imageLoader.registerImageLoader('dicomfile', extendedLoader.wadouri.loadFileRequest);
-
-        // Initialize volume loader
-        await volumeLoader.createAndCacheVolume('placeholder', {
-          imageIds: [],
-        }).catch(() => {
-          // Ignore error from empty volume, we just want to initialize the volume loader
-        });
-
-        this.isInitialized = true;
-        console.log('CornerstoneService: Initialization complete');
-      } catch (error) {
-        console.error('CornerstoneService: Initialization failed:', error);
-        this.isInitialized = false;
-        throw error;
-      } finally {
-        this.initializationLock = false;
-        this.initializationPromise = null;
-      }
-    })();
-
-    return this.initializationPromise;
+    return initState.initPromise;
   }
 
-  async getRenderingEngine(id: string, viewType: string): Promise<RenderingEngine> {
+  private async _initialize(): Promise<void> {
+    try {
+      console.log('Initializing Cornerstone3D...');
+      
+      // Load all modules first
+      await this.loadModules();
+      
+      const { core, tools, imageLoader, parser } = CornerstoneServiceBase.modules;
+      
+      if (!core || !tools || !imageLoader || !parser) {
+        throw new Error('Failed to load required Cornerstone modules');
+      }
+
+      // Initialize core and tools first
+      await core.init();
+      await tools.init();
+      
+      // Register tools
+      await this.registerTools();
+
+      // Store the core imageLoader for later use
+      this.imageLoader = core.imageLoader;
+
+      console.log('Cornerstone3D initialization complete');
+    } catch (error) {
+      console.error('Error in Cornerstone3D initialization:', error);
+      throw error;
+    }
+  }
+
+  async getRenderingEngine(id: string, viewType: string): Promise<any> {
     await this.initialize();
     
     // Check if we already have this rendering engine
@@ -146,14 +309,14 @@ class CornerstoneService {
       console.log(`CornerstoneService: Creating new rendering engine ${id}`);
       // If the rendering engine with this ID already exists in Cornerstone,
       // we need to destroy it first to prevent conflicts
-      const existingEngine = cornerstone3D.getRenderingEngine(id);
+      const existingEngine = this.core.getRenderingEngine(id);
       if (existingEngine) {
         console.log(`CornerstoneService: Found existing Cornerstone engine with ID ${id}, destroying it first`);
         existingEngine.destroy();
       }
       
       // Create a new rendering engine
-      const renderingEngine = new RenderingEngine(id);
+      const renderingEngine = new this.core.RenderingEngine(id);
       this.renderingEngines[id] = renderingEngine;
       return renderingEngine;
     } catch (error) {
@@ -164,7 +327,7 @@ class CornerstoneService {
 
   async releaseRenderingEngine(id: string, force: boolean = false): Promise<void> {
     try {
-      const engine = this.renderingEngines[id] || cornerstone3D.getRenderingEngine(id);
+      const engine = this.renderingEngines[id] || this.core.getRenderingEngine(id);
       
       if (engine) {
         // Clean up tool groups associated with this engine
@@ -173,11 +336,11 @@ class CornerstoneService {
           const viewports = engine.getViewports();
           
           // For each viewport, check and destroy its tool group
-          viewports.forEach(viewport => {
+          viewports.forEach((viewport: Viewport) => {
             const viewportId = viewport.id;
-            const toolGroup = cornerstoneTools.ToolGroupManager.getToolGroup(viewportId);
+            const toolGroup = this.tools.ToolGroupManager.getToolGroup(viewportId);
             if (toolGroup) {
-              cornerstoneTools.ToolGroupManager.destroyToolGroup(viewportId);
+              this.tools.ToolGroupManager.destroyToolGroup(viewportId);
             }
           });
         } catch (error) {
@@ -229,11 +392,109 @@ class CornerstoneService {
         };
       }
 
-      // For now, we'll be permissive and consider all IDs valid after initialization
+      // Validate metadata for each image
+      const validationResults = await Promise.all(
+        imageIds.map(async (imageId) => {
+          try {
+            // Try to load the image metadata using the imageLoader
+            const imageLoadObject = await this.imageLoader.loadAndCacheImage(imageId);
+            
+            if (!imageLoadObject) {
+              return {
+                imageId,
+                valid: false,
+                issues: ['Failed to load image']
+              };
+            }
+
+            // First check if this is a regular 2D image (non-DICOM)
+            const is2DImage = imageId.startsWith('data:image/') || 
+                            imageId.endsWith('.png') || 
+                            imageId.endsWith('.jpg') || 
+                            imageId.endsWith('.jpeg');
+
+            if (is2DImage) {
+              // For 2D images, we only need basic metadata
+              const basicMetadata = {
+                rows: this.core.metaData.get('rows', imageId),
+                columns: this.core.metaData.get('columns', imageId),
+              };
+
+              // Log metadata for debugging
+              console.log(`Basic metadata for 2D image ${imageId}:`, basicMetadata);
+
+              // Check if basic fields are present
+              if (!basicMetadata.rows || !basicMetadata.columns) {
+                return {
+                  imageId,
+                  valid: false,
+                  issues: ['Missing basic image dimensions']
+                };
+              }
+
+              return {
+                imageId,
+                valid: true,
+                issues: []
+              };
+            }
+
+            // For DICOM images, check all required metadata fields
+            const metadata = {
+              samplesPerPixel: this.core.metaData.get('samplesPerPixel', imageId),
+              photometricInterpretation: this.core.metaData.get('photometricInterpretation', imageId),
+              rows: this.core.metaData.get('rows', imageId),
+              columns: this.core.metaData.get('columns', imageId),
+              bitsAllocated: this.core.metaData.get('bitsAllocated', imageId),
+              bitsStored: this.core.metaData.get('bitsStored', imageId),
+              pixelRepresentation: this.core.metaData.get('pixelRepresentation', imageId)
+            };
+
+            // Log metadata for debugging
+            console.log(`DICOM metadata for ${imageId}:`, metadata);
+
+            // Check if any required fields are missing
+            const missingFields = Object.entries(metadata)
+              .filter(([_, value]) => value === undefined)
+              .map(([key]) => key);
+
+            if (missingFields.length > 0) {
+              return {
+                imageId,
+                valid: false,
+                issues: [`Missing required metadata: ${missingFields.join(', ')}`]
+              };
+            }
+
+            return {
+              imageId,
+              valid: true,
+              issues: []
+            };
+          } catch (error) {
+            console.error(`Error validating image ${imageId}:`, error);
+            return {
+              imageId,
+              valid: false,
+              issues: [error instanceof Error ? error.message : 'Unknown error validating image']
+            };
+          }
+        })
+      );
+
+      // Aggregate results
+      const validIds = validationResults
+        .filter(result => result.valid)
+        .map(result => result.imageId);
+
+      const allIssues = validationResults
+        .filter(result => !result.valid)
+        .map(result => `${result.imageId}: ${result.issues.join(', ')}`);
+
       return {
-        valid: true,
-        validatedIds: imageIds,
-        issues: []
+        valid: validIds.length === imageIds.length,
+        validatedIds: validIds,
+        issues: allIssues
       };
     } catch (error: any) {
       console.error('Failed to validate images due to initialization error:', error);
@@ -254,6 +515,12 @@ class CornerstoneService {
     try {
       console.log(`CornerstoneService: Loading image stack for viewport ${viewportId}`, { imageIds });
       await this.initialize();
+
+      // Validate images first
+      const validation = await this.validateImages(imageIds);
+      if (!validation.valid) {
+        throw new Error(`Invalid images: ${validation.issues.join(', ')}`);
+      }
       
       // Get or create rendering engine
       const renderingEngine = await this.getRenderingEngine(renderingEngineId, 'STACK');
@@ -262,7 +529,7 @@ class CornerstoneService {
       const viewportInput: Types.PublicViewportInput = {
         viewportId,
         element,
-        type: cornerstone3D.Enums.ViewportType.STACK,
+        type: this.core.Enums.ViewportType.STACK,
       };
       
       // Create the viewport
@@ -305,14 +572,14 @@ class CornerstoneService {
       }
       
       // Pre-load the first image to ensure metadata is accessible for volume determination
-      await imageLoader.loadAndCacheImage(imageIds[0]);
+      await this.imageLoader.loadAndCacheImage(imageIds[0]);
       
       // Get metadata to validate we have what's needed for volume loading
-      const imageSpacing = cornerstone3D.metaData.get('imagePixelSpacing', imageIds[0]) || 
-                          cornerstone3D.metaData.get('pixelSpacing', imageIds[0]);
-      const imageOrientation = cornerstone3D.metaData.get('imageOrientationPatient', imageIds[0]);
-      const imagePosition = cornerstone3D.metaData.get('imagePositionPatient', imageIds[0]);
-      const sliceThickness = cornerstone3D.metaData.get('sliceThickness', imageIds[0]);
+      const imageSpacing = this.core.metaData.get('imagePixelSpacing', imageIds[0]) || 
+                          this.core.metaData.get('pixelSpacing', imageIds[0]);
+      const imageOrientation = this.core.metaData.get('imageOrientationPatient', imageIds[0]);
+      const imagePosition = this.core.metaData.get('imagePositionPatient', imageIds[0]);
+      const sliceThickness = this.core.metaData.get('sliceThickness', imageIds[0]);
       
       // Validate we have the required metadata
       const hasRequiredMetadata = !!imageSpacing && !!imageOrientation && !!imagePosition && !!sliceThickness;
@@ -333,10 +600,10 @@ class CornerstoneService {
       const viewportInput: Types.PublicViewportInput = {
         viewportId,
         element,
-        type: cornerstone3D.Enums.ViewportType.ORTHOGRAPHIC,
+        type: this.core.Enums.ViewportType.ORTHOGRAPHIC,
         defaultOptions: {
           background: [0, 0, 0],
-          orientation: cornerstone3D.Enums.OrientationAxis.AXIAL
+          orientation: this.core.Enums.OrientationAxis.AXIAL
         }
       };
       
@@ -351,7 +618,7 @@ class CornerstoneService {
         const volumeId = `volume-${Date.now()}`;
         
         // Create and cache the volume
-        const volume = await volumeLoader.createAndCacheVolume(volumeId, {
+        const volume = await this.core.volumeLoader.createAndCacheVolume(volumeId, {
           imageIds
         });
         
@@ -390,19 +657,19 @@ class CornerstoneService {
     
     try {
       // Load the image to ensure metadata is available
-      await imageLoader.loadAndCacheImage(imageId);
+      await this.imageLoader.loadAndCacheImage(imageId);
       
       // Get all available metadata for this image to diagnose issues
       const allMetadata = {
-        imagePixelSpacing: cornerstone3D.metaData.get('imagePixelSpacing', imageId),
-        pixelSpacing: cornerstone3D.metaData.get('pixelSpacing', imageId),
-        imageOrientation: cornerstone3D.metaData.get('imageOrientationPatient', imageId),
-        imagePosition: cornerstone3D.metaData.get('imagePositionPatient', imageId),
-        sliceThickness: cornerstone3D.metaData.get('sliceThickness', imageId),
-        sliceLocation: cornerstone3D.metaData.get('sliceLocation', imageId),
-        rows: cornerstone3D.metaData.get('rows', imageId),
-        columns: cornerstone3D.metaData.get('columns', imageId),
-        seriesInstanceUID: cornerstone3D.metaData.get('seriesInstanceUID', imageId),
+        imagePixelSpacing: this.core.metaData.get('imagePixelSpacing', imageId),
+        pixelSpacing: this.core.metaData.get('pixelSpacing', imageId),
+        imageOrientation: this.core.metaData.get('imageOrientationPatient', imageId),
+        imagePosition: this.core.metaData.get('imagePositionPatient', imageId),
+        sliceThickness: this.core.metaData.get('sliceThickness', imageId),
+        sliceLocation: this.core.metaData.get('sliceLocation', imageId),
+        rows: this.core.metaData.get('rows', imageId),
+        columns: this.core.metaData.get('columns', imageId),
+        seriesInstanceUID: this.core.metaData.get('seriesInstanceUID', imageId),
       };
 
       console.log(`DICOM metadata for ${imageId}:`, allMetadata);
@@ -433,4 +700,16 @@ class CornerstoneService {
 }
 
 // Export a singleton instance
-export const cornerstoneService = CornerstoneService.getInstance(); 
+export const cornerstoneService = CornerstoneService.getInstance();
+
+// Export initialization state checker
+export const getCornerstoneInitState = () => ({
+  isInitializing: initState.isInitializing,
+  isInitialized: initState.isInitialized,
+  error: initState.error
+});
+
+// Export types
+export type { Types } from "@cornerstonejs/core";
+export { Enums } from "@cornerstonejs/core";
+export { ToolGroupManager } from "@cornerstonejs/tools"; 

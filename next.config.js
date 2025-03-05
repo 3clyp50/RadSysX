@@ -16,6 +16,12 @@ const nextConfig = {
       "env": false,
     }
     
+    // Add alias for DICOM image loader - using the ESM path
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@cornerstonejs/dicom-image-loader': '@cornerstonejs/dicom-image-loader'
+    };
+
     return config
   },
 }
