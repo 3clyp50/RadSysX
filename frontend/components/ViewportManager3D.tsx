@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { DicomViewer3D } from './DicomViewer3D';
-import { Toggle } from '@/components/ui/Toggle';
+import { Toggle, type ToggleProps } from '@/components/ui/Toggle';
 import { Layers, Maximize, Minimize, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+// Import the UiToolType from the original source
 import { UiToolType } from '@/lib/utils/cornerstone3DInit';
 import { ImageToolController } from './ImageToolController';
 import { cornerstoneService } from '@/lib/services/cornerstoneService';
@@ -16,7 +18,7 @@ function ViewerFallback() {
     <div className="flex items-center justify-center h-full w-full bg-black/10 text-white p-4">
       <div className="flex flex-col items-center text-center max-w-md">
         <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
-        <h3 className="text-xl font-semibold mb-2">Viewport Error</h3>
+        <div className="text-xl font-semibold mb-2">Viewport Error</div>
         <p>There was a problem displaying this image. It may not be compatible with 3D viewing.</p>
       </div>
     </div>
@@ -28,14 +30,14 @@ function TwoDimensionalImageMessage() {
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white p-4 z-10">
       <div className="bg-gray-800 p-4 rounded-lg max-w-md text-center">
-        <h3 className="font-medium mb-2">2D Image Notice</h3>
+        <div className="font-medium mb-2">2D Image Notice</div>
         <p className="text-sm">This is a 2D image which can only be viewed in axial plane.</p>
       </div>
     </div>
   );
 }
 
-// Match tools to the props expected by DicomViewer3D
+// Changed from the imported UiToolType to our local one
 type Tool = UiToolType;
 
 interface ViewportManager3DProps {
@@ -112,7 +114,20 @@ export function ViewportManager3D({
   
   // Handle image load completion
   const handleImageLoaded = (success: boolean, is2DImage: boolean = false) => {
-    console.log('ViewportManager3D: Image load result:', { success, is2DImage });
+    console.log('ViewportManager3D: Image load result:', { success, is2DImage, imageIdsCount: allImageIds.length });
+    
+    // Don't show errors if there are no images or during initial load
+    if (allImageIds.length === 0) {
+      // Don't report an error if no images are loaded yet
+      setHasError(false);
+      setIs2D(is2DImage);
+      
+      if (onImageLoaded) {
+        onImageLoaded(true, is2DImage);
+      }
+      return;
+    }
+    
     setHasError(!success);
     setIs2D(is2DImage);
     
@@ -125,6 +140,19 @@ export function ViewportManager3D({
       onImageLoaded(success, is2DImage);
     }
   };
+
+  // Effect to handle single-slice images appropriately
+  useEffect(() => {
+    if (is2D) {
+      // For 2D images (single slice), only show in AXIAL view
+      setActiveViewport('AXIAL');
+      
+      // Also restrict expandedViewport to AXIAL only
+      if (expandedViewport && expandedViewport !== 'AXIAL') {
+        setExpandedViewport('AXIAL');
+      }
+    }
+  }, [is2D, expandedViewport]);
 
   // Toggle 3D viewer
   const toggle3DViewer = () => {
@@ -164,6 +192,7 @@ export function ViewportManager3D({
     return 'col-span-1 row-span-1';
   };
   
+  // Handle tool change internally then call external handler if provided
   const handleToolChangeInternal = (tool: UiToolType) => {
     setCurrentTool(tool);
     
@@ -202,15 +231,17 @@ export function ViewportManager3D({
               !showTools && "col-span-2 row-span-2" // Full grid when tools are hidden
             )} onClick={() => handleViewportActivate('AXIAL')}>
               <div className="relative w-full h-full">
-                <DicomViewer3D 
+                <DicomViewer3D
+                  imageId={imageId}
                   imageIds={allImageIds}
                   viewportType="AXIAL"
                   isActive={activeViewport === 'AXIAL'}
-                  isExpanded={expandedViewport === 'AXIAL' || isExpanded}
+                  isExpanded={expandedViewport === 'AXIAL'}
                   onActivate={() => handleViewportActivate('AXIAL')}
-                  onToggleExpand={onToggleExpand || (() => handleToggleExpand('AXIAL'))}
+                  onToggleExpand={() => handleToggleExpand('AXIAL')}
                   onImageLoaded={(success, is2d) => handleImageLoaded(success, is2d)}
                   activeTool={currentTool}
+                  suppressErrors={is2D}
                   hideExpandButton={false}
                 />
               </div>
@@ -223,6 +254,7 @@ export function ViewportManager3D({
                 <div className={getViewportClasses('SAGITTAL')} onClick={() => handleViewportActivate('SAGITTAL')}>
                   <div className="relative w-full h-full">
                     <DicomViewer3D
+                      imageId={imageId}
                       imageIds={allImageIds}
                       viewportType="SAGITTAL"
                       isActive={activeViewport === 'SAGITTAL'}
@@ -242,6 +274,7 @@ export function ViewportManager3D({
                 <div className={getViewportClasses('CORONAL')} onClick={() => handleViewportActivate('CORONAL')}>
                   <div className="relative w-full h-full">
                     <DicomViewer3D
+                      imageId={imageId}
                       imageIds={allImageIds}
                       viewportType="CORONAL"
                       isActive={activeViewport === 'CORONAL'}
@@ -261,6 +294,7 @@ export function ViewportManager3D({
                 <div className={getViewportClasses('3D')} onClick={() => handleViewportActivate('3D')}>
                   <div className="relative w-full h-full">
                     <DicomViewer3D
+                      imageId={imageId}
                       imageIds={allImageIds}
                       viewportType="3D"
                       isActive={activeViewport === '3D'}
@@ -286,6 +320,7 @@ export function ViewportManager3D({
             <div className="viewport-panel expanded">
               <div className="relative w-full h-full">
                 <DicomViewer3D 
+                  imageId={imageId}
                   imageIds={allImageIds}
                   viewportType={expandedViewport}
                   isActive={true}
@@ -312,12 +347,11 @@ export function ViewportManager3D({
       {showTools && (
         <div className="tool-sidebar flex flex-col gap-4">
           <div className="viewport-controls bg-card border rounded-md p-4">
-            <h3 className="text-sm font-semibold mb-4">Viewport Controls</h3>
-            <Button
-              variant="outline"
-              size="sm"
+            <div className="text-sm font-semibold mb-4">Viewport Controls</div>
+            <button 
               className={cn(
-                "mb-2 w-full justify-start",
+                "px-4 py-2 rounded-md mb-2 w-full text-sm font-medium flex items-center justify-start",
+                "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
                 use3DViewer && !is2D ? "bg-primary/20" : ""
               )}
               onClick={toggle3DViewer}
@@ -325,7 +359,7 @@ export function ViewportManager3D({
             >
               <Layers className="mr-2 h-4 w-4" />
               3D Multi-planar Reconstruction
-            </Button>
+            </button>
           </div>
           
           {/* New Tool Controller */}

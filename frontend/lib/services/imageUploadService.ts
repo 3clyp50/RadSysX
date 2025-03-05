@@ -1,18 +1,17 @@
 import { generateSeriesId } from '../utils/idGenerator';
 import { RenderingEngine, imageLoader, metaData } from '@cornerstonejs/core';
 import dicomParser from 'dicom-parser';
-import { initializeDicomImageLoader, createImageIdsFromFiles } from '@/lib/utils/cornerstone3DInit';
+import { cornerstoneService } from '@/lib/services/cornerstoneService';
 
 // Add browser environment check at the top of the file
 const isBrowser = typeof window !== 'undefined';
 
-// Initialize DICOM image loader only in browser environment
+// Initialize Cornerstone service only in browser environment
 if (isBrowser) {
-  // Call the initialization function without any arguments since the configuration
-  // is handled inside the function itself
-  initializeDicomImageLoader()
+  // Initialize using the cornerstone service
+  cornerstoneService.initialize()
     .catch(error => {
-      console.error('Failed to initialize DICOM image loader:', error);
+      console.error('Failed to initialize Cornerstone service:', error);
     });
 }
 
@@ -87,7 +86,7 @@ export async function processImageSeries(files: File[]): Promise<ImageSeries> {
     // We'll use our improved image ID creation
     const allImageIds = await createImageIdsFromFiles([dicomdirFile, ...files.filter(f => f !== dicomdirFile)]);
     
-    const processedImages: ProcessedImage[] = allImageIds.map((imageId, index) => {
+    const processedImages: ProcessedImage[] = allImageIds.map((imageId: string, index: number) => {
       const file = index === 0 ? dicomdirFile : files.filter(f => f !== dicomdirFile)[index - 1];
       return {
         file,
@@ -456,4 +455,71 @@ async function analyzeImage(file: File): Promise<ImageAnalysis | null> {
     console.error('Error analyzing image:', error);
     return null;
   }
+}
+
+// Helper function to create image IDs from files
+export async function createImageIdsFromFiles(files: File[]): Promise<string[]> {
+  if (!files || files.length === 0) {
+    return [];
+  }
+
+  // Check for DICOMDIR file
+  const dicomdirFile = files.find(file => 
+    file.name.toUpperCase() === 'DICOMDIR' || 
+    file.name.toUpperCase().endsWith('.DICOMDIR')
+  );
+
+  if (dicomdirFile) {
+    // For DICOMDIR, return both the DICOMDIR file and all other DICOM files
+    const dicomdirUrl = URL.createObjectURL(dicomdirFile);
+    
+    // Process all other files as they are likely referenced by the DICOMDIR
+    const otherFiles = files.filter(file => file !== dicomdirFile);
+    
+    return [
+      `wadouri:${dicomdirUrl}`,
+      ...otherFiles.map(file => {
+        const objectUrl = URL.createObjectURL(file);
+        return `wadouri:${objectUrl}`;
+      })
+    ];
+  }
+
+  // Handle multiple DICOM files (without DICOMDIR)
+  const dicomFiles = files.filter(file => 
+    file.name.toLowerCase().endsWith('.dcm') || 
+    file.name.toLowerCase().includes('.dcm') ||
+    file.type === 'application/dicom'
+  );
+
+  if (dicomFiles.length > 0) {
+    // Sort files for proper sequence if they are numbered
+    dicomFiles.sort((a, b) => a.name.localeCompare(b.name));
+    
+    return dicomFiles.map(file => {
+      const objectUrl = URL.createObjectURL(file);
+      return `wadouri:${objectUrl}`;
+    });
+  }
+
+  // Handle standard image files
+  const imageFiles = files.filter(file => 
+    file.type.startsWith('image/') ||
+    file.name.toLowerCase().endsWith('.png') || 
+    file.name.toLowerCase().endsWith('.jpg') || 
+    file.name.toLowerCase().endsWith('.jpeg')
+  );
+
+  if (imageFiles.length > 0) {
+    return imageFiles.map(file => {
+      const objectUrl = URL.createObjectURL(file);
+      return `wadouri:${objectUrl}`;
+    });
+  }
+
+  // Default: treat all files as potential DICOM files
+  return files.map(file => {
+    const objectUrl = URL.createObjectURL(file);
+    return `wadouri:${objectUrl}`;
+  });
 }

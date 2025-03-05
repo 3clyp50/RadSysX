@@ -1,4 +1,4 @@
-import { volumeLoader, Enums, RenderingEngine, Types, metaData } from "@cornerstonejs/core";
+import { volumeLoader, Enums, RenderingEngine, Types, metaData, imageLoader } from "@cornerstonejs/core";
 import { cornerstoneService } from "./index";
 
 export interface VolumeLoadOptions {
@@ -36,17 +36,29 @@ export class VolumeLoaderService {
     try {
       console.log(`Loading volume ${volumeId} with ${imageIds.length} images`);
       
-      // Create and cache the volume
-      const volume = await volumeLoader.createAndCacheVolume(volumeId, {
-        imageIds,
-        ...options
-      });
+      // Check if we have enough images and proper metadata first
+      const canLoadVolume = await this.canLoadAsVolume(imageIds);
+      if (!canLoadVolume) {
+        console.error('Cannot load these images as a volume - insufficient metadata or too few slices');
+        throw new Error('Cannot create volume: insufficient metadata or too few slices');
+      }
+      
+      try {
+        // Create and cache the volume
+        const volume = await volumeLoader.createAndCacheVolume(volumeId, {
+          imageIds,
+          ...options
+        });
 
-      // Load the volume
-      await volume.load();
+        // Load the volume
+        await volume.load();
 
-      console.log(`Volume ${volumeId} loaded successfully`);
-      return { volumeId, volume };
+        console.log(`Volume ${volumeId} loaded successfully`);
+        return { volumeId, volume };
+      } catch (volumeError) {
+        console.error('Error during volume creation/loading:', volumeError);
+        throw volumeError;
+      }
     } catch (error) {
       console.error(`Error loading volume ${volumeId}:`, error);
       throw error;
@@ -107,24 +119,64 @@ export class VolumeLoaderService {
 
   async canLoadAsVolume(imageIds: string[]): Promise<boolean> {
     if (!imageIds || imageIds.length < 3) {
+      console.log('Not enough images for volume loading:', imageIds?.length || 0);
       return false;
     }
 
     try {
-      // Try to load metadata for the first image
-      const imageSpacing = metaData.get('imagePixelSpacing', imageIds[0]) || 
-                          metaData.get('pixelSpacing', imageIds[0]);
-      const imageOrientation = metaData.get('imageOrientationPatient', imageIds[0]);
-      const imagePosition = metaData.get('imagePositionPatient', imageIds[0]);
+      await cornerstoneService.initialize();
       
-      // Check if we have necessary 3D metadata
-      if (!imageSpacing || !imageOrientation || !imagePosition) {
+      // Load the first image to ensure metadata is available
+      try {
+        await imageLoader.loadAndCacheImage(imageIds[0]);
+      } catch (err) {
+        console.error('Failed to load first image for volume check:', err);
         return false;
       }
-
-      return true;
+      
+      // Get all available metadata for the first image
+      const metadata = {
+        imagePixelSpacing: metaData.get('imagePixelSpacing', imageIds[0]),
+        pixelSpacing: metaData.get('pixelSpacing', imageIds[0]),
+        imageOrientation: metaData.get('imageOrientationPatient', imageIds[0]),
+        imagePosition: metaData.get('imagePositionPatient', imageIds[0]),
+        sliceThickness: metaData.get('sliceThickness', imageIds[0]),
+        sliceLocation: metaData.get('sliceLocation', imageIds[0]),
+        rows: metaData.get('rows', imageIds[0]),
+        columns: metaData.get('columns', imageIds[0]),
+        seriesInstanceUID: metaData.get('seriesInstanceUID', imageIds[0]),
+      };
+      
+      console.log('Volume capability check metadata:', metadata);
+      
+      // Basic metadata check
+      const imageSpacing = metadata.imagePixelSpacing || metadata.pixelSpacing;
+      const imageOrientation = metadata.imageOrientation;
+      const imagePosition = metadata.imagePosition;
+      const sliceThickness = metadata.sliceThickness;
+      
+      // Log the values to help with debugging
+      const metadataStatus = {
+        hasSpacing: !!imageSpacing, 
+        hasOrientation: !!imageOrientation, 
+        hasPosition: !!imagePosition,
+        hasThickness: !!sliceThickness,
+        imageCount: imageIds.length
+      };
+      
+      console.log('Volume capability check results:', metadataStatus);
+      
+      // Check if the minimum requirements for a volume are met
+      const canLoadVolume = !!imageSpacing && 
+                          !!imageOrientation && 
+                          !!imagePosition &&
+                          !!sliceThickness &&
+                          imageIds.length >= 3;
+                          
+      console.log('Can load as volume:', canLoadVolume);
+      return canLoadVolume;
     } catch (error) {
-      console.warn('Error checking volume loading capability:', error);
+      console.error('Error checking volume loading capability:', error);
       return false;
     }
   }

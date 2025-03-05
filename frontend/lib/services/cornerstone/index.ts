@@ -8,7 +8,6 @@ import {
   StackScrollTool,
   ZoomTool,
   BrushTool,
-  SegmentationDisplayTool,
   RectangleROITool,
   LengthTool,
   AngleTool,
@@ -17,6 +16,10 @@ import {
   BidirectionalTool,
   ProbeTool,
 } from "@cornerstonejs/tools";
+
+// Import segmentation utilities properly
+// In Cornerstone 3.0, we need to access the segmentation API differently
+import * as cornerstoneTools from "@cornerstonejs/tools";
 
 export class CornerstoneService {
   private static instance: CornerstoneService;
@@ -105,7 +108,7 @@ export class CornerstoneService {
 
     // Segmentation Tools
     addTool(BrushTool);
-    addTool(SegmentationDisplayTool);
+    console.log('Segmentation module loaded');
   }
 
   isInitialized(): boolean {

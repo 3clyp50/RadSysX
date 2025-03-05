@@ -3,64 +3,40 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-interface ToggleProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ToggleProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
   size?: "sm" | "md" | "lg";
+  disabled?: boolean;
 }
 
-export function Toggle({
-  className,
-  checked = false,
-  onCheckedChange,
-  size = "md",
-  ...props
-}: ToggleProps) {
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    onCheckedChange?.(!checked);
-    props.onClick?.(e);
-  };
-
-  const sizeClasses = {
-    sm: "h-5 w-9",
-    md: "h-6 w-11",
-    lg: "h-7 w-14",
-  };
-
-  const thumbSizeClasses = {
-    sm: "h-3 w-3",
-    md: "h-4 w-4",
-    lg: "h-5 w-5",
-  };
-
-  const thumbTranslateClasses = {
-    sm: "translate-x-4",
-    md: "translate-x-5",
-    lg: "translate-x-7",
-  };
-
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className={cn(
-        "relative inline-flex flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-        checked ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-700",
-        sizeClasses[size],
-        props.disabled ? "opacity-50 cursor-not-allowed" : "",
-        className
-      )}
-      onClick={handleClick}
-      {...props}
-    >
-      <span
+export const Toggle = React.forwardRef<HTMLButtonElement, ToggleProps>(
+  ({ className, checked, onCheckedChange, size = "md", disabled, ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
         className={cn(
-          "pointer-events-none inline-block rounded-full bg-white shadow-lg transform ring-0 transition duration-200 ease-in-out",
-          thumbSizeClasses[size],
-          checked ? thumbTranslateClasses[size] : "translate-x-0"
+          "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors",
+          "hover:bg-muted hover:text-muted-foreground",
+          "data-[state=on]:bg-accent data-[state=on]:text-accent-foreground",
+          "disabled:pointer-events-none disabled:opacity-50",
+          size === "sm" && "h-7 px-2",
+          size === "md" && "h-9 px-3",
+          size === "lg" && "h-11 px-5",
+          className
         )}
-      />
-    </button>
-  );
-} 
+        onClick={() => onCheckedChange?.(!checked)}
+        data-state={checked ? "on" : "off"}
+        {...props}
+      >
+        {props.children}
+      </button>
+    );
+  }
+);
+
+Toggle.displayName = "Toggle"; 

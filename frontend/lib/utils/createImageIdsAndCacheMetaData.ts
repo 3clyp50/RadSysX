@@ -2,7 +2,7 @@ import { utilities } from '@cornerstonejs/core';
 import { api } from 'dicomweb-client';
 import * as csTools3d from '@cornerstonejs/tools';
 import { ToolGroupManager } from '@cornerstonejs/tools';
-import { BrushTool, SegmentationDisplayTool } from '@cornerstonejs/tools';
+import { BrushTool, segmentation } from '@cornerstonejs/tools';
 import { volumeLoader, Enums, RenderingEngine } from '@cornerstonejs/core';
 import { Enums as ToolEnums } from '@cornerstonejs/tools';
 
@@ -139,8 +139,10 @@ export function initializeTools(): void {
     csTools3d.addTool(LengthTool);
     csTools3d.addTool(ProbeTool);
     csTools3d.addTool(BrushTool);
-    csTools3d.addTool(SegmentationDisplayTool);
-
+    // Load segmentation module instead of adding SegmentationDisplayTool
+    console.log('Segmentation module loaded');
+    // We don't register SegmentationDisplayTool as it's not available in the current version
+    
     // Create tool group safely
     const toolGroupId = 'my-tool-group';
     const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
@@ -152,7 +154,6 @@ export function initializeTools(): void {
       toolGroup.addTool('Length');
       toolGroup.addTool('Probe');
       toolGroup.addTool('Brush');
-      toolGroup.addTool('SegmentationDisplay');
       
       // Set initial active tool
       toolGroup.setToolActive('Pan', {

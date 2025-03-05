@@ -1,8 +1,9 @@
 "use client";
 
+import * as React from 'react';
 import { useState, lazy, Suspense, useEffect } from 'react';
 import { LoadedImage } from '@/lib/types';
-import { Toggle } from './ui/Toggle';
+import { Toggle, type ToggleProps } from '@/components/ui/Toggle';
 import { Box, ImageIcon, Loader2, AlertTriangle, Info } from 'lucide-react';
 import { DicomViewer3D } from './DicomViewer3D';
 import { ViewportManager3D } from './ViewportManager3D';
@@ -131,6 +132,13 @@ export function ViewportManager({
 
   const handleImageLoaded = (success: boolean) => {
     setImageLoadSuccess(success);
+    
+    // Don't show errors if no images are loaded yet
+    if (!loadedImages || loadedImages.length === 0) {
+      setLoadError(null);
+      return;
+    }
+    
     if (!success) {
       setLoadError('Failed to load image');
     } else {

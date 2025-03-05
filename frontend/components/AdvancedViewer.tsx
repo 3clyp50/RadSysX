@@ -9,14 +9,17 @@ import {
   volumeLoader,
   setVolumesForViewports,
   utilities,
+  init as csRenderInit,
+  imageLoader,
+  metaData,
+  cache
 } from "@cornerstonejs/core"
-import { init as csRenderInit } from "@cornerstonejs/core"
+
 import {
   init as csToolsInit,
   addTool,
   BrushTool,
   ToolGroupManager,
-  segmentation,
   Enums as csToolsEnums,
   PanTool,
   ZoomTool,
@@ -28,92 +31,27 @@ import {
   ProbeTool,
   StackScrollTool,
   MagnifyTool,
-  SegmentationDisplayTool,
 } from "@cornerstonejs/tools"
-import * as cornerstone from 'cornerstone-core';
-import * as dicomParser from 'dicom-parser';
+
+import * as dicomImageLoader from '@cornerstonejs/dicom-image-loader';
+import dicomParser from 'dicom-parser';
 import { mapUiToolToCornerstone3D, type UiToolType } from "@/lib/utils/cornerstone3DInit"
-import cornerstoneWADOImageLoader from 'cornerstone-wado-image-loader';
+import { cornerstoneService } from '@/lib/services/cornerstoneService';
 
-// Declaration of the dicomImageLoaderInit function type
-let dicomImageLoaderInit: any = () => {
-  console.warn('DICOM Image Loader not initialized');
-};
+// Import segmentation API from correct location
+import * as cornerstoneTools from "@cornerstonejs/tools";
+// We'll access segmentation via cornerstoneTools.segmentation
 
-// Dynamic import of cornerstone-wado-image-loader with proper error handling
-try {
-  import('cornerstone-wado-image-loader').then((csWadoModule: any) => {
-    // Store the initialization function for later use
-    dicomImageLoaderInit = ({ maxWebWorkers = 1 } = {}) => {
-      const cornerstoneWADOImageLoader = csWadoModule.default;
-      
-      // Initialize the WADO image loader
-      cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-      cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-
-      // Configure for optimal performance in a browser environment
-      cornerstoneWADOImageLoader.webWorkerManager.initialize({
-        maxWebWorkers,
-        startWebWorkersOnDemand: true,
-        taskConfiguration: {
-          decodeTask: {
-            initializeCodecsOnStartup: true,
-            strict: false,
-          },
-        },
-      });
-
-      // Setup DICOMDIR support - with proper error handling
-      try {
-        // Only try to use dicomdirLoader if it exists
-        if (cornerstoneWADOImageLoader.wadouri && 
-            cornerstoneWADOImageLoader.wadouri.dicomdirLoader) {
-          const dicomdirLoader = cornerstoneWADOImageLoader.wadouri.dicomdirLoader;
-          
-          // Register dicomdir: protocol if the loader exists
-          if (typeof cornerstoneWADOImageLoader.wadouri.register === 'function') {
-            cornerstoneWADOImageLoader.wadouri.register('dicomdir');
-            console.log('Successfully registered dicomdir protocol handler');
-          }
-        } else {
-          console.warn('DICOMDIR loader not available in this version of cornerstone-wado-image-loader');
-        }
-
-        // Always set up the file manager even if dicomdirLoader isn't available
-        if (cornerstoneWADOImageLoader.wadouri && cornerstoneWADOImageLoader.wadouri.fileManager) {
-          // Handle file directories for multi-file DICOM series
-          cornerstoneWADOImageLoader.wadouri.fileManager.add = function(file: File) {
-            const fileUrl = URL.createObjectURL(file);
-            const filename = file.name.toLowerCase();
-            
-            if (filename === 'dicomdir' || filename.endsWith('.dicomdir')) {
-              return `wadouri:${fileUrl}`;  // Fall back to wadouri if dicomdir isn't supported
-            }
-            return `wadouri:${fileUrl}`;
-          };
-          console.log('Successfully configured file manager for multi-file handling');
-        }
-      } catch (error) {
-        console.warn('Error setting up DICOMDIR support, but continuing with basic DICOM support:', error);
-        // Continue initialization as we can still handle basic DICOM files
-      }
-    };
-  }).catch(error => {
-    console.error('Failed to load cornerstone-wado-image-loader:', error);
-  });
-} catch (error) {
-  console.error('Error importing cornerstone-wado-image-loader:', error);
-}
-
-// Initialize cornerstoneWADOImageLoader explicitly
-cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-console.log('Initializing cornerstone-wado-image-loader settings');
-cornerstoneWADOImageLoader.configure({
-  beforeSend: (xhr: XMLHttpRequest) => {
-    // Add custom headers here if needed
-    console.log('WADO Image Loader sending request');
+// Initialize Cornerstone and tools
+const initializeCornerstoneAndTools = async () => {
+  try {
+    await cornerstoneService.initialize();
+    console.log('Cornerstone and tools initialized successfully');
+  } catch (error) {
+    console.error('Error initializing Cornerstone:', error);
+    throw error;
   }
-});
+};
 
 const { ViewportType } = Enums
 const { MouseBindings } = csToolsEnums
@@ -188,6 +126,9 @@ export function AdvancedViewer({
   const segmentationId = "Segmentation_1"
   const volumeId = "Volume_1"
 
+  // Add renderingEngineId constant at the top with other constants
+  const renderingEngineId = "myRenderingEngine";
+
   useEffect(() => {
     // Create a cleanup function for when component unmounts
     return () => {
@@ -203,7 +144,6 @@ export function AdvancedViewer({
           });
           
           // Clean up logic here - this would include destroying the rendering engine, etc.
-          const renderingEngineId = "myRenderingEngine";
           const renderingEngine = window.cornerstone3D?.getRenderingEngine(renderingEngineId);
           if (renderingEngine) {
             renderingEngine.destroy();
@@ -292,7 +232,7 @@ export function AdvancedViewer({
     const tools = [
       "Pan", "Zoom", "WindowLevel", "Length", "RectangleROI", 
       "Angle", "Probe", "SphereBrush", "EllipticalROI", "StackScroll", 
-      "Magnify", "SegmentationDisplay"
+      "Magnify"
     ];
     
     tools.forEach(toolName => {
@@ -309,341 +249,157 @@ export function AdvancedViewer({
     const setup = async () => {
       if (running.current) {
         console.log('Setup already ran, skipping');
-        return
-      }
-      
-      if (!studyInstanceUID && !seriesInstanceUID && !localFiles?.length) {
-        console.log('No study or series UID provided, and no local files');
         return;
       }
-      
+
       // Check if all elements are available
       if (!elementRef1.current || !elementRef2.current || !elementRef3.current) {
         console.error('One or more viewport elements are not available');
         setError('Viewport elements not ready');
         return;
       }
-      
+
       try {
         setIsLoading(true);
-        running.current = true
+        setError(null);
+        running.current = true;
 
-        console.log('Initializing Cornerstone3D with current activeTool:', activeTool);
-        await csRenderInit()
-        await csToolsInit()
+        // Initialize Cornerstone and tools
+        await initializeCornerstoneAndTools();
+
+        // Initialize the rendering engine
+        const renderingEngine = new RenderingEngine(renderingEngineId);
+
+        // Create the viewports
+        const viewportInput1: Types.PublicViewportInput = {
+          viewportId: viewportId1,
+          element: elementRef1.current,
+          type: ViewportType.ORTHOGRAPHIC,
+          defaultOptions: {
+            orientation: Enums.OrientationAxis.AXIAL,
+          },
+        };
+
+        const viewportInput2: Types.PublicViewportInput = {
+          viewportId: viewportId2,
+          element: elementRef2.current,
+          type: ViewportType.ORTHOGRAPHIC,
+          defaultOptions: {
+            orientation: Enums.OrientationAxis.SAGITTAL,
+          },
+        };
+
+        const viewportInput3: Types.PublicViewportInput = {
+          viewportId: viewportId3,
+          element: elementRef3.current,
+          type: ViewportType.ORTHOGRAPHIC,
+          defaultOptions: {
+            orientation: Enums.OrientationAxis.CORONAL,
+          },
+        };
+
+        renderingEngine.enableElement(viewportInput1);
+        renderingEngine.enableElement(viewportInput2);
+        renderingEngine.enableElement(viewportInput3);
+
+        // Get the volume data
+        let imageIds: string[] = [];
         
-        try {
-          console.log('Initializing DICOM Image Loader');
-          // Use our dynamically imported loader with error handling
-          if (typeof dicomImageLoaderInit === 'function') {
-            dicomImageLoaderInit({ maxWebWorkers: 1 });
-          } else {
-            console.warn('DICOM Image Loader initialization function not available');
-            if (onError) onError();
-            throw new Error('DICOM Image Loader not available');
-          }
-        } catch (error) {
-          console.error('Failed to initialize DICOM Image Loader:', error);
-          // We'll call onError here because this is a critical failure
-          if (onError) onError();
-          throw error; // Re-throw to be caught by the outer handler
-        }
-        
-        // Get Cornerstone imageIds for the source data
-        let imageIds;
-        
-        if (studyInstanceUID && seriesInstanceUID && wadoRsRoot) {
-          // Load from WADO-RS server
+        if (localFiles && localFiles.length > 0) {
+          imageIds = await handleLocalFiles(localFiles);
+        } else if (studyInstanceUID && seriesInstanceUID && wadoRsRoot) {
           imageIds = await createImageIdsAndCacheMetaData({
             StudyInstanceUID: studyInstanceUID,
             SeriesInstanceUID: seriesInstanceUID,
-            wadoRsRoot: wadoRsRoot,
-          });
-        } else if (localFiles?.length) {
-          // Handle local files
-          imageIds = await handleLocalFiles(localFiles);
-        } else {
-          // Use demo data as fallback
-          imageIds = await createImageIdsAndCacheMetaData({
-            StudyInstanceUID: "1.3.6.1.4.1.14519.5.2.1.7009.2403.334240657131972136850343327463",
-            SeriesInstanceUID: "1.3.6.1.4.1.14519.5.2.1.7009.2403.226151125820845824875394858561",
-            wadoRsRoot: "https://d14fa38qiwhyfd.cloudfront.net/dicomweb",
+            wadoRsRoot,
           });
         }
 
-        // Check if imageIds are for non-DICOM images (PNG/JPG)
-        const isPngOrJpgImage = imageIds.length > 0 && imageIds[0].startsWith('pngimage:');
-        
-        if (isPngOrJpgImage) {
-          console.log('PNG/JPG images detected. These are not compatible with volume rendering.');
-          setError('Standard images like PNG/JPG are not compatible with 3D volume rendering. Please use DICOM images for 3D viewing.');
-          setIsLoading(false);
-          if (onError) onError();
-          return;
+        if (imageIds.length === 0) {
+          throw new Error('No images available to load');
         }
-        
+
+        // Create and cache the volume
         const volume = await volumeLoader.createAndCacheVolume(volumeId, {
           imageIds,
         });
 
-        // Instantiate a rendering engine
-        console.log('Creating rendering engine');
-        const renderingEngineId = "myRenderingEngine";
-        const renderingEngine = new RenderingEngine(renderingEngineId);
+        // Set the volume to load
+        volume.load();
 
-        // We've already verified that element refs are not null above
-        const viewportInputArray = [
-          {
-            viewportId: viewportId1,
-            type: ViewportType.ORTHOGRAPHIC,
-            element: elementRef1.current!,
-            defaultOptions: {
-              orientation: Enums.OrientationAxis.AXIAL,
-            },
-          },
-          {
-            viewportId: viewportId2,
-            type: ViewportType.ORTHOGRAPHIC,
-            element: elementRef2.current!,
-            defaultOptions: {
-              orientation: Enums.OrientationAxis.SAGITTAL,
-            },
-          },
-          {
-            viewportId: viewportId3,
-            type: ViewportType.VOLUME_3D,
-            element: elementRef3.current!,
-            defaultOptions: {
-              background: CONSTANTS.BACKGROUND_COLORS.slicer3D as [number, number, number],
-            },
-          },
-        ];
-
-        console.log('Setting up viewports');
-        renderingEngine.setViewports(viewportInputArray)
-
-        // Define tool group variables at a higher scope
-        let toolGroup1, toolGroup2;
-        
-        console.log('Adding tools to Cornerstone3D');
-        // Add tools to Cornerstone3D - check if tool has already been added
-        try {
-          // Check if tool is already registered to avoid the "already added globally" error
-          const toolAlreadyAdded = ToolGroupManager.getToolGroup(toolGroupId) !== undefined;
-          
-          if (!toolAlreadyAdded) {
-            // Register all required tools for our UI
-            addTool(PanTool);
-            addTool(ZoomTool);
-            addTool(WindowLevelTool);
-            addTool(LengthTool);
-            addTool(RectangleROITool);
-            addTool(EllipticalROITool);
-            addTool(AngleTool);
-            addTool(ProbeTool);
-            addTool(StackScrollTool);
-            addTool(MagnifyTool);
-            addTool(BrushTool);
-            addTool(SegmentationDisplayTool);
-          }
-        } catch (error) {
-          console.error('Error registering tools:', error);
-          // Continue setup despite tool errors - we can still try to load images
+        // Set up tool group
+        const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
+        if (!toolGroup) {
+          throw new Error('Failed to create tool group');
         }
-        
-        // Remove existing tool groups if they exist
-        try {
-          if (ToolGroupManager.getToolGroup(toolGroupId)) {
-            ToolGroupManager.destroyToolGroup(toolGroupId);
-          }
-          if (ToolGroupManager.getToolGroup(toolGroupId2)) {
-            ToolGroupManager.destroyToolGroup(toolGroupId2);
-          }
-        } catch (e) {
-          console.log('Tool groups did not exist yet, creating new ones');
-        }
+        toolGroupRef.current = toolGroup;
 
-        // Create new tool groups with the rendering engine ID
-        toolGroup1 = ToolGroupManager.createToolGroup(toolGroupId);
-        toolGroup2 = ToolGroupManager.createToolGroup(toolGroupId2);
+        // Add tools to the tool group
+        toolGroup.addTool(PanTool.toolName);
+        toolGroup.addTool(ZoomTool.toolName);
+        toolGroup.addTool(WindowLevelTool.toolName);
+        toolGroup.addTool(StackScrollTool.toolName);
+        toolGroup.addTool(MagnifyTool.toolName);
+        toolGroup.addTool(LengthTool.toolName);
+        toolGroup.addTool(RectangleROITool.toolName);
+        toolGroup.addTool(EllipticalROITool.toolName);
+        toolGroup.addTool(AngleTool.toolName);
+        toolGroup.addTool(ProbeTool.toolName);
 
-        if (!toolGroup1 || !toolGroup2) {
-          throw new Error('Failed to create tool groups');
-        }
-        
-        // Store toolGroup1 in the ref for later use
-        toolGroupRef.current = toolGroup1;
+        // Add the viewports to the toolgroup
+        toolGroup.addViewport(viewportId1, renderingEngineId);
+        toolGroup.addViewport(viewportId2, renderingEngineId);
+        toolGroup.addViewport(viewportId3, renderingEngineId);
 
-        // Add all the tools to the tool group
-        toolGroup1.addTool('Pan');
-        toolGroup1.addTool('Zoom');
-        toolGroup1.addTool('WindowLevel');
-        toolGroup1.addTool('Length');
-        toolGroup1.addTool('RectangleROI');
-        toolGroup1.addTool('EllipticalROI');
-        toolGroup1.addTool('Angle');
-        toolGroup1.addTool('Probe');
-        toolGroup1.addTool('StackScroll');
-        toolGroup1.addTool('Magnify');
-        toolGroup1.addTool('SphereBrush');
-        toolGroup1.addTool('SegmentationDisplay');
-        
-        // If an activeTool is specified, activate it
+        // Set initial active tool
         if (activeTool) {
           setActiveTool(activeTool);
         } else {
-          // Default active tool - make Pan active by default
-          toolGroup1.setToolActive('Pan', {
-            bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }]
+          toolGroup.setToolActive(PanTool.toolName, {
+            bindings: [{ mouseButton: MouseBindings.Primary }],
           });
         }
 
-        // Add viewports to tool groups with the rendering engine ID
-        toolGroup1.addViewport(viewportId1, renderingEngineId);
-        toolGroup1.addViewport(viewportId2, renderingEngineId);
-        toolGroup2.addViewport(viewportId3, renderingEngineId);
+        // Set up the viewports
+        const viewport1 = renderingEngine.getViewport(viewportId1);
+        const viewport2 = renderingEngine.getViewport(viewportId2);
+        const viewport3 = renderingEngine.getViewport(viewportId3);
 
-        // Set the volume to load
-        await volume.load()
-
-        // Set volumes on the viewports
-        await setVolumesForViewports(
-          renderingEngine,
-          [{ volumeId }],
-          [viewportId1, viewportId2, viewportId3]
-        )
-
-        // Set up the 3D volume actor
-        console.log('Configuring 3D view');
-        const volumeActor = renderingEngine
-          .getViewport(viewportId3)
-          .getDefaultActor().actor as Types.VolumeActor
-        
-        const bonePreset = CONSTANTS.VIEWPORT_PRESETS.find((preset) => preset.name === "CT-Bone")
-        if (bonePreset) {
-          utilities.applyPreset(volumeActor, bonePreset)
-        } else {
-          console.warn('CT-Bone preset not found, using default settings');
-        }
-        
-        volumeActor.setVisibility(false)
-
-        // Add some segmentations based on the source data volume
-        console.log('Setting up segmentation');
-        // Create a segmentation of the same resolution as the source data
-        await volumeLoader.createAndCacheDerivedVolume(volumeId, {
-          volumeId: segmentationId,
-        })
-
-        // Add the segmentations to state
-        await segmentation.addSegmentations([
+        await setVolumesForViewports(renderingEngine, [
           {
-            segmentationId,
-            representation: {
-              type: csToolsEnums.SegmentationRepresentations.Labelmap,
-              data: {
-                volumeId: segmentationId,
-              },
+            volumeId,
+            callback: ({ volumeActor }) => {
+              // Set the volume actor properties
+              volumeActor.getProperty().setInterpolationTypeToLinear();
+              return volumeActor;
             },
           },
-        ])
+        ], [viewportId1, viewportId2, viewportId3]);
 
-        // Add the segmentation representation to the viewports
-        const segmentationRepresentation = {
-          segmentationId,
-          type: csToolsEnums.SegmentationRepresentations.Labelmap,
-        }
+        viewport1.render();
+        viewport2.render();
+        viewport3.render();
 
-        // Use appropriate method if available, or comment out if not
-        try {
-          // Use modern API if available
-          if (typeof segmentation.addSegmentationRepresentations === 'function') {
-            await segmentation.addSegmentationRepresentations(viewportId1, [segmentationRepresentation]);
-            await segmentation.addSegmentationRepresentations(viewportId2, [segmentationRepresentation]);
-          } else {
-            // Skip segmentation if API not available
-            console.warn('Segmentation API methods not available - skipping segmentation setup');
-          }
-        } catch (error) {
-          console.warn('Error adding segmentation to viewports:', error);
-          // Continue without segmentations
-        }
-
-        // Render the image
-        console.log('Rendering viewports');
-        renderingEngine.render()
-        
-        setSegmentationLoaded(true);
         setIsLoading(false);
-
-        // Replace the synchronization code with a manual approach
-        if (enableSync) {
-          console.log('Setting up basic viewport synchronization');
-          try {
-            // We'll use a simpler approach that doesn't rely on synchronizers
-            // Just render both viewports whenever one changes
-            const renderingEngineId = "myRenderingEngine";
-            const renderingEngine = window.cornerstone3D?.getRenderingEngine(renderingEngineId);
-
-            if (renderingEngine) {
-              // Store original render method of viewports for cleanup
-              const originalRenderMethods = {
-                [viewportId1]: renderingEngine.getViewport(viewportId1).render,
-                [viewportId2]: renderingEngine.getViewport(viewportId2).render,
-              };
-
-              // Override render method to sync both viewports
-              const viewport1 = renderingEngine.getViewport(viewportId1);
-              const viewport2 = renderingEngine.getViewport(viewportId2);
-
-              if (viewport1 && viewport2) {
-                // Create a wrapper for the render method that renders both viewports
-                viewport1.render = function() {
-                  originalRenderMethods[viewportId1].call(this);
-                  originalRenderMethods[viewportId2].call(viewport2);
-                };
-
-                viewport2.render = function() {
-                  originalRenderMethods[viewportId2].call(this);
-                  originalRenderMethods[viewportId1].call(viewport1);
-                };
-
-                // Store for cleanup
-                syncRefs.current = [
-                  { 
-                    destroy: function() {
-                      if (viewport1) viewport1.render = originalRenderMethods[viewportId1];
-                      if (viewport2) viewport2.render = originalRenderMethods[viewportId2];
-                    }
-                  }
-                ];
-              }
-              
-              console.log('Basic synchronization set up successfully');
-            } else {
-              console.warn('Rendering engine not available for sync');
-            }
-          } catch (error) {
-            console.error('Error setting up synchronization:', error);
-          }
-        }
       } catch (error) {
-        console.error('Error setting up Cornerstone3D:', error);
-        setError('Failed to initialize the advanced viewer');
+        console.error('Error in setup:', error);
+        setError('Failed to initialize viewer');
         setIsLoading(false);
         running.current = false;
-        if (onError) onError(); // Notify parent component of error
+        if (onError) {
+          onError();
+        }
       }
-    }
+    };
 
-    setup()
-  }, [studyInstanceUID, seriesInstanceUID, wadoRsRoot, localFiles, onError])
+    setup();
+  }, [studyInstanceUID, seriesInstanceUID, wadoRsRoot, localFiles, activeTool, onError]);
 
   const convertTo3D = async () => {
     try {
       console.log('Converting segmentation to 3D');
       // add the 3d representation to the 3d toolgroup
-      await segmentation.addSegmentationRepresentations(toolGroupId2, [
+      await cornerstoneTools.segmentation.addSegmentationRepresentations(toolGroupId2, [
         {
           segmentationId,
           type: csToolsEnums.SegmentationRepresentations.Surface,
@@ -651,7 +407,6 @@ export function AdvancedViewer({
       ])
       
       // Make the volume visible in 3D view
-      const renderingEngineId = "myRenderingEngine";
       const renderingEngine = window.cornerstone3D?.getRenderingEngine(renderingEngineId);
       if (renderingEngine) {
         const volumeActor = renderingEngine
@@ -699,7 +454,6 @@ export function AdvancedViewer({
       }
       
       // Render the viewports
-      const renderingEngineId = "myRenderingEngine";
       const renderingEngine = window.cornerstone3D?.getRenderingEngine(renderingEngineId);
       if (renderingEngine) {
         renderingEngine.render();

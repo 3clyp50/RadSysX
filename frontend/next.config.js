@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, dev }) => {
     // WebAssembly configuration
     config.experiments = {
       ...config.experiments,
@@ -25,6 +25,11 @@ const nextConfig = {
         },
       ],
     });
+
+    // Set explicit publicPath to fix "Automatic publicPath is not supported in this browser" error
+    if (!isServer) {
+      config.output.publicPath = '/_next/';
+    }
 
     // More comprehensive fallback configuration
     config.resolve.fallback = {

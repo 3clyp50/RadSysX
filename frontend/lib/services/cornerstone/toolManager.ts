@@ -92,7 +92,15 @@ export class ToolManagerService {
 
     // Add segmentation tools
     toolGroup.addTool('Brush');
-    toolGroup.addTool('SegmentationDisplay');
+    
+    // Check if SegmentationDisplay tool is available before adding it
+    try {
+      toolGroup.addTool('SegmentationDisplay');
+      console.log('SegmentationDisplay tool added successfully');
+    } catch (error) {
+      console.warn('SegmentationDisplay tool not available in this version of Cornerstone Tools');
+      // Alternative approach could be to use the segmentation API directly
+    }
   }
 
   setToolActive(groupId: string, toolName: string, options: ToolOptions = {}): void {
