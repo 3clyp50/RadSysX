@@ -1,306 +1,188 @@
 # RadSysX Agent Guidance
 
-Last updated: 2026-03-08
+Last updated: 2026-06-11
 
-This file replaces older reconnaissance notes that no longer describe the active architecture. Follow this version when making changes.
+## Purpose
 
-## Project Posture
+- This file is the root DOX rail for RadSysX: project-wide instructions, global preferences, durable workflow rules, and the top-level Child DOX Index.
+- RadSysX has two parallel product surfaces:
+  - `research`: rapid experimentation, legacy viewer flows, browser-side AI prototypes, and agent/MCP exploration.
+  - `clinical`: governed FastAPI contracts, worklist-driven launch, opaque viewer sessions, OHIF reading, audited reporting, AI workflow state, and backend-mediated derived DICOM writeback.
+- Do not treat the research and clinical surfaces as equivalent.
 
-RadSysX currently has two parallel product surfaces:
+## Ownership
 
-- `research` surface: rapid experimentation, legacy viewer flows, browser-side AI prototypes.
-- `clinical` foundation: governed FastAPI contracts, worklist-driven launch, opaque viewer sessions, audited report and AI workflow state.
+- Root owns project-wide posture, root manifests, root docs, root Docker Compose, top-level scripts, logo/assets, and cross-domain workflow guidance.
+- Child `AGENTS.md` files own domain-specific instructions for their subtrees. When a path has a child doc, read the full chain from this file to the nearest child before editing.
+- Root-owned files and folders include `README.md`, `CLAUDE.md`, `WARP.md`, `DEPLOY_GPU.md`, `DEPLOY_LOCAL.md`, `PHASE4_CLINICAL_EXECUTION_CHECKLIST.md`, `package.json`, `package-lock.json`, `docker-compose.yml`, `.gitignore`, `dev.sh`, `RadSysX-Logo.png`, `test-biomedparse.py`, `test-files-inventory.txt`, `.claude/`, `.cursor/`, `.handoffs/`, and `.serena/`.
 
-Do not treat those surfaces as equivalent.
+## DOX Core Contract
+
+- `AGENTS.md` files are binding work contracts for their subtrees.
+- Work products, source materials, instructions, records, assets, and durable docs must stay understandable from the nearest applicable `AGENTS.md` plus every parent `AGENTS.md` above it.
+- Before editing, re-read this file, identify every path you expect to touch, walk from the repository root to each target path, and read every `AGENTS.md` found along each route.
+- If a parent `AGENTS.md` lists a child whose scope contains the path, read that child and continue from there.
+- The closer doc controls local work details when instructions conflict, but no child doc may weaken this DOX contract or project-wide safety rules.
+- After every meaningful change, do a DOX pass: update the closest owning `AGENTS.md` when purpose, scope, ownership, durable structure, contracts, workflows, inputs, outputs, permissions, constraints, side effects, artifacts, or durable user preferences change.
+- Update parent docs when parent-level structure, ownership, workflow, or a Child DOX Index changes. Update children when parent changes alter local rules. Remove stale or contradictory text immediately.
+- Small edits that do not change behavior or contracts may leave docs unchanged, but the DOX pass still must happen and closeout should state why docs were unchanged.
 
 ## Host Environment Posture
 
-The primary development and validation target is now a native Linux host.
-
-Rules:
-
-- Do not assume WSL, Windows path translation, Docker Desktop integration, `fnm`, or any Windows-only shell behavior.
+- The primary development and validation target is native Ubuntu/Linux.
+- Do not assume WSL, Windows path translation, Docker Desktop integration, `fnm`, or Windows-only shell behavior.
+- Prefer Linux paths and commands. Use `./.venv/bin/python` style paths, not Windows virtualenv paths.
+- Prefer a repo-local Python virtual environment in `.venv` and the workspace `package.json` plus root `package-lock.json` for Node dependencies.
+- Treat Docker Engine plus Compose on Linux as the reference container runtime.
 - Do not rely on machine-specific temporary dependency paths, ad hoc `PYTHONPATH` overrides, or globally preinstalled packages that are not documented.
-- Prefer a repo-local Python virtual environment in `.venv` and the workspace `package.json` plus the root `package-lock.json` for Node dependencies.
-- Treat Docker Engine + Compose on Linux as the reference container runtime, not Docker Desktop-specific behavior.
-- On a fresh Linux host, first do a quick repo/context recon, then stop and wait for the user's report about what happened during the first Linux app test pass before making deeper code changes.
+- On a fresh Linux host, first do quick repo/context recon, then stop and wait for the user's report about the first Linux app test pass before deeper code changes.
 
-For future Linux bring-up, prefer this bootstrap sequence:
+## Bootstrap
 
-- `python3 -m venv .venv`
-- `. .venv/bin/activate`
-- `python3 -m pip install --upgrade pip`
-- `python3 -m pip install -r backend/requirements-clinical.txt`
-- `npm install --legacy-peer-deps`
-
-`backend/requirements.txt` remains the broader research/agent dependency set. Use it only when you intentionally need the research surface and its extra dependencies.
-If you need one interpreter that can install both the clinical and broader research dependency sets, use Python `3.12`.
-
-If the host is missing a required system dependency, surface that explicitly instead of patching around it with host-local hacks.
+- Clinical-first local bootstrap:
+  - `python3 -m venv .venv`
+  - `. .venv/bin/activate`
+  - `python3 -m pip install --upgrade pip`
+  - `python3 -m pip install -r backend/requirements-clinical.txt`
+  - `npm install --legacy-peer-deps`
+- `backend/requirements.txt` is the broader research/agent dependency set. Use it only when intentionally working on the research surface and its extra dependencies.
+- Use Python `3.12` if one interpreter must install both clinical and broader research dependency sets.
+- If the host is missing a required system dependency, surface that explicitly instead of patching around it with host-local hacks.
 
 ## Project Operating Rules
 
-These rules are intended to keep RadSysX coherent as the clinical platform hardens and the repo continues to carry both research and clinical surfaces.
-
 1. Update docs in the same tranche as code when behavior, architecture, env vars, commands, or operational expectations change.
-2. Treat `AGENTS.md` as the authoritative guide and keep `README.md`, `CLAUDE.md`, `WARP.md`, and active checklists aligned instead of letting them drift.
+2. Treat `AGENTS.md` as authoritative and keep `README.md`, `CLAUDE.md`, `WARP.md`, and active checklists aligned instead of letting them drift.
 3. Keep the research and clinical surfaces explicitly separated; do not solve a clinical gap by routing through a research-only shortcut.
 4. Prefer backend-authoritative contracts over browser-local state or inferred client behavior whenever clinical workflow, actor identity, reporting, AI, DICOM, or audit data is involved.
 5. Keep the viewer bootstrap minimal; if behavior can live in an OHIF extension, mode, service, or backend contract, move it there.
 6. Never normalize insecure local habits into maintained guidance: no committed live credentials, no PHI-bearing URLs, no casual identifier logging, and no dependence on machine-local temp paths.
 7. Make environment setup reproducible from the repo itself: `.venv`, declared Python requirements, workspace-managed npm installs, and env-driven secrets.
-8. When review comments expose a real defect or ambiguity, fix the code and also capture the durable lesson in guidance or checklists if it is likely to recur.
+8. When review comments expose a real defect or ambiguity, fix the code and capture the durable lesson in guidance or checklists if it is likely to recur.
 9. After substantial changes, record what was actually verified and what was not; do not imply Docker, viewer, or end-to-end validation if it did not happen.
-10. On new machines or major environment transitions, do initial recon first, then anchor the next decisions to observed runtime behavior from the first user-reported test pass.
+10. On new machines or major environment transitions, do initial recon first, then anchor next decisions to observed runtime behavior from the first user-reported test pass.
 
-## Primary Runtime Paths
+## Runtime Modes
 
-### Clinical path
+- Mode is controlled by `RADSYSX_APP_MODE`.
+- Valid modes are `research`, `pilot`, and `clinical`.
+- Only `research` may expose experimental upload/analyze flows.
+- `pilot` and `clinical` must use the clinical FastAPI surface and worklist/viewer flow.
+- Do not send DICOM bytes directly from the browser to third-party AI services in `pilot` or `clinical`.
 
-Use these files first for clinical workflow changes:
-
-- `backend/server.py`
-- `backend/clinical/auth.py`
-- `backend/clinical/config.py`
-- `backend/clinical/contracts.py`
-- `backend/clinical/dicomweb.py`
-- `backend/clinical/models.py`
-- `backend/clinical/repositories.py`
-- `backend/clinical/seed_orthanc.py`
-- `backend/clinical/services.py`
-- `backend/tests/test_clinical_platform.py`
-- `docker-compose.yml`
-- `deploy/clinical-stack/nginx.conf`
-- `deploy/clinical-stack/orthanc.json`
-- `frontend/app/login/page.tsx`
-- `frontend/app/worklist/page.tsx`
-- `frontend/lib/clinical/client.ts`
-- `frontend/lib/clinical/contracts.ts`
-- `frontend/lib/env.ts`
-- `packages/clinical-web/src/client.ts`
-- `packages/clinical-web/src/contracts.ts`
-- `packages/clinical-web/src/env.ts`
-- `viewer/scripts/build-ohif-dist.mjs`
-- `viewer/assets/radsysx-bootstrap.js`
-- `viewer/assets/radsysx-ohif-extension.js`
-- `viewer/assets/radsysx-ohif-mode.js`
-- `viewer/assets/radsysx-viewer.css`
-
-Clinical workflow is now:
+## Clinical Workflow Contract
 
 1. Establish a clinical session via `POST /api/auth/local-login` and confirm it with `GET /api/auth/session`.
 2. Open `/worklist` in the Next.js shell.
 3. Create an opaque launch session via `POST /api/imaging/launch`.
 4. Resolve that session in `/viewer/?launch=...` via `GET /api/imaging/launch/resolve`.
-5. Let the dedicated OHIF viewer app bind to the returned `viewerRuntime` and same-origin DICOMweb roots.
+5. Let the dedicated OHIF viewer app bind to returned `viewerRuntime` and same-origin DICOMweb roots.
 6. Load study workspace state via `GET /api/studies/{studyUid}/workspace`.
 7. Persist reports, AI jobs, derived results, and audit events through backend contracts, including backend-mediated STOW via `POST /api/derived-results/stow`.
 
-### Research path
+## Clinical Runtime Paths
 
-These routes/components are still valid for experimentation, but they are not the authoritative clinical path and should not be reintroduced as clinical viewer fallbacks:
+- Backend authority:
+  - `backend/server.py`
+  - `backend/clinical/auth.py`
+  - `backend/clinical/config.py`
+  - `backend/clinical/contracts.py`
+  - `backend/clinical/dicomweb.py`
+  - `backend/clinical/models.py`
+  - `backend/clinical/repositories.py`
+  - `backend/clinical/seed_orthanc.py`
+  - `backend/clinical/services.py`
+- Clinical frontend shell:
+  - `frontend/app/login/page.tsx`
+  - `frontend/app/worklist/page.tsx`
+  - `frontend/lib/clinical/client.ts`
+  - `frontend/lib/clinical/contracts.ts`
+  - `frontend/lib/env.ts`
+- Shared browser package:
+  - `packages/clinical-web/src/client.ts`
+  - `packages/clinical-web/src/contracts.ts`
+  - `packages/clinical-web/src/env.ts`
+- OHIF viewer runtime:
+  - `viewer/scripts/build-ohif-dist.mjs`
+  - `viewer/assets/radsysx-bootstrap.js`
+  - `viewer/assets/radsysx-ohif-extension.js`
+  - `viewer/assets/radsysx-ohif-mode.js`
+  - `viewer/assets/radsysx-viewer.css`
+- Local clinical stack:
+  - `docker-compose.yml`
+  - `deploy/clinical-stack/nginx.conf`
+  - `deploy/clinical-stack/orthanc.json`
 
-- `frontend/app/page.tsx`
-- `frontend/components/core/CoreViewer.tsx`
-- `frontend/components/DicomViewer.tsx`
-- `frontend/app/api/analyze/route.ts`
-- `frontend/app/api/upload/route.ts`
-- `frontend/components/toolbars/RightPanel.tsx`
+## Research Surface Contract
 
-Research-only routes must stay gated outside `pilot` and `clinical` modes.
-
-## Runtime Modes
-
-Mode is controlled by `RADSYSX_APP_MODE`:
-
-- `research`
-- `pilot`
-- `clinical`
-
-Rules:
-
-- Only `research` may expose experimental upload/analyze flows.
-- `pilot` and `clinical` should use the clinical FastAPI surface and worklist/viewer flow.
-- Do not send DICOM bytes directly from the browser to third-party AI services in `pilot` or `clinical`.
-
-## Backend Architecture
-
-### Clinical service layer
-
-`backend/clinical/*` is the active implementation seam for the clinical platform.
-
-- `contracts.py`: shared request/response models and enums.
-- `config.py`: mode, viewer, archive, AI, and database settings.
-- `models.py`: SQLAlchemy persistence models.
-- `repositories.py`: SQLite-backed repository and seed data.
-- `services.py`: launch, workspace, report, AI, derived-result, and audit orchestration.
-- `dicomweb.py`: DICOMweb adapter boundary. Orthanc is the reference adapter.
-
-### Research / agent backend
-
-The repo still includes a research/agent backend surface outside the clinical authority path:
-
-- `backend/radsysx.py`: multi-agent research orchestration
-- `backend/chat_interface.py`: direct chat interface
-- `backend/mcp/*`: MCP/FHIR integrations and installer paths
-- `backend/biomedparse_api.py`: research imaging/AI analysis router
-
-Keep these seams available for experimentation, but do not use them as shortcuts around the clinical contracts.
-
-### Persistence
-
-Clinical backend persistence is currently SQLAlchemy-backed and defaults to:
-
-- `backend/radsysx_clinical.db`
-
-This file is a local dev artifact and must not be committed.
-
-The Prisma schema in `frontend/schema.prisma` is scaffolding for frontend-adjacent workflow/data modeling. It is not the runtime source of truth for the FastAPI clinical API.
-
-### Clinical endpoints
-
-Current core endpoints:
-
-- `GET /api/auth/session`
-- `POST /api/auth/local-login`
-- `POST /api/auth/logout`
-- `GET /api/platform/config`
-- `GET /api/worklist`
-- `POST /api/imaging/launch`
-- `GET /api/imaging/launch/resolve`
-- `GET /api/studies/{studyUid}/workspace`
-- `POST /api/reports/draft`
-- `POST /api/ai/jobs`
-- `POST /api/derived-results`
-- `POST /api/derived-results/stow`
-- `GET /api/audit/studies/{studyUid}`
-
-When extending clinical behavior, prefer adding to these contracts rather than inventing browser-local shortcuts.
-
-## Frontend Architecture
-
-### Clinical shell
-
-Use:
-
-- `frontend/app/login/page.tsx` for seeded local persona login
-- `frontend/app/worklist/page.tsx` for the clinical worklist shell
-- `frontend/app/page.tsx` only as a landing/surface selector, not as a viewer runtime
-- `packages/clinical-web/src/client.ts` for the shared backend clinical API client
-- `packages/clinical-web/src/contracts.ts` for shared frontend/viewer types
-- `packages/clinical-web/src/env.ts` for shared env helpers
-
-Do not treat `frontend/lib/api.ts` as the primary client for clinical flows. It still contains legacy prototype APIs and only re-exports the clinical client for convenience.
-
-### Viewer direction
-
-The clinical public `/viewer` route is owned exclusively by the dedicated OHIF app in `viewer/`. The current viewer runtime is composed from:
-
-- `viewer/scripts/build-ohif-dist.mjs`
-- `viewer/assets/radsysx-bootstrap.js`
-- `viewer/assets/radsysx-ohif-extension.js`
-- `viewer/assets/radsysx-ohif-mode.js`
-- `viewer/assets/radsysx-viewer.css`
-- `packages/clinical-web/*`
-
-There is no supported Next.js `/viewer` fallback route anymore.
-
-OHIF is now the application shell for the clinical viewer path, and RadSysX-specific report/AI/derived-result workflow UI is mounted through RadSysX-owned OHIF panel extension/mode assets instead of an injected sidecar. Cornerstone remains the rendering and tooling substrate inside OHIF; it was not replaced.
-
-### Research viewer
-
-`CoreViewer.tsx` remains useful for parity work, experiments, and research UX, but it is not the primary reading path for clinical changes.
+- Research-only routes and components remain valid for experimentation, but are not authoritative clinical paths:
+  - `frontend/app/page.tsx`
+  - `frontend/components/core/CoreViewer.tsx`
+  - `frontend/components/DicomViewer.tsx`
+  - `frontend/app/api/analyze/route.ts`
+  - `frontend/app/api/upload/route.ts`
+  - `frontend/components/toolbars/RightPanel.tsx`
+  - `backend/radsysx.py`
+  - `backend/chat_interface.py`
+  - `backend/mcp/*`
+  - `backend/biomedparse_api.py`
+- Research-only routes must stay gated outside `pilot` and `clinical` modes.
 
 ## Security And PHI Rules
-
-These are mandatory:
 
 - Do not put PHI-bearing launch context directly into viewer URLs.
 - Use opaque launch tokens, then resolve server-side.
 - Do not write uploads into public static paths for clinical workflows.
 - Do not log patient names, identifiers, DICOM tags, or FHIR payloads casually.
 - Keep AI execution server-side for governed workflows.
-- Treat `app/api/analyze` and `app/api/upload` as research-only.
-
-If you are changing anything around DICOM, reporting, AI jobs, or launch/session handling, assume auditability and PHI boundaries matter first.
-
-Additional clinical rules:
-
+- Treat `frontend/app/api/analyze` and `frontend/app/api/upload` as research-only.
 - Do not reintroduce browser-supplied `role`, `user_id`, `requestedBy`, or other actor identity inputs into governed clinical APIs.
 - Treat backend-issued signed session cookies as the source of clinical actor context until a real OIDC provider replaces the local issuer.
 - Keep DICOM SR and DICOM SEG writeback mediated by the backend rather than letting the browser store directly to Orthanc.
 
 ## Working Conventions
 
-### Backend
+- Backend: use async endpoints for I/O boundaries; keep orchestration in services, persistence in repositories, and request/response definitions in contracts.
+- Frontend: use TypeScript strict-mode patterns already present in the repo; keep viewer and worklist pages study-centric, not file-centric.
+- Clinical frontend code should import the client from `@/lib/clinical/client`, which re-exports the shared `@radsysx/clinical-web` package.
+- Do not treat `frontend/lib/api.ts` as the primary clinical API client; it remains a legacy convenience surface.
+- The clinical public `/viewer` route is owned exclusively by the dedicated OHIF app in `viewer/`. There is no supported Next.js `/viewer` fallback route.
+- Cornerstone remains the rendering and tooling substrate inside OHIF.
+- For Agent Zero plugin/backend code outside this repo, treat the Docker container at `localhost:32080` as the live runtime code and always copy live runtime changes into `/home/eclypso/a0/agent-zero/plugins`.
 
-- Use async endpoints for I/O boundaries.
-- Keep orchestration in `services.py`, persistence in `repositories.py`, and request/response definitions in `contracts.py`.
-- Preserve graceful degradation in `backend/server.py` for optional legacy stacks, but do not route new clinical logic through prototype imports.
+## Verification
 
-### Frontend
-
-- Use TypeScript strict mode patterns already present in the repo.
-- Prefer the shared workspace package in `packages/clinical-web` for contracts/client/env logic consumed by both Next.js and the OHIF viewer.
-- Import the clinical client from `@/lib/clinical/client` for Next.js clinical pages.
-- Keep viewer and worklist pages study-centric, not file-centric.
-
-## Testing Guidance
-
-Preferred focused checks for the clinical slice:
-
-- `python3 -m pytest backend/tests/test_clinical_platform.py`
-- `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-- `npm run type-check --workspace frontend`
-- `npm run type-check --workspace viewer`
-- `npm run build --workspace viewer`
-
-Use broader suites only when the change demands it.
-
-Install missing Python dependencies into `.venv`; do not normalize one-off temp-path dependency shims as part of the expected workflow.
-
-If Docker Engine and Compose are available on the Linux host, also validate the composed stack with Orthanc and nginx rather than assuming the local shell/dev servers are equivalent.
+- Preferred focused checks for the clinical slice:
+  - `python3 -m pytest backend/tests/test_clinical_platform.py`
+  - `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+  - `npm run type-check --workspace frontend`
+  - `npm run type-check --workspace viewer`
+  - `npm run build --workspace viewer`
+- Use broader suites only when the change demands it.
+- Install missing Python dependencies into `.venv`; do not normalize one-off temp-path dependency shims as part of expected workflow.
+- If Docker Engine and Compose are available on the Linux host, validate the composed stack with Orthanc and nginx for clinical end-to-end work.
 
 ## Commands
 
-### Linux Bootstrap
+- Backend dev server: `. .venv/bin/activate && python3 backend/server.py`
+- Clinical backend tests: `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`
+- Whole backend runtime: `. .venv/bin/activate && RADSYSX_APP_MODE=research python3 backend/server.py`
+- Frontend dev server: `npm run dev --workspace frontend`
+- Viewer dev server: `npm run dev --workspace viewer`
+- Frontend type check: `npm run type-check --workspace frontend`
+- Viewer type check: `npm run type-check --workspace viewer`
+- Viewer build: `npm run build --workspace viewer`
+- Root type check: `npm run type-check`
 
-- `python3 -m venv .venv`
-- `. .venv/bin/activate`
-- `python3 -m pip install --upgrade pip`
-- `python3 -m pip install -r backend/requirements-clinical.txt`
-- `npm install --legacy-peer-deps`
+## Local Clinical Stack
 
-### Backend
-
-- `. .venv/bin/activate && python3 backend/server.py`
-- `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`
-
-### Whole Backend Runtime
-
-- Use Python `3.12` if the environment needs both `backend/requirements-clinical.txt` and `backend/requirements.txt`.
-- `. .venv/bin/activate && python3 -m pip install -r backend/requirements.txt`
-- `. .venv/bin/activate && RADSYSX_APP_MODE=research python3 backend/server.py`
-
-### Frontend / Workspace
-
-- `npm install --legacy-peer-deps`
-- `npm run dev --workspace frontend`
-- `npm run dev --workspace viewer`
-- `npm run type-check --workspace frontend`
-- `npm run type-check --workspace viewer`
-- `npm run build --workspace viewer`
-
-Use the workspace script for the frontend dev server; it is the supported local start path for the monorepo shell.
-
-### Local Clinical Stack
-
-- `export RADSYSX_ORTHANC_USERNAME=local-user`
-- `export RADSYSX_ORTHANC_PASSWORD=local-pass`
-- `docker compose up --build`
-- This stack validates the governed clinical surface only; it is not the full research+clinical runtime.
-- clinical public origin: `http://localhost:3000`
-- do not validate the governed viewer flow by opening the raw viewer dev server on port `3001`; use the nginx-served `http://localhost:3000` origin instead
+- Before starting compose:
+  - `export RADSYSX_ORTHANC_USERNAME=local-user`
+  - `export RADSYSX_ORTHANC_PASSWORD=local-pass`
+- Start stack: `docker compose up --build`
+- This stack validates the governed clinical surface only; it is not the full research plus clinical runtime.
+- Clinical public origin: `http://localhost:3000`
+- Do not validate the governed viewer flow by opening the raw viewer dev server on port `3001`; use the nginx-served `http://localhost:3000` origin instead.
 - Next.js shell: `/`
 - OHIF viewer: `/viewer/`
 - FastAPI: `/api`
@@ -311,41 +193,24 @@ Use the workspace script for the frontend dev server; it is the supported local 
 - `frontend/app/page.tsx` is not the main product entry point for clinical work.
 - `frontend/lib/api.ts` is not the authoritative clinical API client.
 - `frontend/app/api/analyze/route.ts` and `frontend/app/api/upload/route.ts` are not normal production paths.
-- `CoreViewer.tsx` is not the long-term clinical viewer shell.
+- `frontend/components/core/CoreViewer.tsx` is not the long-term clinical viewer shell.
 - Prisma is not the backend clinical runtime datastore.
 - Viewer launch should not trust raw query parameters like `study=...&patient=...`.
 
-## Near-Term Roadmap Context
+## User Preferences
 
-The current implemented foundation covers:
+- Favor rigorous, beautiful, professional solutions with high signal-to-noise.
+- Prefer Linux-native commands and paths.
+- Record durable behavior changes in this file or the nearest relevant child `AGENTS.md`.
 
-- mode-aware clinical boundaries
-- SQLAlchemy-backed clinical persistence
-- local signed-cookie session auth with OIDC-shaped claims
-- opaque launch session creation and resolution
-- study workspace aggregation
-- shared browser-side clinical package in `packages/clinical-web`
-- dedicated OHIF-based clinical viewer workspace in `viewer/`
-- backend-mediated STOW handling for uploaded derived DICOM instances
-- local nginx/Orthanc compose scaffolding for a one-origin clinical runtime
-- persisted report, AI, derived-result, and audit actions
+## Child DOX Index
 
-The next major steps are:
-
-- keep docs and operational guidance aligned with the shipped RadSysX runtime
-- continue deepening the RadSysX OHIF extension/mode code and reduce any remaining bootstrap-only seams
-- wire OHIF measurement tracking and segmentation services directly into governed SR/SEG export and reload flows
-- validate the full one-origin clinical stack end to end with Docker and Orthanc
-- move from local seeded auth/worklist context to real institutional identity and integration
-- continue phasing out prototype-only routes from any clinical deployment path
-
-## Recommended Next Tranche Plan
-
-If starting from the current post-Phase-4-polish baseline, do the next tranche in this order:
-
-1. Do a quick Linux host recon, then wait for the user's first Linux test report so the next fixes are grounded in observed runtime behavior rather than assumptions.
-2. Keep the hardening/docs pass current with the shipped RadSysX runtime: secrets, auth mode enforcement, cookie posture, URL secrecy, streamed STOW handoff, and de-identified local scaffolding.
-3. Deepen the OHIF-native integration: move any remaining viewer-specific workflow logic from bootstrap-time helpers into extension/mode/service seams while preserving the opaque launch contract and backend-authoritative workspace behavior.
-4. Finish standards-native writeback: connect OHIF measurement tracking and segmentation flows directly to backend-mediated SR/SEG export through `POST /api/derived-results/stow`, then rehydrate those stored objects from Orthanc on reload.
-5. Validate the real local stack: run the nginx + frontend + viewer + backend + Orthanc compose stack and prove the end-to-end workflow for login, worklist launch, OHIF load, report save/finalize, shadow AI queueing, SR persistence, SEG persistence, workspace refresh, and audit visibility.
-6. Only after viewer/archive realism is stable, move to institutional identity/context: replace the seeded local personas with real identity/provider integration and begin the shift from seeded worklist data toward institutional context.
+- `backend/AGENTS.md`: FastAPI backend, clinical/research backend split, Python dependencies, backend tests, MCP, skills, tools, and model utilities.
+- `deploy/AGENTS.md`: deploy/runtime configuration, especially the clinical nginx and Orthanc stack.
+- `dicom-test-files/AGENTS.md`: local DICOM fixtures and non-production imaging test assets.
+- `frontend/AGENTS.md`: Next.js shell, clinical login/worklist pages, research UI, frontend libraries, and styling.
+- `ideas-inspo/AGENTS.md`: source inspiration documents and exploratory materials.
+- `packages/AGENTS.md`: workspace packages shared across app surfaces.
+- `related-papers/AGENTS.md`: research papers and media used as source material.
+- `tests/AGENTS.md`: root-level legacy/test harness scripts outside `backend/tests`.
+- `viewer/AGENTS.md`: dedicated OHIF clinical viewer app, build wrapper, runtime assets, and generated viewer distribution.
