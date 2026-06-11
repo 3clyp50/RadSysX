@@ -1,0 +1,35 @@
+# Viewer DOX
+
+## Purpose
+
+- Own the dedicated OHIF-based clinical viewer app.
+
+## Ownership
+
+- Owns `package.json`, `tsconfig.json`, generated `dist/`, viewer scripts, and RadSysX viewer runtime assets.
+- Child docs own build scripts and runtime asset contracts.
+
+## Local Contracts
+
+- The clinical public `/viewer` route is served from this app, usually through nginx at `http://localhost:3000/viewer/`.
+- Do not add or rely on a Next.js clinical `/viewer` fallback.
+- `dist/` is generated output from `npm run build --workspace viewer`; do not hand-edit generated bundles for durable behavior.
+- Viewer runtime must resolve opaque launch sessions through the backend and bind OHIF to returned same-origin DICOMweb roots.
+- RadSysX report, AI, derived-result, and audit UI belongs in the OHIF extension/mode assets or backend contracts, not an ad hoc sidecar.
+
+## Work Guidance
+
+- Keep bootstrap minimal and move durable workflow behavior into extension, mode, service, or backend seams when possible.
+- Preserve OHIF and Cornerstone as the clinical rendering/tooling substrate.
+- Never expose PHI-bearing launch context in URLs.
+
+## Verification
+
+- `npm run type-check --workspace viewer`
+- `npm run build --workspace viewer`
+- For governed flow, validate through `http://localhost:3000/viewer/` in the composed stack rather than raw port `3001`.
+
+## Child DOX Index
+
+- `viewer/assets/AGENTS.md`: RadSysX OHIF bootstrap, extension, mode, and CSS assets.
+- `viewer/scripts/AGENTS.md`: OHIF dist build wrapper.
