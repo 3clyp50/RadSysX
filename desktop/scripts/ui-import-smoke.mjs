@@ -562,8 +562,8 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   };
 
   const clickPickerFolderImport = async (importPanel) => {
-    if (!window.radsysxDesktop?.selectLocalImagingFiles) {
-      throw new Error("Desktop local imaging picker bridge was not exposed to the renderer.");
+    if (!window.radsysxDesktop?.importLocalImaging) {
+      throw new Error("Desktop direct local imaging import bridge was not exposed to the renderer.");
     }
 
     const button = await waitFor(

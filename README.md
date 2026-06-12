@@ -261,7 +261,7 @@ npm run desktop
 
 `desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
 For a quick startup and cleanup check:
 
@@ -291,7 +291,7 @@ For a native picker bridge check:
 npm run desktop:smoke:picker-import
 ```
 
-That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. It proves the picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
+That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. Electron main uploads the selected files directly to the backend import endpoint with the existing session cookie, so the renderer receives only the backend import response. It proves the picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
 
 ### Install the full backend/runtime dependency set
 

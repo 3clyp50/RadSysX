@@ -9,6 +9,7 @@ import { Activity, FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Up
 import { clinicalApi, resolveClinicalApiUrl } from "@/lib/clinical/client";
 import type {
   ClinicalPlatformConfig,
+  LocalImagingImportResponse,
   LocalImagingStudyAsset,
   LocalImagingStudyAnalysisResponse,
   LocalImagingStudyAssetsResponse,
@@ -60,6 +61,10 @@ declare global {
       selectLocalImagingFiles?: (options?: { mode?: DesktopPickerMode }) => Promise<{
         cancelled: boolean;
         files: DesktopPickedFile[];
+      }>;
+      importLocalImaging?: (options?: { mode?: DesktopPickerMode }) => Promise<{
+        cancelled: boolean;
+        response: LocalImagingImportResponse | null;
       }>;
       versions?: {
         chrome?: string;
@@ -179,11 +184,7 @@ export default function WorklistPage() {
     }
   };
 
-  const importLocalFiles = async (files: File[]) => {
-    if (!files.length) {
-      return;
-    }
-
+  const beginLocalImport = () => {
     setImporting(true);
     setError(null);
     setImportMessage(null);
@@ -191,26 +192,41 @@ export default function WorklistPage() {
     setLocalStudyAssets(null);
     setLocalStudyAnalysis(null);
     setNiftiPreviewStates({});
+  };
+
+  const clearLocalImportInputs = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    if (folderInputRef.current) {
+      folderInputRef.current.value = "";
+    }
+  };
+
+  const applyLocalImportResponse = async (response: LocalImagingImportResponse) => {
+    const studyCount = response.importedStudies.length;
+    setImportMessage(
+      `Imported ${response.acceptedFiles} file${response.acceptedFiles === 1 ? "" : "s"} into ${studyCount} local stud${studyCount === 1 ? "y" : "ies"}.`,
+    );
+    setImportWarnings(response.warnings);
+    const worklist = await clinicalApi.getWorklist();
+    setRows(worklist.rows);
+  };
+
+  const importLocalFiles = async (files: File[]) => {
+    if (!files.length) {
+      return;
+    }
+
+    beginLocalImport();
 
     try {
-      const response = await clinicalApi.importLocalImaging(files);
-      const studyCount = response.importedStudies.length;
-      setImportMessage(
-        `Imported ${response.acceptedFiles} file${response.acceptedFiles === 1 ? "" : "s"} into ${studyCount} local stud${studyCount === 1 ? "y" : "ies"}.`,
-      );
-      setImportWarnings(response.warnings);
-      const worklist = await clinicalApi.getWorklist();
-      setRows(worklist.rows);
+      await applyLocalImportResponse(await clinicalApi.importLocalImaging(files));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to import local imaging files.");
     } finally {
       setImporting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-      if (folderInputRef.current) {
-        folderInputRef.current.value = "";
-      }
+      clearLocalImportInputs();
     }
   };
 
@@ -253,6 +269,27 @@ export default function WorklistPage() {
   };
 
   const handleDesktopLocalImport = async (mode: DesktopPickerMode) => {
+    const desktopImport = window.radsysxDesktop?.importLocalImaging;
+    if (desktopImport) {
+      beginLocalImport();
+      try {
+        const result = await desktopImport({ mode });
+        if (result.cancelled) {
+          return;
+        }
+        if (!result.response) {
+          throw new Error("Desktop local imaging import did not return a backend response.");
+        }
+        await applyLocalImportResponse(result.response);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Unable to choose local imaging files.");
+      } finally {
+        setImporting(false);
+        clearLocalImportInputs();
+      }
+      return;
+    }
+
     const picker = window.radsysxDesktop?.selectLocalImagingFiles;
     if (!picker) {
       if (mode === "folder") {

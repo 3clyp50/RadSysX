@@ -207,7 +207,7 @@ Last updated: 2026-06-12
   - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries/previews/technical analysis, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI/image files, verify worklist/asset-summary/analysis/DICOMweb/launch behavior, and cleanly shut down.
   - Run `npm run desktop:smoke:ui-import` to drive the hydrated Electron worklist UI, dispatch a local imaging drag/drop import, inspect imported studies, verify NIFTI previews including a coronal slice, run backend technical analysis, and cleanly shut down.
-  - Run `npm run desktop:smoke:picker-import` to drive the hydrated Electron worklist UI through the native picker bridge using smoke-injected test paths, proving the renderer button, preload IPC, main-process recursive collector, backend import, inspection, NIFTI preview controls, and analysis path without automating the OS dialog itself.
+  - Run `npm run desktop:smoke:picker-import` to drive the hydrated Electron worklist UI through the native picker bridge using smoke-injected test paths, proving the renderer button, preload IPC, main-process recursive collector, direct main-process upload to backend import, inspection, NIFTI preview controls, and analysis path without automating the OS dialog itself.
   - Local imaging import is controlled by `RADSYSX_LOCAL_IMAGING_ENABLED`; the Electron desktop runtime enables it by default for the fast path.
   - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or an explicitly configured local DICOMweb target.
 - Before starting compose:

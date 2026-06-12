@@ -109,6 +109,11 @@ function guessContentType(filePath) {
 }
 
 async function collectPickedFiles(pathsToImport) {
+  const selectedEntries = await collectPickedFileEntries(pathsToImport);
+  return Promise.all(selectedEntries.map(readPickedFile));
+}
+
+async function collectPickedFileEntries(pathsToImport) {
   const selectedFiles = [];
   let totalBytes = 0;
 
@@ -123,7 +128,7 @@ async function collectPickedFiles(pathsToImport) {
         totalBytes += fileStats.size;
         enforcePickerLimits(selectedFiles.length + 1, totalBytes);
         selectedFiles.push(
-          await readPickedFile(
+          pickedFileEntry(
             filePath,
             path.join(path.basename(selectedPath), path.relative(selectedPath, filePath)),
             fileStats,
@@ -138,7 +143,7 @@ async function collectPickedFiles(pathsToImport) {
     }
     totalBytes += stats.size;
     enforcePickerLimits(selectedFiles.length + 1, totalBytes);
-    selectedFiles.push(await readPickedFile(selectedPath, path.basename(selectedPath), stats));
+    selectedFiles.push(pickedFileEntry(selectedPath, path.basename(selectedPath), stats));
   }
 
   return selectedFiles;
@@ -194,17 +199,73 @@ function enforcePickerLimits(fileCount, totalBytes) {
   }
 }
 
-async function readPickedFile(filePath, relativePath, stats) {
-  const data = await fs.promises.readFile(filePath);
-  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+function pickedFileEntry(filePath, relativePath, stats) {
   return {
     name: path.basename(filePath),
+    filePath,
     relativePath: relativePath.split(path.sep).join("/"),
     type: guessContentType(filePath),
     size: stats.size,
     lastModified: stats.mtimeMs,
+  };
+}
+
+async function readPickedFile(entry) {
+  const data = await fs.promises.readFile(entry.filePath);
+  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return {
+    name: entry.name,
+    relativePath: entry.relativePath,
+    type: entry.type,
+    size: entry.size,
+    lastModified: entry.lastModified,
     data: buffer,
   };
+}
+
+async function importPickedFilesThroughBackend(sender, pathsToImport) {
+  if (!publicBaseUrl) {
+    throw new Error("RadSysX desktop runtime is not ready for local imaging import.");
+  }
+
+  const selectedEntries = await collectPickedFileEntries(pathsToImport);
+  if (!selectedEntries.length) {
+    throw new Error("No supported local imaging files were selected.");
+  }
+
+  const form = new FormData();
+  const relativePaths = [];
+  for (const entry of selectedEntries) {
+    const blob = await fs.openAsBlob(entry.filePath, { type: entry.type });
+    relativePaths.push(entry.relativePath);
+    form.append("files", blob, entry.relativePath);
+  }
+  form.set("relativePaths", JSON.stringify(relativePaths));
+
+  const cookieHeader = await cookieHeaderForSender(sender);
+  const response = await fetch(`${publicBaseUrl}/api/local-imaging/import`, {
+    method: "POST",
+    body: form,
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(payload || `Local imaging import failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function cookieHeaderForSender(sender) {
+  if (!publicBaseUrl) {
+    return "";
+  }
+
+  const cookies = await sender.session.cookies.get({ url: publicBaseUrl });
+  return cookies
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join("; ");
 }
 
 function pythonCommand() {
@@ -773,50 +834,69 @@ function createMainWindow() {
 function registerDesktopIpc() {
   ipcMain.handle("radsysx:select-local-imaging", async (event, options = {}) => {
     const mode = options?.mode === "folder" ? "folder" : "files";
-    const testPaths = readPickerTestPaths();
-    if (testPaths) {
-      const files = await collectPickedFiles(testPaths);
-      return { cancelled: false, files };
-    }
-
-    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
-    const dialogOptions = {
-      title: mode === "folder" ? "Import local imaging folder" : "Import local imaging files",
-      properties:
-        mode === "folder"
-          ? ["openDirectory", "multiSelections"]
-          : ["openFile", "multiSelections"],
-      filters: [
-        {
-          name: "Medical imaging files",
-          extensions: [
-            "bmp",
-            "dcm",
-            "dicom",
-            "gif",
-            "jpg",
-            "jpeg",
-            "nii",
-            "gz",
-            "png",
-            "tif",
-            "tiff",
-          ],
-        },
-        { name: "All files", extensions: ["*"] },
-      ],
-    };
-    const result = parentWindow
-      ? await dialog.showOpenDialog(parentWindow, dialogOptions)
-      : await dialog.showOpenDialog(dialogOptions);
-
-    if (result.canceled || result.filePaths.length === 0) {
+    const selection = await selectLocalImagingPaths(event.sender, mode);
+    if (selection.cancelled) {
       return { cancelled: true, files: [] };
     }
 
-    const files = await collectPickedFiles(result.filePaths);
+    const files = await collectPickedFiles(selection.filePaths);
     return { cancelled: false, files };
   });
+
+  ipcMain.handle("radsysx:import-local-imaging", async (event, options = {}) => {
+    const mode = options?.mode === "folder" ? "folder" : "files";
+    const selection = await selectLocalImagingPaths(event.sender, mode);
+    if (selection.cancelled) {
+      return { cancelled: true, response: null };
+    }
+
+    const response = await importPickedFilesThroughBackend(event.sender, selection.filePaths);
+    return { cancelled: false, response };
+  });
+}
+
+async function selectLocalImagingPaths(sender, mode) {
+  const testPaths = readPickerTestPaths();
+  if (testPaths) {
+    return { cancelled: false, filePaths: testPaths };
+  }
+
+  const parentWindow = BrowserWindow.fromWebContents(sender) ?? mainWindow;
+  const dialogOptions = {
+    title: mode === "folder" ? "Import local imaging folder" : "Import local imaging files",
+    properties:
+      mode === "folder"
+        ? ["openDirectory", "multiSelections"]
+        : ["openFile", "multiSelections"],
+    filters: [
+      {
+        name: "Medical imaging files",
+        extensions: [
+          "bmp",
+          "dcm",
+          "dicom",
+          "gif",
+          "jpg",
+          "jpeg",
+          "nii",
+          "gz",
+          "png",
+          "tif",
+          "tiff",
+        ],
+      },
+      { name: "All files", extensions: ["*"] },
+    ],
+  };
+  const result = parentWindow
+    ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { cancelled: true, filePaths: [] };
+  }
+
+  return { cancelled: false, filePaths: result.filePaths };
 }
 
 function loadingHtml() {
@@ -957,8 +1037,8 @@ app.whenReady().then(async () => {
 
   try {
     const runtime = await startRuntime();
-    await mainWindow.loadURL(runtime.publicBaseUrl);
     scheduleSmokeExit();
+    await mainWindow.loadURL(runtime.publicBaseUrl);
   } catch (error) {
     if (shuttingDown) {
       return;

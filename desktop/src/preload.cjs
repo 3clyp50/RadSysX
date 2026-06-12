@@ -10,4 +10,8 @@ contextBridge.exposeInMainWorld("radsysxDesktop", {
     ipcRenderer.invoke("radsysx:select-local-imaging", {
       mode: options.mode === "folder" ? "folder" : "files",
     }),
+  importLocalImaging: (options = {}) =>
+    ipcRenderer.invoke("radsysx:import-local-imaging", {
+      mode: options.mode === "folder" ? "folder" : "files",
+    }),
 });
