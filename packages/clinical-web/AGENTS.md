@@ -13,7 +13,7 @@
 - `src/contracts.ts` must mirror the backend clinical contract models in `backend/clinical/contracts.py`.
 - `src/client.ts` should call governed backend endpoints with cookies included and should not invent browser-local clinical state.
 - `src/client.ts` owns the browser client for backend local imaging import, imported-study asset summaries/previews/preview controls/technical analysis, API URL resolution, and relative-path preservation for folder/DICOMDIR uploads from browser `webkitRelativePath` and Electron `radsysxRelativePath`.
-- `src/env.ts` owns app mode, backend base URL, viewer base URL, and experimental imaging flags shared by browser surfaces.
+- `src/env.ts` owns app mode, backend base URL, viewer base URL, and experimental imaging flags shared by browser surfaces; public `NEXT_PUBLIC_*` reads must use direct guarded env keys so Next.js can inline them consistently across server and client hydration.
 - Keep exports stable for both `frontend` and `viewer` workspaces.
 
 ## Work Guidance

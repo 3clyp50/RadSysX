@@ -8,12 +8,15 @@ For the shortest no-Docker local run of RadSysX, use the Electron desktop path f
 npm run desktop:bootstrap
 npm run desktop:doctor
 npm run desktop:smoke:import
+npm run desktop:smoke:ui-import
 npm run desktop
 ```
 
 This starts the local clinical FastAPI backend, Next.js shell, and OHIF viewer bridge under one localhost origin. It is the preferred quick path for local login, native local file/folder selection, browser drag-and-drop import, local DICOM/DICOMDIR/NIFTI import, imported-study asset summaries, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, NIFTI header inspection, worklist registration, local DICOM metadata/frame serving, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval, full NIFTI volume rendering, and durable STOW validation still require deeper validation or a configured local imaging backend.
 
 `npm run desktop:smoke:import` starts the desktop runtime on high local ports, creates PHI-free synthetic DICOMDIR/DICOM/NIFTI/image files, imports them through the local bridge, verifies worklist, local DICOMweb, asset-summary, preview, analysis, and launch behavior, and shuts the runtime down.
+
+`npm run desktop:smoke:ui-import` drives the hydrated Electron worklist UI, drops the same class of synthetic local imaging files onto the local import panel, verifies inspection, NIFTI slice preview controls, and backend technical analysis, and shuts the runtime down.
 
 ## Frontend Local, GPU Backend On Cloud VM
 

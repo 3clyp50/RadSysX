@@ -17,6 +17,7 @@
 - Clinical API usage should go through `@/lib/clinical/client`, which re-exports `@radsysx/clinical-web/client`.
 - `frontend/lib/api.ts` remains a legacy prototype convenience surface, not the authoritative clinical client.
 - Research-only upload/analyze flows must remain gated outside `pilot` and `clinical`.
+- The root app layout should stay light for clinical/desktop routes; do not wrap the clinical shell in unused research-era providers or dependencies that can break Electron/Next hydration.
 
 ## Work Guidance
 

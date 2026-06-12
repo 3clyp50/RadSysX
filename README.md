@@ -277,6 +277,14 @@ npm run desktop:smoke:import
 
 That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries/previews/analysis, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
 
+For a hydrated UI-level import check:
+
+```bash
+npm run desktop:smoke:ui-import
+```
+
+That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI/PNG files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
+
 ### Install the full backend/runtime dependency set
 
 If you want one local Python environment that can exercise both the governed clinical backend and the broader research/agent surface, use Python `3.12` and then install the full backend set:
@@ -351,6 +359,7 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 6. `npm run desktop:doctor`
 7. `npm run desktop:smoke`
 8. `npm run desktop:smoke:import`
+9. `npm run desktop:smoke:ui-import`
 9. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
 10. `python3 -m pytest backend/tests/test_clinical_platform.py`
 11. `npm run type-check --workspace frontend`
@@ -364,7 +373,7 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, and `npm run desktop:smoke:import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, and `npm run desktop:smoke:ui-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

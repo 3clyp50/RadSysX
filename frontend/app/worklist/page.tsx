@@ -355,6 +355,7 @@ export default function WorklistPage() {
 
           {config?.localImagingEnabled && (
             <div
+              data-testid="local-import-panel"
               onDragEnter={handleLocalImportDragEnter}
               onDragOver={handleLocalImportDragEnter}
               onDragLeave={handleLocalImportDragLeave}
@@ -371,7 +372,9 @@ export default function WorklistPage() {
                   DICOM, DICOMDIR, NIFTI, PNG, JPEG, TIFF · drop files or folders
                 </div>
                 {importMessage && (
-                  <div className="mt-2 text-sm text-cyan-100">{importMessage}</div>
+                  <div data-testid="local-import-message" className="mt-2 text-sm text-cyan-100">
+                    {importMessage}
+                  </div>
                 )}
                 {importWarnings.length > 0 && (
                   <div className="mt-2 text-xs text-amber-200">
@@ -419,7 +422,10 @@ export default function WorklistPage() {
           )}
 
           {localStudyAssets && (
-            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+            <div
+              data-testid="local-assets-panel"
+              className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4"
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-cyan-300/70">
@@ -434,6 +440,7 @@ export default function WorklistPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    data-testid="analyze-local-study"
                     onClick={() => void handleAnalyzeLocalStudy(localStudyAssets.studyInstanceUID)}
                     className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
                     disabled={analyzingStudyUid === localStudyAssets.studyInstanceUID}
@@ -466,9 +473,9 @@ export default function WorklistPage() {
               )}
 
               <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {localStudyAssets.findings.map((finding) => (
+                {localStudyAssets.findings.map((finding, index) => (
                   <div
-                    key={`${finding.label}-${finding.value}`}
+                    key={`${finding.label}-${finding.value}-${index}`}
                     className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2"
                   >
                     <div className="text-xs uppercase tracking-[0.14em] text-slate-500">
@@ -498,6 +505,7 @@ export default function WorklistPage() {
                       <div className="flex h-20 w-24 items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-900/80">
                         {asset.previewSupported && previewPath ? (
                           <img
+                            data-testid="local-asset-preview"
                             src={resolveClinicalApiUrl(previewPath)}
                             alt=""
                             className="h-full w-full object-cover"
@@ -562,7 +570,10 @@ export default function WorklistPage() {
               </div>
 
               {localStudyAnalysis && (
-                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                <div
+                  data-testid="local-analysis-panel"
+                  className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-cyan-300/70">
                       <Activity className="h-4 w-4" />
@@ -622,6 +633,7 @@ export default function WorklistPage() {
           <div className="mt-8 grid gap-4">
             {rows.map((row) => (
               <div
+                data-testid="worklist-row"
                 key={row.studyInstanceUID}
                 className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-5 lg:grid-cols-[1.7fr_1fr_auto]"
               >
@@ -655,6 +667,7 @@ export default function WorklistPage() {
                   {row.archiveRef.startsWith("local://") && (
                     <button
                       type="button"
+                      data-testid="inspect-local-study"
                       onClick={() => void handleInspectLocalStudy(row)}
                       className="inline-flex items-center justify-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-medium text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
                       disabled={inspectingStudyUid === row.studyInstanceUID}

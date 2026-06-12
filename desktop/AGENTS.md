@@ -16,6 +16,7 @@
 - The desktop path is a local convenience runtime, not a shortcut around governed clinical contracts.
 - Electron must keep the app shell, `/api`, and `/viewer` under one local origin so clinical cookies and opaque launch sessions work without nginx.
 - The local bridge may serve the generated `viewer/dist/` app and proxy backend routes, but durable OHIF behavior still belongs in `viewer/` assets or backend contracts.
+- The local bridge must proxy Next.js development static assets and WebSocket upgrades reliably enough for the Electron shell to hydrate through the one-origin desktop URL.
 - Do not add PHI-bearing launch context to desktop URLs.
 - Do not let the browser write directly to Orthanc; backend-mediated derived result paths remain authoritative.
 - A missing local DICOMweb archive should degrade honestly. Full Orthanc-backed image retrieval remains the compose-stack path until a local archive bundle is added.
@@ -24,6 +25,7 @@
 - `preload.cjs` exposes only narrow desktop helpers, including the native local imaging file/folder picker; browser drag-and-drop remains a portable frontend fallback and must still import through backend contracts. Do not expose raw filesystem or shell primitives to the renderer.
 - `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` enables the local `/_radsysx/desktop/shutdown` endpoint for smoke tests only; do not enable it for normal desktop runs.
 - `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/image import, asset summaries, local previews including NIFTI slice navigation, backend technical analysis, DICOMweb discovery, and opaque launch without Docker.
+- `npm run desktop:smoke:ui-import` should keep proving the hydrated worklist UI can import dropped local imaging files, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker.
 
 ## Work Guidance
 
@@ -37,8 +39,10 @@
 - `npm run desktop:doctor`
 - `npm run desktop:smoke`
 - `npm run desktop:smoke:import`
+- `npm run desktop:smoke:ui-import`
 - `node --check desktop/src/main.mjs`
 - `node --check desktop/scripts/doctor.mjs`
 - `node --check desktop/scripts/import-smoke.mjs`
+- `node --check desktop/scripts/ui-import-smoke.mjs`
 
 ## Child DOX Index

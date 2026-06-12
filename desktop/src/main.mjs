@@ -417,6 +417,12 @@ function startDesktopBridge({ appPort, backendBaseUrl, frontendBaseUrl }) {
         frontendBaseUrl,
       });
     });
+    server.on("upgrade", (request, socket, head) => {
+      handleBridgeUpgrade(request, socket, head, {
+        backendBaseUrl,
+        frontendBaseUrl,
+      });
+    });
 
     server.once("error", reject);
     server.listen(appPort, "127.0.0.1", () => {
@@ -489,10 +495,7 @@ function isBackendRoute(pathname) {
 
 function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
   const targetUrl = buildProxyUrl(targetBaseUrl, request.url ?? "/", stripPrefix);
-  const headers = {
-    ...request.headers,
-    host: targetUrl.host,
-  };
+  const headers = sanitizeProxyHeaders(request.headers, targetUrl.host);
 
   const transport = targetUrl.protocol === "https:" ? https : http;
   const proxy = transport.request(
@@ -503,6 +506,7 @@ function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
       method: request.method,
       path: `${targetUrl.pathname}${targetUrl.search}`,
       headers,
+      agent: false,
     },
     (proxyResponse) => {
       response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
@@ -526,6 +530,76 @@ function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
   });
 
   request.pipe(proxy);
+}
+
+function handleBridgeUpgrade(request, socket, head, runtime) {
+  const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+  const targetBaseUrl = isBackendRoute(requestUrl.pathname)
+    ? runtime.backendBaseUrl
+    : runtime.frontendBaseUrl;
+  const targetUrl = buildProxyUrl(targetBaseUrl, request.url ?? "/", "");
+
+  if (targetUrl.protocol !== "http:") {
+    socket.destroy();
+    return;
+  }
+
+  const headers = sanitizeProxyHeaders(request.headers, targetUrl.host);
+  headers.connection = "Upgrade";
+  headers.upgrade = request.headers.upgrade ?? "websocket";
+
+  const upstream = net.connect(
+    Number.parseInt(targetUrl.port || "80", 10),
+    targetUrl.hostname,
+    () => {
+      upstream.write(`${request.method} ${targetUrl.pathname}${targetUrl.search} HTTP/${request.httpVersion}\r\n`);
+      for (const [name, value] of Object.entries(headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            upstream.write(`${name}: ${item}\r\n`);
+          }
+        } else if (value != null) {
+          upstream.write(`${name}: ${value}\r\n`);
+        }
+      }
+      upstream.write("\r\n");
+      if (head.length) {
+        upstream.write(head);
+      }
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    },
+  );
+
+  upstream.once("error", (error) => {
+    appendLog("bridge", `upgrade proxy error for ${targetUrl.href}: ${error.message}`);
+    if (!socket.destroyed) {
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    }
+  });
+  socket.once("error", () => upstream.destroy());
+  socket.once("close", () => upstream.destroy());
+}
+
+function sanitizeProxyHeaders(sourceHeaders, host) {
+  const headers = { ...sourceHeaders };
+  for (const header of [
+    "accept-encoding",
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+  ]) {
+    delete headers[header];
+  }
+  headers.host = host;
+  headers.connection = "close";
+  return headers;
 }
 
 function buildProxyUrl(targetBaseUrl, originalUrl, stripPrefix) {
