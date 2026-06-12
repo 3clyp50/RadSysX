@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { DragEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload, X } from "lucide-react";
 
@@ -28,6 +29,29 @@ type DesktopPickerMode = "files" | "folder";
 type NiftiPreviewState = {
   axis: string;
   slice: number;
+};
+type BrowserFileSystemEntry = {
+  fullPath?: string;
+  isDirectory: boolean;
+  isFile: boolean;
+  name: string;
+};
+type BrowserFileSystemFileEntry = BrowserFileSystemEntry & {
+  file: (
+    successCallback: (file: File) => void,
+    errorCallback?: (error: DOMException) => void,
+  ) => void;
+};
+type BrowserFileSystemDirectoryEntry = BrowserFileSystemEntry & {
+  createReader: () => {
+    readEntries: (
+      successCallback: (entries: BrowserFileSystemEntry[]) => void,
+      errorCallback?: (error: DOMException) => void,
+    ) => void;
+  };
+};
+type BrowserDataTransferItem = DataTransferItem & {
+  webkitGetAsEntry?: () => unknown;
 };
 
 declare global {
@@ -63,6 +87,7 @@ export default function WorklistPage() {
   const [localStudyAssets, setLocalStudyAssets] = useState<LocalImagingStudyAssetsResponse | null>(null);
   const [localStudyAnalysis, setLocalStudyAnalysis] = useState<LocalImagingStudyAnalysisResponse | null>(null);
   const [niftiPreviewStates, setNiftiPreviewStates] = useState<Record<string, NiftiPreviewState>>({});
+  const [draggingLocalImport, setDraggingLocalImport] = useState(false);
 
   const directoryInputProps = {
     directory: "",
@@ -193,6 +218,40 @@ export default function WorklistPage() {
     await importLocalFiles(Array.from(fileList ?? []));
   };
 
+  const handleLocalImportDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (config?.localImagingEnabled) {
+      event.dataTransfer.dropEffect = "copy";
+      setDraggingLocalImport(true);
+    }
+  };
+
+  const handleLocalImportDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextTarget = event.relatedTarget;
+    if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+      setDraggingLocalImport(false);
+    }
+  };
+
+  const handleLocalImportDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingLocalImport(false);
+
+    if (!config?.localImagingEnabled || importing) {
+      return;
+    }
+
+    try {
+      await importLocalFiles(await filesFromDataTransfer(event.dataTransfer));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to read dropped imaging files.");
+    }
+  };
+
   const handleDesktopLocalImport = async (mode: DesktopPickerMode) => {
     const picker = window.radsysxDesktop?.selectLocalImagingFiles;
     if (!picker) {
@@ -295,11 +354,21 @@ export default function WorklistPage() {
           )}
 
           {config?.localImagingEnabled && (
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+            <div
+              onDragEnter={handleLocalImportDragEnter}
+              onDragOver={handleLocalImportDragEnter}
+              onDragLeave={handleLocalImportDragLeave}
+              onDrop={(event) => void handleLocalImportDrop(event)}
+              className={`mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 transition ${
+                draggingLocalImport
+                  ? "border-cyan-300/60 bg-cyan-300/10 shadow-lg shadow-cyan-950/30"
+                  : "border-slate-800 bg-slate-950/70"
+              }`}
+            >
               <div>
                 <div className="text-sm font-medium text-white">Local imaging import</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  DICOM, DICOMDIR, NIFTI, PNG, JPEG, TIFF
+                  DICOM, DICOMDIR, NIFTI, PNG, JPEG, TIFF · drop files or folders
                 </div>
                 {importMessage && (
                   <div className="mt-2 text-sm text-cyan-100">{importMessage}</div>
@@ -678,16 +747,116 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise<File[]> {
+  const itemEntries = Array.from(dataTransfer.items)
+    .filter((item) => item.kind === "file")
+    .map(getBrowserFileSystemEntry)
+    .filter(isBrowserFileSystemEntry);
+
+  if (!itemEntries.length) {
+    return Array.from(dataTransfer.files);
+  }
+
+  const files = await Promise.all(itemEntries.map((entry) => filesFromEntry(entry)));
+  return files.flat();
+}
+
+async function filesFromEntry(
+  entry: BrowserFileSystemEntry,
+  parentRelativePath = "",
+): Promise<File[]> {
+  const relativePath = joinRelativePath(parentRelativePath, entry.name);
+
+  if (entry.isFile) {
+    return [await fileFromFileEntry(entry as BrowserFileSystemFileEntry, relativePath)];
+  }
+
+  if (!entry.isDirectory) {
+    return [];
+  }
+
+  const childEntries = await readDirectoryEntries(entry as BrowserFileSystemDirectoryEntry);
+  const nestedFiles = await Promise.all(
+    childEntries.map((childEntry) => filesFromEntry(childEntry, relativePath)),
+  );
+  return nestedFiles.flat();
+}
+
+function fileFromFileEntry(
+  entry: BrowserFileSystemFileEntry,
+  relativePath: string,
+): Promise<File> {
+  return new Promise((resolve, reject) => {
+    entry.file(
+      (file) => resolve(fileWithRelativePath(file, relativePath || file.name)),
+      reject,
+    );
+  });
+}
+
+function readDirectoryEntries(
+  entry: BrowserFileSystemDirectoryEntry,
+): Promise<BrowserFileSystemEntry[]> {
+  const reader = entry.createReader();
+  const entries: BrowserFileSystemEntry[] = [];
+
+  return new Promise((resolve, reject) => {
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) {
+          resolve(entries);
+          return;
+        }
+        entries.push(...batch);
+        readBatch();
+      }, reject);
+    };
+
+    readBatch();
+  });
+}
+
+function getBrowserFileSystemEntry(item: DataTransferItem): BrowserFileSystemEntry | null {
+  const entry = (item as BrowserDataTransferItem).webkitGetAsEntry?.() ?? null;
+  return isBrowserFileSystemEntry(entry) ? entry : null;
+}
+
+function isBrowserFileSystemEntry(
+  entry: unknown,
+): entry is BrowserFileSystemEntry {
+  return Boolean(
+    entry &&
+      typeof entry === "object" &&
+      "name" in entry &&
+      "isFile" in entry &&
+      "isDirectory" in entry &&
+      typeof entry.name === "string" &&
+      typeof entry.isFile === "boolean" &&
+      typeof entry.isDirectory === "boolean",
+  );
+}
+
+function fileWithRelativePath(file: File, relativePath: string): File {
+  const fileWithPath = file as File & { radsysxRelativePath?: string };
+  Object.defineProperty(fileWithPath, "radsysxRelativePath", {
+    configurable: true,
+    value: relativePath || file.name,
+  });
+  return fileWithPath;
+}
+
+function joinRelativePath(parentPath: string, name: string): string {
+  const cleanParent = parentPath.replace(/^\/+|\/+$/g, "");
+  const cleanName = name.replace(/^\/+|\/+$/g, "");
+  return cleanParent ? `${cleanParent}/${cleanName}` : cleanName;
+}
+
 function desktopPickedFileToFile(part: DesktopPickedFile): File {
   const file = new File([toBlobPart(part.data)], part.name, {
     lastModified: part.lastModified,
     type: part.type || "application/octet-stream",
-  }) as File & { radsysxRelativePath?: string };
-  Object.defineProperty(file, "radsysxRelativePath", {
-    configurable: true,
-    value: part.relativePath || part.name,
   });
-  return file;
+  return fileWithRelativePath(file, part.relativePath || part.name);
 }
 
 function toBlobPart(data: ArrayBuffer | ArrayBufferView): BlobPart {

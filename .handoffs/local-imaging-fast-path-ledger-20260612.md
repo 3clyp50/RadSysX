@@ -26,7 +26,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - Generated OHIF viewer assets from `viewer/dist/`.
 - Desktop runtime defaults to local `pilot` mode with local seeded auth and development secrets.
 - The current desktop fast path can validate seeded login, worklist, launch/session resolution, workspace/report/AI/audit contracts.
-- The Electron desktop path now exposes a native local imaging file/folder picker through a narrow preload bridge, while retaining browser file inputs as fallback.
+- The Electron desktop path now exposes a native local imaging file/folder picker through a narrow preload bridge, while retaining browser file input and drag-and-drop fallbacks.
 - The desktop import smoke can validate no-Docker import/use of synthetic DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files through the one-origin local bridge.
 - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require compose unless a local DICOMweb target is configured.
 
@@ -54,7 +54,6 @@ This is not merely an upload button. The desired end state is a local app that c
 - Existing clinical worklist is seeded in SQLite through `backend/clinical/repositories.py`.
 - Existing clinical viewer expects DICOMweb roots from backend launch resolution.
 - Desktop bridge can serve `/viewer` and proxy `/api`; it has a placeholder route for `/dicom-web`.
-- There is not yet a local file ingest service that turns uploaded DICOM/DICOMDIR/NIFTI files into a clinical/local workspace.
 - There is now a first backend-owned local file ingest service in `backend/clinical/local_imaging.py`.
 - There is now an ignored repo-local storage default at `backend/local-imaging-data/`, enabled by Electron.
 - There is now a minimal backend local DICOMweb surface for imported DICOM: study/series/instance metadata, whole-instance multipart retrieval, bulk-data multipart retrieval, and simple frame multipart retrieval.
@@ -65,14 +64,14 @@ This is not merely an upload button. The desired end state is a local app that c
 - There is now a reproducible desktop import smoke at `npm run desktop:smoke:import`; it starts Electron on high local ports, generates PHI-free synthetic imaging files, imports them, verifies worklist rows, asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the runtime down.
 - There is now an Electron-native file/folder selection bridge at `window.radsysxDesktop.selectLocalImagingFiles`; it reads selected files in the desktop main process, preserves folder-relative paths as `radsysxRelativePath`, and then the frontend imports through the same backend local imaging contract.
 - NIFTI display still needs a dedicated full volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries, multi-axis slice previews, and deterministic voxel statistics.
-- DICOMDIR expansion needs parsing and file-path resolution rules.
-- Cross-platform file picker and directory upload behavior needs explicit testing.
+- Deeper DICOMDIR directory-record parsing and file-path resolution rules remain future work beyond the current included-file grouping path.
+- Cross-platform file picker, directory upload, and real UI drag-and-drop behavior need explicit testing.
 - Diagnostic AI/segmentation remains future work; the current no-Docker analyzer is deliberately technical and deterministic, not a clinical diagnosis engine.
 
 ## Concrete Requirements Derived From User Objective
 
 1. The app must be runnable locally through the desktop fast path.
-2. A user must be able to choose local medical image files or folders from the desktop app.
+2. A user must be able to choose or drop local medical image files or folders from the desktop app.
 3. The local ingest path must accept at least:
    - Single DICOM files.
    - Multiple DICOM files representing a study/series.
@@ -114,6 +113,7 @@ Likely components:
 - `frontend/app/worklist/page.tsx` or a dedicated local import route:
   - Add a compact local import control visible in desktop/local modes.
   - Use browser file/directory input as a fallback.
+  - Use browser drag-and-drop as a portable fallback when it can still submit to the backend import contract.
 - `desktop/src/main.mjs` and `desktop/src/preload.cjs`:
   - Expose an Electron file/folder picker through narrow IPC for better cross-platform directory selection.
   - Keep web app fallback input for browser compatibility.
@@ -194,6 +194,7 @@ Likely components:
 - [x] Add local import UI to the desktop/local app path.
 - [x] Keep controls dense and operational, not marketing-style.
 - [x] Support native Electron file/folder selection and browser file/directory selection where browsers allow it.
+- [x] Support browser drag-and-drop for files and Chromium-exposed folders while preserving relative paths.
 - [x] Allow multiple files.
 - [x] Clearly show supported formats without in-app instructional clutter.
 - [x] Show import success, warnings, and errors.
@@ -205,7 +206,7 @@ Likely components:
 - [x] Add a worklist local-analysis action that renders backend technical metrics for imported assets.
 - [x] Keep text inside buttons/cards from overflowing on mobile and desktop in the worklist controls touched by this tranche.
 - [x] Prefer the Electron native file/folder picker when available, while retaining browser input fallback.
-- [ ] Add richer drag-and-drop affordance for local import if it can stay compatible with governed backend upload.
+- [x] Add richer drag-and-drop affordance for local import if it can stay compatible with governed backend upload.
 - [ ] Add a dedicated local study detail route if the inspection panel becomes too dense for the worklist.
 
 ### Desktop Integration
@@ -213,7 +214,7 @@ Likely components:
 - [x] Add Electron IPC file/folder picker for the desktop fast path.
 - [x] Expose the picker through `preload.cjs` without exposing raw filesystem or shell primitives.
 - [x] Preserve folder-relative paths from Electron picks through `radsysxRelativePath`.
-- [ ] Keep drag-and-drop browser upload as a portable fallback.
+- [x] Keep drag-and-drop browser upload as a portable fallback.
 - [ ] Ensure desktop bridge/proxy behavior handles large upload sizes beyond focused smoke fixtures.
 - [x] Ensure startup environment points local upload storage to a predictable ignored path.
 - [x] Verify `npm run desktop:smoke` still starts and cleans up.
@@ -285,10 +286,11 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: `npm run desktop:doctor` and `npm run desktop:smoke` also passed after the imported-study asset-summary tranche.
   - Evidence: `npm run desktop:smoke:import` passed after being added as a committed script.
   - Evidence: Electron now exposes a native local imaging file/folder picker through `window.radsysxDesktop.selectLocalImagingFiles`.
+  - Evidence: the worklist local import panel now accepts browser drag-and-drop files and Chromium-exposed folders, preserving folder-relative paths as `radsysxRelativePath` before submitting to the backend import endpoint.
   - Evidence: `desktop:smoke:import` now also fetches backend-mediated NIFTI SVG and PNG previews through the local bridge.
   - Evidence: `desktop:smoke:import` now verifies NIFTI preview slice metadata and a non-default coronal preview through the local bridge.
   - Evidence: `desktop:smoke:import` now fetches backend technical analysis results for imported DICOM, NIFTI, and PNG assets through the local bridge.
-  - Remaining gap: needs manual or automation-backed native OS dialog upload smoke before final completion.
+  - Remaining gap: needs manual or automation-backed native OS dialog or drag-and-drop upload smoke before final completion.
 - Upload/select local DICOM:
   - Evidence: backend endpoint tests import synthetic DICOM through `POST /api/local-imaging/import`; local DICOMweb and asset summary tests prove the stored DICOM is discoverable and viewer-eligible; `npm run desktop:smoke:import` imports synthetic DICOM and reports viewer eligibility.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove simple uncompressed DICOM pixel technical analysis, including frame dimensions, intensity range, and mean intensity.
@@ -322,9 +324,9 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: full OHIF pixel rendering across real-world DICOM and richer diagnostic/AI NIFTI/image analysis remain unproven.
 - No Docker required for the fast path:
   - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews/analysis, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
-  - Remaining gap: final UI runtime smoke should be repeated through hydrated worklist controls and the native OS dialog.
+  - Remaining gap: final UI runtime smoke should be repeated through hydrated worklist controls and the native OS dialog or drag-and-drop surface.
 - Cross-platform design:
-  - Evidence: browser file inputs preserve `webkitRelativePath` when available; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
+  - Evidence: browser file inputs preserve `webkitRelativePath` when available; browser drag-and-drop preserves Chromium directory-entry relative paths as `radsysxRelativePath`; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
   - Remaining gap: Windows/macOS native directory picker behavior is implemented via Electron but not yet tested on those OSes.
 - PHI/security guardrails preserved:
   - Evidence: imported files stay outside public static routes; manifests avoid raw DICOM patient identifiers in tests; local asset summaries/previews/analysis omit private stored paths and raw DICOM tags; endpoints require signed backend session and `RADSYSX_LOCAL_IMAGING_ENABLED`.
@@ -333,6 +335,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: focused local imaging backend tests and Python compile checks passed during this tranche; full clinical platform test suite passed; frontend/viewer type-checks passed; viewer build passed; desktop doctor and desktop smoke passed; committed desktop import smoke passed.
   - Evidence: after the preview tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings.
   - Evidence: after the local technical analysis tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings; broader verification must be rerun after final edits.
-  - Remaining gap: true native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
+  - Evidence: after the drag-and-drop import tranche, `npm run type-check --workspace frontend`, `npm run type-check`, `npm run desktop:smoke:import`, `npm run desktop:doctor`, `python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run desktop:smoke`, and `git diff --check` passed.
+  - Remaining gap: true native OS dialog or drag-and-drop upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

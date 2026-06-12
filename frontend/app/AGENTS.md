@@ -12,8 +12,9 @@
 
 - `/login` establishes local seeded clinical sessions through the backend.
 - `/worklist` is the clinical launch surface and must create opaque imaging launch sessions through the backend.
-- `/worklist` may expose local imaging import and imported-study inspection/analysis controls when backend platform config enables them; imports, asset summaries, technical analysis, NIFTI slice navigation, and preview thumbnails must go through the backend local imaging contract.
+- `/worklist` may expose local imaging import and imported-study inspection/analysis controls when backend platform config enables them; native picker, browser input, and drag-and-drop imports plus asset summaries, technical analysis, NIFTI slice navigation, and preview thumbnails must go through the backend local imaging contract.
 - In Electron, `/worklist` may use `window.radsysxDesktop.selectLocalImagingFiles` as the native file/folder picker, but selected bytes still flow through the backend local imaging import contract.
+- Browser drag-and-drop may recurse through Chromium directory entries and preserve relative paths as `radsysxRelativePath`; never preserve absolute local paths or route dropped bytes through research-only upload handlers.
 - `/` may help select or explain surfaces, but must not become a clinical viewer runtime.
 - Do not add a Next.js `/viewer` route for clinical fallback.
 - Route copy and behavior must preserve the distinction between research and governed clinical modes.
