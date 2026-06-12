@@ -268,7 +268,7 @@ This path is intentionally no-Docker. It is enough for seeded login, native loca
 
 By default Electron starts at `/viewer/?local=1`, strips that helper query from the visible URL, and shows a compact OHIF local import screen. DICOM imports auto-open in OHIF through the governed launch contract. Non-DICOM-only imports fall back to the worklist's local asset inspection panel.
 
-The desktop launcher builds the frontend production shell on first launch for the selected local bridge URL, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the stamp matches. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
+The desktop launcher builds the frontend production shell on first launch, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the same-origin public API/viewer settings match. This keeps the local app from rebuilding just because it chooses a fallback localhost port. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
 
 ```bash
 npm run desktop:dev-frontend

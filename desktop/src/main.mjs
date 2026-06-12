@@ -604,9 +604,8 @@ async function startRuntime() {
     RADSYSX_LOCAL_IMAGING_STORAGE_DIR:
       process.env.RADSYSX_LOCAL_IMAGING_STORAGE_DIR ??
       path.join(workspaceRoot, "backend", "local-imaging-data"),
-    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL ?? publicBaseUrl,
-    NEXT_PUBLIC_VIEWER_BASE_URL:
-      process.env.NEXT_PUBLIC_VIEWER_BASE_URL ?? `${publicBaseUrl}/viewer`,
+    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL ?? "",
+    NEXT_PUBLIC_VIEWER_BASE_URL: process.env.NEXT_PUBLIC_VIEWER_BASE_URL ?? "/viewer",
     NEXT_PUBLIC_RADSYSX_APP_MODE:
       process.env.NEXT_PUBLIC_RADSYSX_APP_MODE ?? (process.env.RADSYSX_APP_MODE ?? "pilot"),
   };

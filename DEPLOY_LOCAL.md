@@ -12,7 +12,7 @@ This starts the local clinical FastAPI backend, a production Next.js standalone 
 
 `RADSYSX_DESKTOP_START_PATH` can override the first route for focused validation, but normal local use should keep the default `/viewer/?local=1` so OHIF is the first screen.
 
-The desktop launcher first checks the local bootstrap, runs `npm run desktop:bootstrap` if setup is incomplete, then builds and stamps the frontend production shell for its selected bridge URL when needed. Use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop` to force a rebuild, or `npm run desktop:dev-frontend` when intentionally developing against the Next.js dev server.
+The desktop launcher first checks the local bootstrap, runs `npm run desktop:bootstrap` if setup is incomplete, then builds and stamps the frontend production shell when needed. The default public frontend API/viewer settings are same-origin, so the local app can reuse the same build if it chooses a fallback localhost port. Use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop` to force a rebuild, or `npm run desktop:dev-frontend` when intentionally developing against the Next.js dev server.
 
 `npm run desktop:bootstrap` is a cross-platform Node bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. Use `npm run desktop -- --check-only` or `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies. Use `npm run desktop:run` only when intentionally bypassing the user-facing setup check after setup is known good.
 
