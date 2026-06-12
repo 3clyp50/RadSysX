@@ -641,6 +641,7 @@ async function waitForStandaloneLocalViewer(cdp, publicBaseUrl) {
     `(() => ({
       href: window.location.href,
       pathname: window.location.pathname,
+      documentTitle: document.title,
       localQueryPresent: new URL(window.location.href).searchParams.has("local"),
       loaderPresent: Boolean(document.getElementById("radsysx-loader")),
       localViewerReady: window.__RADSYSX_LOCAL_VIEWER_READY__ === true,
@@ -658,6 +659,9 @@ async function waitForStandaloneLocalViewer(cdp, publicBaseUrl) {
 
   if (localViewerState.localQueryPresent) {
     throw new Error(`Local query was not stripped from the visible viewer URL: ${localViewerState.href}`);
+  }
+  if (localViewerState.documentTitle !== "RadSysX") {
+    throw new Error(`Viewer document title was not RadSysX: ${JSON.stringify(localViewerState)}`);
   }
   if (localViewerState.loaderPresent || localViewerState.localStartCardPresent) {
     throw new Error(`Desktop local viewer is still blocked by an intermediate overlay: ${JSON.stringify(localViewerState)}`);
@@ -818,6 +822,7 @@ async function verifyStandaloneLocalDicomViewer(cdp) {
     `(() => ({
       href: window.location.href,
       pathname: window.location.pathname,
+      documentTitle: document.title,
       studyInstanceUIDs: new URL(window.location.href).searchParams.getAll("StudyInstanceUIDs"),
       datasources: new URL(window.location.href).searchParams.get("datasources"),
       localViewer: window.__RADSYSX_LOCAL_VIEWER__ === true,
@@ -833,15 +838,125 @@ async function verifyStandaloneLocalDicomViewer(cdp) {
   if (viewerState.launchPresent || viewerState.loaderPresent || viewerState.workspacePanelPresent) {
     throw new Error(`Standalone local viewer retained governed UI state: ${JSON.stringify(viewerState)}`);
   }
+  if (viewerState.documentTitle !== "RadSysX") {
+    throw new Error(`Standalone local viewer title was not RadSysX: ${JSON.stringify(viewerState)}`);
+  }
   if (viewerState.workspaceUnavailableTextSeen) {
     throw new Error("Standalone local viewer showed governed workspace-unavailable copy.");
   }
 
   const renderProbe = await waitForViewerRenderProbe(cdp);
+  const aiChatState = await verifyAiChatPanel(cdp);
   return {
     ...viewerState,
     renderProbe,
+    aiChatState,
   };
+}
+
+async function verifyAiChatPanel(cdp) {
+  const openState = await evaluateInRenderer(
+    cdp,
+    `(${openAiChatPanelInRenderer.toString()})()`,
+    30000,
+  );
+  if (!openState.aiPanelRegistered) {
+    throw new Error(`RadSysX AI panel was not registered: ${JSON.stringify(openState)}`);
+  }
+  if (!openState.aiTabPresent) {
+    throw new Error(`RadSysX AI panel tab was not visible: ${JSON.stringify(openState)}`);
+  }
+
+  await waitForRendererCondition(
+    cdp,
+    `Boolean(document.querySelector("radsysx-ai-chat-panel textarea")) &&
+      Boolean(document.querySelector("radsysx-ai-chat-panel [data-action='voice']")) &&
+      Boolean(document.querySelector("radsysx-ai-chat-panel [data-action='toggle-mention']"))`,
+    "RadSysX AI chat composer",
+    30000,
+  );
+
+  const chatState = await evaluateInRenderer(
+    cdp,
+    `(() => {
+      const panel = document.querySelector("radsysx-ai-chat-panel");
+      const textarea = panel?.querySelector("textarea");
+      const mentionButton = panel?.querySelector("[data-action='toggle-mention']");
+      const voiceButton = panel?.querySelector("[data-action='voice']");
+      const sendButton = panel?.querySelector("button[type='submit']");
+      mentionButton?.click();
+      return {
+        aiPanelPresent: Boolean(panel),
+        composerPresent: Boolean(textarea),
+        mentionButtonPresent: Boolean(mentionButton),
+        voiceButtonPresent: Boolean(voiceButton),
+        sendButtonPresent: Boolean(sendButton),
+        mentionMenuOpen: panel?.querySelector(".radsysx-ai-mention-menu")?.getAttribute("data-open") === "true",
+        roiOptionPresent: Boolean(panel?.querySelector("[data-attachment-kind='roi']")),
+        segmentationOptionPresent: Boolean(panel?.querySelector("[data-attachment-kind='segmentation']"))
+      };
+    })()`,
+    30000,
+  );
+
+  if (
+    !chatState.aiPanelPresent ||
+    !chatState.composerPresent ||
+    !chatState.mentionButtonPresent ||
+    !chatState.voiceButtonPresent ||
+    !chatState.sendButtonPresent ||
+    !chatState.mentionMenuOpen ||
+    !chatState.roiOptionPresent ||
+    !chatState.segmentationOptionPresent
+  ) {
+    throw new Error(`RadSysX AI chat composer was incomplete: ${JSON.stringify(chatState)}`);
+  }
+
+  return {
+    ...openState,
+    ...chatState,
+  };
+}
+
+async function openAiChatPanelInRenderer() {
+  const panelModules = window.__RADSYSX_OHIF_EXTENSION__?.getPanelModule?.() ?? [];
+  const aiPanelRegistered = panelModules.some((module) => module?.name === "aiChat");
+  const confirmButton = Array.from(document.querySelectorAll("button"))
+    .find((candidate) => candidate.textContent?.trim() === "Confirm and hide");
+  confirmButton?.click();
+  if (confirmButton) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  const controlCandidates = Array.from(
+    document.querySelectorAll("button,[role='button'],[role='tab'],[aria-label],[title]"),
+  );
+  const aiTab = controlCandidates.find((candidate) => {
+    const label = [
+      candidate.getAttribute("aria-label"),
+      candidate.getAttribute("title"),
+      candidate.textContent,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return /\bRadSysX AI\b/i.test(label) || /\bAI\b/.test(label);
+  });
+
+  const aiClickTarget = aiTab?.querySelector?.('[data-cy="aiChat-btn"]') ?? aiTab;
+  aiClickTarget?.click();
+  if (aiTab) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  const state = {
+    aiPanelRegistered,
+    aiTabPresent: Boolean(aiTab),
+    aiPanelPresent: Boolean(document.querySelector("radsysx-ai-chat-panel")),
+    panelModuleNames: panelModules.map((module) => module?.name).filter(Boolean),
+    aiTabLabel: aiTab?.getAttribute("aria-label") ?? aiTab?.getAttribute("title") ?? null,
+  };
+  window.__RADSYSX_AI_SMOKE_OPEN_STATE__ = state;
+  return state;
 }
 
 async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
@@ -1312,6 +1427,7 @@ async function waitForRendererCondition(cdp, expression, label, timeoutMs = 6000
             src: script.src,
             type: script.type,
           })).slice(0, 40),
+          aiSmoke: window.__RADSYSX_AI_SMOKE_OPEN_STATE__ ?? null,
           testIds: Array.from(document.querySelectorAll("[data-testid]")).map((node) => node.getAttribute("data-testid")),
         };
       })()`);

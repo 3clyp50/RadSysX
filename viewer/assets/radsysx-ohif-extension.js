@@ -13,6 +13,24 @@
   const EXTENSION_ID = "@radsysx/extension-clinical";
   const DEFAULT_DICOMWEB_NAMESPACE = "@ohif/extension-default.dataSourcesModule.dicomweb";
   const WORKSPACE_PANEL_ID = `${EXTENSION_ID}.panelModule.workspace`;
+  const AI_CHAT_PANEL_ID = `${EXTENSION_ID}.panelModule.aiChat`;
+  const AI_ATTACHMENT_OPTIONS = [
+    {
+      kind: "roi",
+      label: "ROI",
+      body: "Current region context",
+    },
+    {
+      kind: "segmentation",
+      label: "Segmentation",
+      body: "Visible segment context",
+    },
+    {
+      kind: "measurement",
+      label: "Measurement",
+      body: "Active measurement context",
+    },
+  ];
 
   class RadSysXWorkspacePanel extends HTMLElement {
     connectedCallback() {
@@ -365,9 +383,295 @@
     }
   }
 
+  class RadSysXAIChatPanel extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.connected === "true") {
+        return;
+      }
+
+      this.dataset.connected = "true";
+      this.classList.add("radsysx-panel-root", "radsysx-ai-chat-root");
+      this.state = {
+        messages: [
+          {
+            role: "assistant",
+            text: "RadSysX AI is ready for local viewer context.",
+            attachments: [],
+          },
+        ],
+        draft: "",
+        attachments: [],
+        mentionOpen: false,
+        listening: false,
+        voiceStatus: null,
+      };
+      this.recognition = null;
+      this.render();
+    }
+
+    disconnectedCallback() {
+      this.stopVoiceInput();
+    }
+
+    bindActions() {
+      this.querySelector("form")?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        this.sendMessage();
+      });
+      this.querySelector("textarea")?.addEventListener("input", (event) => {
+        this.handleDraftInput(event);
+      });
+      this.querySelector("textarea")?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          this.sendMessage();
+        }
+      });
+      this.querySelector("[data-action='toggle-mention']")?.addEventListener("click", () => {
+        this.state.mentionOpen = !this.state.mentionOpen;
+        this.render();
+      });
+      this.querySelector("[data-action='voice']")?.addEventListener("click", () => {
+        this.toggleVoiceInput();
+      });
+      this.querySelectorAll("[data-attachment-kind]").forEach((button) => {
+        button.addEventListener("click", () => {
+          this.addAttachment(button.getAttribute("data-attachment-kind") ?? "");
+        });
+      });
+      this.querySelectorAll("[data-remove-attachment]").forEach((button) => {
+        button.addEventListener("click", () => {
+          this.removeAttachment(button.getAttribute("data-remove-attachment") ?? "");
+        });
+      });
+    }
+
+    handleDraftInput(event) {
+      const textarea = /** @type {HTMLTextAreaElement} */ (event.target);
+      this.state.draft = textarea.value;
+      const cursor = textarea.selectionStart ?? textarea.value.length;
+      const beforeCursor = textarea.value.slice(0, cursor);
+      const shouldOpenMention = /(^|\s)@[\w-]*$/.test(beforeCursor);
+      if (shouldOpenMention !== this.state.mentionOpen) {
+        this.state.mentionOpen = shouldOpenMention;
+        this.render();
+      }
+    }
+
+    addAttachment(kind) {
+      const option = AI_ATTACHMENT_OPTIONS.find((item) => item.kind === kind);
+      if (!option) {
+        return;
+      }
+
+      const exists = this.state.attachments.some((item) => item.kind === option.kind);
+      if (!exists) {
+        this.state.attachments.push({
+          id: `${option.kind}-${Date.now()}`,
+          kind: option.kind,
+          label: option.label,
+        });
+      }
+
+      this.state.draft = this.state.draft.replace(/(^|\s)@[\w-]*$/, "$1").trimStart();
+      this.state.mentionOpen = false;
+      this.render();
+      this.querySelector("textarea")?.focus();
+    }
+
+    removeAttachment(id) {
+      this.state.attachments = this.state.attachments.filter((item) => item.id !== id);
+      this.render();
+    }
+
+    sendMessage() {
+      const textarea = /** @type {HTMLTextAreaElement | null} */ (this.querySelector("textarea"));
+      const draft = (textarea?.value ?? this.state.draft).trim();
+      if (!draft && this.state.attachments.length === 0) {
+        return;
+      }
+
+      const attachments = this.state.attachments.map((item) => ({ ...item }));
+      this.state.messages.push({
+        role: "user",
+        text: draft || "Attached viewer context.",
+        attachments,
+      });
+      this.state.messages.push({
+        role: "assistant",
+        text: "Local draft captured. Backend AI orchestration is not connected yet.",
+        attachments: [],
+      });
+      this.state.draft = "";
+      this.state.attachments = [];
+      this.state.mentionOpen = false;
+      this.state.voiceStatus = null;
+      this.render();
+      this.scrollThreadToBottom();
+    }
+
+    toggleVoiceInput() {
+      if (this.state.listening) {
+        this.stopVoiceInput();
+        this.state.listening = false;
+        this.state.voiceStatus = "Voice input stopped.";
+        this.render();
+        return;
+      }
+
+      const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+      if (!Recognition) {
+        this.state.voiceStatus = "Voice input is unavailable in this runtime.";
+        this.render();
+        return;
+      }
+
+      const recognition = new Recognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((result) => result?.[0]?.transcript ?? "")
+          .join(" ")
+          .trim();
+        if (!transcript) {
+          return;
+        }
+        const textarea = /** @type {HTMLTextAreaElement | null} */ (this.querySelector("textarea"));
+        const nextDraft = [this.state.draft, transcript].filter(Boolean).join(" ").trim();
+        this.state.draft = nextDraft;
+        if (textarea) {
+          textarea.value = nextDraft;
+        }
+      };
+      recognition.onerror = (event) => {
+        this.state.listening = false;
+        this.state.voiceStatus = `Voice input stopped: ${event.error ?? "unavailable"}.`;
+        this.render();
+      };
+      recognition.onend = () => {
+        this.state.listening = false;
+        if (!this.state.voiceStatus) {
+          this.state.voiceStatus = "Voice input ready.";
+        }
+        this.render();
+      };
+
+      this.recognition = recognition;
+      this.state.listening = true;
+      this.state.voiceStatus = "Listening.";
+      this.render();
+      try {
+        recognition.start();
+      } catch (error) {
+        this.state.listening = false;
+        this.state.voiceStatus =
+          error instanceof Error ? error.message : "Voice input could not start.";
+        this.render();
+      }
+    }
+
+    stopVoiceInput() {
+      if (!this.recognition) {
+        return;
+      }
+
+      try {
+        this.recognition.stop();
+      } catch (error) {
+        console.warn("Unable to stop RadSysX voice input.", error);
+      }
+      this.recognition = null;
+    }
+
+    scrollThreadToBottom() {
+      const thread = this.querySelector(".radsysx-ai-thread");
+      if (thread) {
+        thread.scrollTop = thread.scrollHeight;
+      }
+    }
+
+    render() {
+      this.innerHTML = `
+        <div class="radsysx-ai-shell">
+          <div class="radsysx-panel-header radsysx-ai-header">
+            <div>
+              <div class="radsysx-panel-kicker">RadSysX AI</div>
+              <div class="radsysx-panel-title">Imaging chat</div>
+            </div>
+            <div class="radsysx-ai-state">Local</div>
+          </div>
+
+          <div class="radsysx-ai-thread" role="log" aria-label="RadSysX AI chat">
+            ${this.state.messages.map((message) => renderAiMessage(message)).join("")}
+          </div>
+
+          <form class="radsysx-ai-composer">
+            ${
+              this.state.attachments.length > 0
+                ? `<div class="radsysx-ai-attachment-row">
+                    ${this.state.attachments.map((item) => renderComposerAttachment(item)).join("")}
+                  </div>`
+                : ""
+            }
+
+            <div class="radsysx-ai-mention-menu" data-open="${this.state.mentionOpen ? "true" : "false"}">
+              ${AI_ATTACHMENT_OPTIONS.map(renderAttachmentOption).join("")}
+            </div>
+
+            <textarea
+              rows="3"
+              aria-label="RadSysX AI message"
+              placeholder="Ask RadSysX AI"
+            >${escapeHtml(this.state.draft)}</textarea>
+
+            <div class="radsysx-ai-composer-footer">
+              <div class="radsysx-ai-composer-actions">
+                <button
+                  class="radsysx-ai-icon-button"
+                  data-action="toggle-mention"
+                  type="button"
+                  title="Attach ROI or segmentation"
+                  aria-label="Attach ROI or segmentation"
+                >@</button>
+                <button
+                  class="radsysx-ai-icon-button"
+                  data-action="voice"
+                  data-active="${this.state.listening ? "true" : "false"}"
+                  type="button"
+                  title="Voice input"
+                  aria-label="Voice input"
+                >${renderMicIcon()}</button>
+              </div>
+              <button
+                class="radsysx-ai-send-button"
+                type="submit"
+                title="Send"
+                aria-label="Send message"
+              >${renderSendIcon()}</button>
+            </div>
+            ${
+              this.state.voiceStatus
+                ? `<div class="radsysx-ai-voice-status">${escapeHtml(this.state.voiceStatus)}</div>`
+                : ""
+            }
+          </form>
+        </div>
+      `;
+
+      this.bindActions();
+    }
+  }
+
   if (!customElements.get("radsysx-workspace-panel")) {
     customElements.define("radsysx-workspace-panel", RadSysXWorkspacePanel);
   }
+
+  if (!customElements.get("radsysx-ai-chat-panel")) {
+    customElements.define("radsysx-ai-chat-panel", RadSysXAIChatPanel);
+  }
+  installAiPanelTabLabeler();
 
   window.__RADSYSX_OHIF_EXTENSION__ = {
     id: EXTENSION_ID,
@@ -436,9 +740,131 @@
           label: "RadSysX Workspace",
           component: () => React.createElement("radsysx-workspace-panel"),
         },
+        {
+          name: "aiChat",
+          iconName: "AI",
+          iconLabel: "AI",
+          label: "RadSysX AI",
+          component: () => React.createElement("radsysx-ai-chat-panel"),
+        },
       ];
     },
   };
+
+  function renderAiMessage(message) {
+    const role = message.role === "user" ? "You" : "RadSysX AI";
+    return `
+      <article class="radsysx-ai-message" data-role="${escapeHtml(message.role)}">
+        <div class="radsysx-ai-message-role">${escapeHtml(role)}</div>
+        <div class="radsysx-ai-message-body">${escapeHtml(message.text)}</div>
+        ${renderAttachmentChips(message.attachments)}
+      </article>
+    `;
+  }
+
+  function renderAttachmentChips(attachments) {
+    if (!attachments || attachments.length === 0) {
+      return "";
+    }
+
+    return `
+      <div class="radsysx-ai-message-attachments">
+        ${attachments
+          .map(
+            (item) => `
+              <span class="radsysx-ai-chip">
+                @${escapeHtml(item.label)}
+              </span>
+            `,
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  function renderComposerAttachment(item) {
+    return `
+      <span class="radsysx-ai-chip radsysx-ai-chip-removable">
+        @${escapeHtml(item.label)}
+        <button
+          data-remove-attachment="${escapeHtml(item.id)}"
+          type="button"
+          title="Remove"
+          aria-label="Remove ${escapeHtml(item.label)} attachment"
+        >${renderCloseIcon()}</button>
+      </span>
+    `;
+  }
+
+  function renderAttachmentOption(option) {
+    return `
+      <button
+        class="radsysx-ai-mention-option"
+        data-attachment-kind="${escapeHtml(option.kind)}"
+        type="button"
+      >
+        <span>@${escapeHtml(option.label)}</span>
+        <small>${escapeHtml(option.body)}</small>
+      </button>
+    `;
+  }
+
+  function renderMicIcon() {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" />
+        <path d="M19 11a7 7 0 0 1-14 0" />
+        <path d="M12 18v3" />
+        <path d="M8 21h8" />
+      </svg>
+    `;
+  }
+
+  function renderSendIcon() {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="m5 12 14-7-5 14-2-5-7-2Z" />
+        <path d="m12 14 7-9" />
+      </svg>
+    `;
+  }
+
+  function renderCloseIcon() {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </svg>
+    `;
+  }
+
+  function installAiPanelTabLabeler() {
+    const apply = () => {
+      document.querySelectorAll("button").forEach((button) => {
+        if (button.textContent?.trim() !== "Missing icon") {
+          return;
+        }
+        button.classList.add("radsysx-ai-panel-tab");
+        button.setAttribute("aria-label", "RadSysX AI");
+        button.setAttribute("title", "RadSysX AI");
+      });
+    };
+
+    const observe = () => {
+      if (!document.body) {
+        window.setTimeout(observe, 50);
+        return;
+      }
+      apply();
+      const observer = new MutationObserver(apply);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    };
+
+    observe();
+  }
 
   async function requestJson(path, init) {
     const response = await fetch(path, {

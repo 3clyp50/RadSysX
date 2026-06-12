@@ -968,9 +968,17 @@ function serveViewer(requestUrl, response) {
 
   response.writeHead(200, {
     "content-type": contentTypeFor(filePath),
-    "cache-control": filePath.endsWith("index.html") ? "no-store" : "public, max-age=300",
+    "cache-control": viewerCacheControl(filePath),
   });
   fs.createReadStream(filePath).pipe(response);
+}
+
+function viewerCacheControl(filePath) {
+  const assetName = path.basename(filePath);
+  if (filePath.endsWith("index.html") || assetName === "app-config.js" || viewerAssetNames.includes(assetName)) {
+    return "no-store";
+  }
+  return "public, max-age=300";
 }
 
 function safeJoin(root, relativePath) {
@@ -1027,6 +1035,7 @@ function writeText(response, status, text) {
 
 function createMainWindow() {
   const window = new BrowserWindow({
+    title: "RadSysX",
     width: 1440,
     height: 980,
     minWidth: 1100,
@@ -1043,6 +1052,11 @@ function createMainWindow() {
     },
   });
 
+  window.setTitle("RadSysX");
+  window.webContents.on("page-title-updated", (event) => {
+    event.preventDefault();
+    window.setTitle("RadSysX");
+  });
   window.once("ready-to-show", () => window.show());
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (publicBaseUrl && url.startsWith(publicBaseUrl)) {

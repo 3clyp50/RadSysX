@@ -11,6 +11,7 @@
 ## Local Contracts
 
 - Build script copies OHIF app dist, RadSysX assets, logo, React UMD asset, and patches runtime configuration.
+- Build script must cache-bust injected RadSysX runtime assets in `index.html` so Electron/Chromium does not keep stale extension, mode, bootstrap, or CSS behavior.
 - Generated files belong in `viewer/dist/`.
 - Do not make the build depend on machine-local paths outside the npm workspace.
 

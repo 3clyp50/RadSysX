@@ -15,7 +15,7 @@
 - Do not add or rely on a Next.js clinical `/viewer` fallback.
 - `dist/` is generated output from `npm run build --workspace viewer`; do not hand-edit generated bundles for durable behavior.
 - Governed viewer runtime must resolve opaque launch sessions through the backend and bind OHIF to returned same-origin DICOMweb roots. Standalone desktop/local OHIF routes may use OHIF's `dicomlocal` data source without a governed launch.
-- RadSysX report, AI, derived-result, and audit UI belongs in the OHIF extension/mode assets or backend contracts, not an ad hoc sidecar.
+- RadSysX report, AI, derived-result, and audit UI belongs in the OHIF extension/mode assets or backend contracts, not an ad hoc sidecar. Frontend-only exploratory AI chat affordances may live in the OHIF extension as long as they are clearly local UI state and do not imply backend AI execution.
 
 ## Work Guidance
 

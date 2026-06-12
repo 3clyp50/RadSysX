@@ -35,7 +35,7 @@ The current clinical baseline on this branch is:
 - Backend-issued signed cookies provide local seeded clinical identity until institutional auth replaces them.
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
-- The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path, opening OHIF first with local import ready.
+- The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path, opening OHIF first with local import ready, keeping the visible app name as RadSysX, and including a frontend-only RadSysX AI chat panel in the OHIF right sidebar.
 - The desktop app enables native local file/folder selection plus browser drag-and-drop fallback for backend-owned local imaging import of DICOM, DICOMDIR, NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, NRRD `.nrrd`, ZIP archives containing supported files, and common image files, with safe imported-study asset summaries, backend-mediated NIFTI slice previews/common-image previews including TIFF SVG header previews, NRRD header/voxel metrics, and deterministic technical analysis for local analysis readiness.
 
 The current research/agent baseline still includes:
@@ -266,7 +266,7 @@ The desktop runtime, bootstrap, doctor, and smoke helpers resolve the repo-local
 
 This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/NRRD `.nrrd`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, NRRD header/voxel metrics, deterministic technical analysis, opaque launch/session resolution, OHIF rendering of imported DICOM from the first screen, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
-By default Electron starts at `/viewer/local`, so the first visible screen is OHIF's native local DICOM loader. DICOM files load directly through OHIF's `dicomlocal` data source at `/viewer/dicomlocal` without a governed launch token or clinical workspace panel. NIFTI/NRRD/image/ZIP assets remain available through the local worklist inspection and analysis path.
+By default Electron starts at `/viewer/local`, so the first visible screen is OHIF's native local DICOM loader. DICOM files load directly through OHIF's `dicomlocal` data source at `/viewer/dicomlocal` without a governed launch token or clinical workspace panel. NIFTI/NRRD/image/ZIP assets remain available through the local worklist inspection and analysis path. The OHIF right sidebar includes a RadSysX AI tab with a local chat composer, voice-input affordance, and frontend-only `@` chips for ROI, segmentation, and measurement context.
 
 The desktop launcher builds the frontend production shell on first launch, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the same-origin public API/viewer settings match. This keeps the local app from rebuilding just because it chooses a fallback localhost port. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
 
@@ -294,7 +294,7 @@ For the first-screen OHIF local import/render check:
 npm run desktop:smoke:local-start
 ```
 
-That smoke starts Electron on `/viewer/local`, verifies OHIF's local file/folder controls are visible without a RadSysX bootstrap card, loads a synthetic DICOM through OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, and asserts that OHIF paints a nonblank canvas without a governed launch.
+That smoke starts Electron on `/viewer/local`, verifies OHIF's local file/folder controls are visible without a RadSysX bootstrap card, verifies the document title is `RadSysX`, loads a synthetic DICOM through OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, asserts that OHIF paints a nonblank canvas without a governed launch, and checks the RadSysX AI sidebar composer with voice and `@` ROI/segmentation controls.
 
 For the first-screen OHIF drag/drop import/render check:
 
@@ -302,7 +302,7 @@ For the first-screen OHIF drag/drop import/render check:
 npm run desktop:smoke:local-start-drop
 ```
 
-That smoke starts Electron on the same OHIF local screen, drops a synthetic DICOM directly onto it, forwards the drop into OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, and asserts that OHIF paints a nonblank canvas without a governed launch.
+That smoke starts Electron on the same OHIF local screen, drops a synthetic DICOM directly onto it, forwards the drop into OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, and asserts that OHIF paints a nonblank canvas with the `RadSysX` title and RadSysX AI sidebar composer, without a governed launch.
 
 For the first-screen NIFTI/NRRD/image-only fallback check:
 

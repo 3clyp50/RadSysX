@@ -9,6 +9,7 @@
   const LOCAL_START_INSPECT_KEY = "radsysx.localStart.inspectStudyUid";
   const REQUEST_TIMEOUT_MS = 10000;
   const DROP_RELATIVE_PATH_KEY = "radsysxRelativePath";
+  enforceRadSysXTitle();
   const loader = await ensureLoader();
   const params = new URLSearchParams(window.location.search);
   const launchFromUrl = params.get("launch");
@@ -706,6 +707,36 @@
 
     const normalized = `/${trimmed.replace(/^\/+/, "")}`.replace(/\/+$/, "");
     return normalized || "/";
+  }
+
+  function enforceRadSysXTitle() {
+    const desiredTitle = "RadSysX";
+    const setTitle = () => {
+      if (document.title !== desiredTitle) {
+        document.title = desiredTitle;
+      }
+    };
+
+    setTitle();
+
+    let titleElement = document.querySelector("title");
+    if (!titleElement) {
+      titleElement = document.createElement("title");
+      document.head?.appendChild(titleElement);
+    }
+
+    if (titleElement) {
+      const observer = new MutationObserver(setTitle);
+      observer.observe(titleElement, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+
+    window.addEventListener("load", setTitle, { once: true });
+    window.setTimeout(setTitle, 250);
+    window.setTimeout(setTitle, 1200);
   }
 
   function normalizeSameOriginUrl(value) {

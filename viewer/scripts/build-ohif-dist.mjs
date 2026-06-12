@@ -12,6 +12,12 @@ const candidateSourceDists = [
   path.join(workspaceRoot, "node_modules", "@ohif", "app", "dist"),
 ];
 const sourceDist = candidateSourceDists.find((candidate) => fs.existsSync(candidate));
+const runtimeAssetNames = [
+  "radsysx-bootstrap.js",
+  "radsysx-ohif-extension.js",
+  "radsysx-ohif-mode.js",
+  "radsysx-viewer.css",
+];
 
 if (!sourceDist) {
   throw new Error(
@@ -23,10 +29,9 @@ fs.rmSync(distRoot, { recursive: true, force: true });
 fs.mkdirSync(distRoot, { recursive: true });
 fs.cpSync(sourceDist, distRoot, { recursive: true });
 
-copyViewerAsset("radsysx-bootstrap.js");
-copyViewerAsset("radsysx-ohif-extension.js");
-copyViewerAsset("radsysx-ohif-mode.js");
-copyViewerAsset("radsysx-viewer.css");
+for (const assetName of runtimeAssetNames) {
+  copyViewerAsset(assetName);
+}
 copyWorkspaceFile(["RadSysX-Logo.png"], "radsysx-logo.png");
 copyWorkspaceAsset(["react", "umd", "react.production.min.js"], "react.production.min.js");
 writeAppConfig();
@@ -153,6 +158,10 @@ function writeAppConfig() {
 function patchIndexHtml() {
   const indexPath = path.join(distRoot, "index.html");
   let html = fs.readFileSync(indexPath, "utf8");
+  const runtimeAssetVersion = runtimeAssetNames
+    .map((assetName) => fs.statSync(path.join(distRoot, assetName)).mtimeMs)
+    .reduce((latest, mtime) => Math.max(latest, mtime), 0)
+    .toFixed(0);
   const publicUrlBootstrap = [
     "window.__RADSYSX_VIEWER_BASE_PATH__ = (function resolveViewerBasePath() {",
     "  const pathname = String((window.location && window.location.pathname) || '/');",
@@ -179,15 +188,15 @@ function patchIndexHtml() {
     '<script rel="preload" as="script" src="app-config.js"></script>',
     [
       '<script src="react.production.min.js"></script>',
-      '<script src="radsysx-bootstrap.js"></script>',
-      '<script src="radsysx-ohif-extension.js"></script>',
-      '<script src="radsysx-ohif-mode.js"></script>',
+      `<script src="radsysx-bootstrap.js?v=${runtimeAssetVersion}"></script>`,
+      `<script src="radsysx-ohif-extension.js?v=${runtimeAssetVersion}"></script>`,
+      `<script src="radsysx-ohif-mode.js?v=${runtimeAssetVersion}"></script>`,
       '<script rel="preload" as="script" src="app-config.js"></script>',
     ].join(""),
   );
   html = html.replace(
     "</head>",
-    '<link href="radsysx-viewer.css" rel="stylesheet"></head>',
+    `<link href="radsysx-viewer.css?v=${runtimeAssetVersion}" rel="stylesheet"></head>`,
   );
 
   fs.writeFileSync(indexPath, html, "utf8");

@@ -7,6 +7,7 @@
       const [longitudinalMode] = await loadModules(["@ohif/mode-longitudinal"]);
       const baseMode = longitudinalMode.modeFactory({ modeConfiguration });
       const workspacePanel = "@radsysx/extension-clinical.panelModule.workspace";
+      const aiChatPanel = "@radsysx/extension-clinical.panelModule.aiChat";
       const baseRoute = baseMode.routes?.[0];
       const originalOnModeEnter = baseMode.onModeEnter?.bind(baseMode);
 
@@ -27,14 +28,14 @@
                 ...baseRoute,
                 layoutTemplate: () => {
                   const layout = baseRoute.layoutTemplate();
-                  if (isStandaloneLocalViewer()) {
-                    return layout;
-                  }
                   const props = layout?.props ?? {};
                   const rightPanels = Array.isArray(props.rightPanels)
                     ? [...props.rightPanels]
                     : [];
-                  if (!rightPanels.includes(workspacePanel)) {
+                  if (!rightPanels.includes(aiChatPanel)) {
+                    rightPanels.push(aiChatPanel);
+                  }
+                  if (!isStandaloneLocalViewer() && !rightPanels.includes(workspacePanel)) {
                     rightPanels.push(workspacePanel);
                   }
 
