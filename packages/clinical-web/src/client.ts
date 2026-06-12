@@ -11,6 +11,7 @@ import type {
   ImagingLaunchResolveResponse,
   ImagingLaunchResponse,
   LocalImagingImportResponse,
+  LocalImagingStudyAssetsResponse,
   LocalLoginRequest,
   LocalLoginResponse,
   ReportDraftRequest,
@@ -100,6 +101,14 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
       }
       form.set("relativePaths", JSON.stringify(relativePaths));
       return requestMultipart("/api/local-imaging/import", form, options);
+    },
+
+    getLocalImagingStudyAssets(studyInstanceUID: string): Promise<LocalImagingStudyAssetsResponse> {
+      return requestJson(
+        `/api/local-imaging/studies/${encodeURIComponent(studyInstanceUID)}/assets`,
+        undefined,
+        options,
+      );
     },
 
     launchImaging(payload: ImagingLaunchRequest): Promise<ImagingLaunchResponse> {

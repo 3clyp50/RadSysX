@@ -84,6 +84,7 @@ try:
         DerivedResultRequest,
         ImagingLaunchRequest,
         LocalImagingImportResponse,
+        LocalImagingStudyAssetsResponse,
         LocalLoginRequest,
         ReportDraftRequest,
         ResourceType,
@@ -110,6 +111,7 @@ except ModuleNotFoundError:
         DerivedResultRequest,
         ImagingLaunchRequest,
         LocalImagingImportResponse,
+        LocalImagingStudyAssetsResponse,
         LocalLoginRequest,
         ReportDraftRequest,
         ResourceType,
@@ -580,6 +582,18 @@ async def import_local_imaging(
             )
         )
     return result
+
+
+@app.get("/api/local-imaging/studies/{study_uid}/assets")
+async def get_local_imaging_study_assets(
+    study_uid: str,
+    http_request: Request,
+) -> LocalImagingStudyAssetsResponse:
+    """Return safe local asset metadata and deterministic analysis hints for an imported study."""
+    if not settings.local_imaging_enabled:
+        raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
+    _require_session(http_request)
+    return local_imaging_importer.study_assets(study_uid)
 
 
 @app.get("/dicom-web/studies")

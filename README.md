@@ -36,7 +36,7 @@ The current clinical baseline on this branch is:
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
 - The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path.
-- The desktop app enables backend-owned local imaging import for DICOM, DICOMDIR, NIFTI, and common image files.
+- The desktop app enables backend-owned local imaging import for DICOM, DICOMDIR, NIFTI, and common image files, with safe imported-study asset summaries for local analysis readiness.
 
 The current research/agent baseline still includes:
 
@@ -145,6 +145,7 @@ Research-only imaging/AI experimentation still includes:
 - `POST /api/imaging/launch`
 - `GET /api/imaging/launch/resolve`
 - `POST /api/local-imaging/import`
+- `GET /api/local-imaging/studies/{studyUid}/assets`
 - `GET /api/studies/{studyUid}/workspace`
 - `POST /api/reports/draft`
 - `POST /api/ai/jobs`

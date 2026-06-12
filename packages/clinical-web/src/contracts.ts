@@ -93,6 +93,36 @@ export type LocalImagingImportResponse = {
   warnings: string[];
 };
 
+export type LocalImagingStudyAsset = {
+  relativePath: string;
+  format: string;
+  modality?: string | null;
+  size: number;
+  studyInstanceUID?: string | null;
+  seriesInstanceUID?: string | null;
+  sopInstanceUID?: string | null;
+  analysisSupported: boolean;
+  viewerSupported: boolean;
+};
+
+export type LocalImagingStudyFinding = {
+  label: string;
+  value: string;
+};
+
+export type LocalImagingStudyAssetsResponse = {
+  studyInstanceUID: string;
+  archiveRef: string;
+  modality: string;
+  description: string;
+  fileCount: number;
+  formats: string[];
+  summary: string;
+  findings: LocalImagingStudyFinding[];
+  assets: LocalImagingStudyAsset[];
+  warnings: string[];
+};
+
 export type ViewerRuntime = {
   viewerKind: string;
   viewerBasePath: string;

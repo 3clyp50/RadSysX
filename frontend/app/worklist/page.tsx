@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload } from "lucide-react";
+import { FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload, X } from "lucide-react";
 
 import { clinicalApi } from "@/lib/clinical/client";
 import type {
   ClinicalPlatformConfig,
+  LocalImagingStudyAssetsResponse,
   SessionClaims,
   WorklistRow,
 } from "@/lib/clinical/contracts";
@@ -24,6 +25,8 @@ export default function WorklistPage() {
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [launchingStudyUid, setLaunchingStudyUid] = useState<string | null>(null);
+  const [inspectingStudyUid, setInspectingStudyUid] = useState<string | null>(null);
+  const [localStudyAssets, setLocalStudyAssets] = useState<LocalImagingStudyAssetsResponse | null>(null);
 
   const directoryInputProps = {
     directory: "",
@@ -87,6 +90,19 @@ export default function WorklistPage() {
     }
   };
 
+  const handleInspectLocalStudy = async (row: WorklistRow) => {
+    setInspectingStudyUid(row.studyInstanceUID);
+    setError(null);
+    try {
+      const assets = await clinicalApi.getLocalImagingStudyAssets(row.studyInstanceUID);
+      setLocalStudyAssets(assets);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to inspect local imaging files.");
+    } finally {
+      setInspectingStudyUid(null);
+    }
+  };
+
   const handleLocalImport = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? []);
     if (!files.length) {
@@ -97,6 +113,7 @@ export default function WorklistPage() {
     setError(null);
     setImportMessage(null);
     setImportWarnings([]);
+    setLocalStudyAssets(null);
 
     try {
       const response = await clinicalApi.importLocalImaging(files);
@@ -232,6 +249,67 @@ export default function WorklistPage() {
             </div>
           )}
 
+          {localStudyAssets && (
+            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-cyan-300/70">
+                    <FileSearch className="h-4 w-4" />
+                    Local study assets
+                  </div>
+                  <div className="mt-2 text-base font-medium text-white">
+                    {localStudyAssets.description}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-300">{localStudyAssets.summary}</div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close local study assets"
+                  onClick={() => setLocalStudyAssets(null)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 text-slate-300 transition hover:border-cyan-400/50 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {localStudyAssets.warnings.length > 0 && (
+                <div className="mt-3 text-xs text-amber-200">
+                  {localStudyAssets.warnings.join(" ")}
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {localStudyAssets.findings.map((finding) => (
+                  <div
+                    key={`${finding.label}-${finding.value}`}
+                    className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2"
+                  >
+                    <div className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                      {finding.label}
+                    </div>
+                    <div className="mt-1 break-words text-sm text-slate-100">{finding.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 divide-y divide-slate-800 overflow-hidden rounded-xl border border-slate-800">
+                {localStudyAssets.assets.map((asset, index) => (
+                  <div
+                    key={`${asset.relativePath}-${index}`}
+                    className="grid gap-2 bg-slate-950/40 px-3 py-2 text-sm text-slate-300 md:grid-cols-[88px_minmax(0,1fr)_92px_92px]"
+                  >
+                    <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                      {asset.format}
+                    </div>
+                    <div className="min-w-0 break-all text-slate-100">{asset.relativePath}</div>
+                    <div>{formatFileSize(asset.size)}</div>
+                    <div>{asset.viewerSupported ? "Viewer" : asset.analysisSupported ? "Analysis" : "Stored"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-8 grid gap-4">
             {rows.map((row) => (
               <div
@@ -264,22 +342,40 @@ export default function WorklistPage() {
                   <div>Updated {new Date(row.lastUpdatedAt).toLocaleString()}</div>
                 </div>
 
-                <div className="flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleOpenViewer(row)}
-                    className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-70"
-                    disabled={launchingStudyUid === row.studyInstanceUID}
-                  >
-                    {launchingStudyUid === row.studyInstanceUID ? (
-                      <span className="inline-flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2 lg:flex-col lg:items-stretch">
+                  {row.archiveRef.startsWith("local://") && (
+                    <button
+                      type="button"
+                      onClick={() => void handleInspectLocalStudy(row)}
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-medium text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
+                      disabled={inspectingStudyUid === row.studyInstanceUID}
+                    >
+                      {inspectingStudyUid === row.studyInstanceUID ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Launching
-                      </span>
-                    ) : (
-                      "Open viewer"
-                    )}
-                  </button>
+                      ) : (
+                        <FileSearch className="h-4 w-4" />
+                      )}
+                      Inspect files
+                    </button>
+                  )}
+                  {(!row.archiveRef.startsWith("local://") ||
+                    !["NIFTI", "IMG"].includes(row.modality.toUpperCase())) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenViewer(row)}
+                      className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-70"
+                      disabled={launchingStudyUid === row.studyInstanceUID}
+                    >
+                      {launchingStudyUid === row.studyInstanceUID ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Launching
+                        </span>
+                      ) : (
+                        "Open viewer"
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -288,4 +384,15 @@ export default function WorklistPage() {
       </div>
     </div>
   );
+}
+
+function formatFileSize(sizeBytes: number): string {
+  let value = Math.max(sizeBytes, 0);
+  for (const unit of ["B", "KB", "MB", "GB"]) {
+    if (value < 1024 || unit === "GB") {
+      return unit === "B" ? `${Math.round(value)} B` : `${value.toFixed(1)} ${unit}`;
+    }
+    value /= 1024;
+  }
+  return `${value.toFixed(1)} GB`;
 }

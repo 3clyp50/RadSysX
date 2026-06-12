@@ -4,6 +4,7 @@ import gzip
 import json
 import re
 import shutil
+import struct
 from collections import defaultdict
 from dataclasses import dataclass
 from io import BytesIO
@@ -15,7 +16,13 @@ from fastapi import HTTPException
 from pydicom.tag import Tag
 
 from .config import ClinicalPlatformSettings
-from .contracts import LocalImagingImportResponse, LocalImagingImportedStudy
+from .contracts import (
+    LocalImagingImportResponse,
+    LocalImagingImportedStudy,
+    LocalImagingStudyAsset,
+    LocalImagingStudyAssetsResponse,
+    LocalImagingStudyFinding,
+)
 from .repositories import ClinicalRepository
 
 DICOMDIR_SOP_CLASS_UID = "1.2.840.10008.1.3.10"
@@ -83,8 +90,8 @@ class LocalImagingImporter:
                 detected_files.append(detected)
 
             warnings.extend(self._dicomdir_warnings(detected_files))
-            studies = self._register_studies(import_id, detected_files, warnings)
-            self._write_manifest(import_root, import_id, detected_files, studies, warnings)
+            studies, file_study_uids = self._register_studies(import_id, detected_files, warnings)
+            self._write_manifest(import_root, import_id, detected_files, studies, file_study_uids, warnings)
         except Exception:
             shutil.rmtree(import_root, ignore_errors=True)
             raise
@@ -179,11 +186,12 @@ class LocalImagingImporter:
         import_id: str,
         detected_files: list[_DetectedFile],
         warnings: list[str],
-    ) -> list[LocalImagingImportedStudy]:
+    ) -> tuple[list[LocalImagingImportedStudy], dict[str, str]]:
         if not detected_files:
-            return []
+            return [], {}
 
         grouped: dict[str, list[_DetectedFile]] = defaultdict(list)
+        file_study_uids: dict[str, str] = {}
         generated_study_uid = self._generated_uid()
         primary_dicom_study_uid = next(
             (
@@ -202,6 +210,7 @@ class LocalImagingImporter:
             else:
                 study_uid = generated_study_uid
             grouped[study_uid].append(detected)
+            file_study_uids[detected.stored_path] = study_uid
 
         studies: list[LocalImagingImportedStudy] = []
         for study_uid, files in grouped.items():
@@ -224,7 +233,7 @@ class LocalImagingImporter:
             self._repository.register_local_imported_study(summary)
             studies.append(summary)
 
-        return studies
+        return studies, file_study_uids
 
     def _write_manifest(
         self,
@@ -232,6 +241,7 @@ class LocalImagingImporter:
         import_id: str,
         detected_files: list[_DetectedFile],
         studies: list[LocalImagingImportedStudy],
+        file_study_uids: dict[str, str],
         warnings: list[str],
     ) -> None:
         manifest = {
@@ -245,6 +255,7 @@ class LocalImagingImporter:
                     "size": file.size,
                     "format": file.format,
                     "studyInstanceUID": file.study_instance_uid,
+                    "localStudyInstanceUID": file_study_uids.get(file.stored_path),
                     "seriesInstanceUID": file.series_instance_uid,
                     "sopInstanceUID": file.sop_instance_uid,
                     "modality": file.modality,
@@ -365,6 +376,40 @@ class LocalImagingImporter:
             raise HTTPException(status_code=404, detail="Frame data was not found.")
         return frame
 
+    def study_assets(self, study_instance_uid: str) -> LocalImagingStudyAssetsResponse:
+        for manifest in self._iter_manifests():
+            study = self._find_manifest_study(manifest, study_instance_uid)
+            if study is None:
+                continue
+
+            file_entries = [
+                file_entry
+                for file_entry in manifest.get("files", [])
+                if self._manifest_file_belongs_to_study(file_entry, study, manifest)
+            ]
+            assets = [self._asset_from_manifest_entry(file_entry) for file_entry in file_entries]
+            findings, analysis_warnings = self._study_findings(file_entries)
+            warnings = [str(warning) for warning in study.get("warnings", []) if warning]
+            warnings.extend(analysis_warnings)
+            formats = [str(file_format) for file_format in study.get("formats", []) if file_format]
+            if not formats:
+                formats = sorted({asset.format for asset in assets})
+
+            return LocalImagingStudyAssetsResponse(
+                study_instance_uid=study_instance_uid,
+                archive_ref=str(study.get("archiveRef") or f"local://unknown/studies/{study_instance_uid}"),
+                modality=str(study.get("modality") or "LOCAL"),
+                description=str(study.get("description") or "Local imaging import"),
+                file_count=int(study.get("fileCount") or len(assets)),
+                formats=formats,
+                summary=self._study_summary(formats, assets),
+                findings=findings,
+                assets=assets,
+                warnings=warnings,
+            )
+
+        raise HTTPException(status_code=404, detail="Local imaging study was not found.")
+
     def _dicomdir_warnings(self, detected_files: list[_DetectedFile]) -> list[str]:
         warnings: list[str] = []
         dicomdir_files = [file for file in detected_files if file.format == "dicomdir"]
@@ -403,6 +448,139 @@ class LocalImagingImporter:
                 yield json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
+
+    @staticmethod
+    def _find_manifest_study(manifest: dict, study_instance_uid: str) -> dict | None:
+        for study in manifest.get("studies", []):
+            if str(study.get("studyInstanceUID") or "") == study_instance_uid:
+                return study
+        return None
+
+    @staticmethod
+    def _manifest_file_belongs_to_study(file_entry: dict, study: dict, manifest: dict) -> bool:
+        target_uid = str(study.get("studyInstanceUID") or "")
+        local_study_uid = str(file_entry.get("localStudyInstanceUID") or "")
+        source_study_uid = str(file_entry.get("studyInstanceUID") or "")
+        if local_study_uid == target_uid or source_study_uid == target_uid:
+            return True
+
+        file_format = str(file_entry.get("format") or "")
+        study_formats = {str(format_name) for format_name in study.get("formats", [])}
+        if file_format not in study_formats:
+            return False
+
+        manifest_studies = manifest.get("studies", []) or []
+        if len(manifest_studies) == 1:
+            return True
+        if file_format == "dicomdir":
+            return True
+        return file_format != "dicom" and not source_study_uid
+
+    def _asset_from_manifest_entry(self, file_entry: dict) -> LocalImagingStudyAsset:
+        file_format = str(file_entry.get("format") or "unknown")
+        study_uid = str(
+            file_entry.get("studyInstanceUID")
+            or file_entry.get("localStudyInstanceUID")
+            or "",
+        ) or None
+        series_uid = str(file_entry.get("seriesInstanceUID") or "") or None
+        sop_uid = str(file_entry.get("sopInstanceUID") or "") or None
+        viewer_supported = bool(file_format == "dicom" and study_uid and series_uid and sop_uid)
+        return LocalImagingStudyAsset(
+            relative_path=str(file_entry.get("relativePath") or "local-file"),
+            format=file_format,
+            modality=str(file_entry.get("modality") or "") or None,
+            size=int(file_entry.get("size") or 0),
+            study_instance_uid=study_uid,
+            series_instance_uid=series_uid,
+            sop_instance_uid=sop_uid,
+            analysis_supported=file_format in {"dicom", "dicomdir", "nifti", *COMMON_IMAGE_EXTENSIONS},
+            viewer_supported=viewer_supported,
+        )
+
+    def _study_findings(
+        self,
+        file_entries: list[dict],
+    ) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        findings: list[LocalImagingStudyFinding] = []
+        warnings: list[str] = []
+        total_size = sum(int(file_entry.get("size") or 0) for file_entry in file_entries)
+        findings.append(LocalImagingStudyFinding(label="Files", value=str(len(file_entries))))
+        findings.append(LocalImagingStudyFinding(label="Stored size", value=self._human_size(total_size)))
+
+        dicom_entries = [entry for entry in file_entries if entry.get("format") == "dicom"]
+        if dicom_entries:
+            series_uids = {
+                str(entry.get("seriesInstanceUID"))
+                for entry in dicom_entries
+                if entry.get("seriesInstanceUID")
+            }
+            findings.append(LocalImagingStudyFinding(label="DICOM instances", value=str(len(dicom_entries))))
+            findings.append(LocalImagingStudyFinding(label="DICOM series", value=str(len(series_uids))))
+
+        dicomdir_entries = [entry for entry in file_entries if entry.get("format") == "dicomdir"]
+        if dicomdir_entries:
+            findings.append(LocalImagingStudyFinding(label="DICOMDIR files", value=str(len(dicomdir_entries))))
+
+        nifti_entries = [entry for entry in file_entries if entry.get("format") == "nifti"]
+        for nifti_entry in nifti_entries:
+            header = self._read_nifti_header(nifti_entry)
+            relative_path = str(nifti_entry.get("relativePath") or "NIFTI volume")
+            if header is None:
+                warnings.append(f"NIFTI header could not be read for {Path(relative_path).name}.")
+                continue
+
+            dimensions = header["dimensions"]
+            dimension_text = " x ".join(str(value) for value in dimensions) if dimensions else "header detected"
+            datatype = header["datatypeCode"]
+            bitpix = header["bitsPerVoxel"]
+            findings.append(
+                LocalImagingStudyFinding(
+                    label="NIFTI volume",
+                    value=f"{dimension_text} voxels; datatype {datatype}; {bitpix} bits/voxel",
+                )
+            )
+
+        image_entries = [
+            entry
+            for entry in file_entries
+            if str(entry.get("format") or "") in COMMON_IMAGE_EXTENSIONS
+        ]
+        if image_entries:
+            findings.append(LocalImagingStudyFinding(label="Image files", value=str(len(image_entries))))
+
+        return findings, warnings
+
+    def _read_nifti_header(self, file_entry: dict) -> dict[str, object] | None:
+        path = self._stored_file_path(file_entry)
+        if path is None:
+            return None
+
+        lower_name = str(file_entry.get("relativePath") or path.name).lower()
+        try:
+            if lower_name.endswith(".nii.gz") or path.name.lower().endswith(".gz"):
+                with gzip.open(path, "rb") as handle:
+                    header = handle.read(352)
+            else:
+                with path.open("rb") as handle:
+                    header = handle.read(352)
+        except (OSError, EOFError, gzip.BadGzipFile):
+            return None
+
+        return self._parse_nifti_header(header)
+
+    def _stored_file_path(self, file_entry: dict) -> Path | None:
+        raw_path = str(file_entry.get("storedPath") or "")
+        if not raw_path:
+            return None
+        try:
+            storage_root = Path(self._settings.local_imaging_storage_dir).resolve()
+            resolved_path = Path(raw_path).resolve()
+        except OSError:
+            return None
+        if resolved_path != storage_root and storage_root not in resolved_path.parents:
+            return None
+        return resolved_path if resolved_path.is_file() else None
 
     def _require_instance(
         self,
@@ -476,6 +654,39 @@ class LocalImagingImporter:
             return pydicom.dcmread(BytesIO(data), stop_before_pixels=True, force=force)
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_nifti_header(header: bytes) -> dict[str, object] | None:
+        if len(header) < 348 or header[344:348] not in {b"n+1\x00", b"ni1\x00"}:
+            return None
+
+        endian: str | None = None
+        for candidate in ("<", ">"):
+            try:
+                if struct.unpack(f"{candidate}i", header[0:4])[0] == 348:
+                    endian = candidate
+                    break
+            except struct.error:
+                return None
+        if endian is None:
+            return None
+
+        try:
+            dims = struct.unpack(f"{endian}8h", header[40:56])
+            datatype_code = struct.unpack(f"{endian}h", header[70:72])[0]
+            bits_per_voxel = struct.unpack(f"{endian}h", header[72:74])[0]
+            vox_offset = struct.unpack(f"{endian}f", header[108:112])[0]
+        except struct.error:
+            return None
+
+        dimension_count = dims[0] if 0 < dims[0] <= 7 else 0
+        dimensions = [int(value) for value in dims[1 : dimension_count + 1] if value > 0]
+        return {
+            "dimensions": dimensions,
+            "datatypeCode": int(datatype_code),
+            "bitsPerVoxel": int(bits_per_voxel),
+            "voxOffset": float(vox_offset),
+        }
 
     @staticmethod
     def _is_nifti(data: bytes, lower_name: str) -> bool:
@@ -561,6 +772,27 @@ class LocalImagingImporter:
         if any(file.format == "dicomdir" for file in files):
             return [warning for warning in warnings if "DICOMDIR" in warning]
         return []
+
+    @staticmethod
+    def _study_summary(formats: list[str], assets: list[LocalImagingStudyAsset]) -> str:
+        format_set = set(formats)
+        has_viewable_dicom = any(asset.viewer_supported for asset in assets)
+        if has_viewable_dicom:
+            return "Local DICOM assets are available through the desktop DICOMweb bridge."
+        if "nifti" in format_set:
+            return "Local NIFTI assets are registered for backend-side analysis summary."
+        if format_set.intersection(COMMON_IMAGE_EXTENSIONS):
+            return "Local image assets are registered for backend-side analysis summary."
+        return "Local imaging assets are registered in private storage."
+
+    @staticmethod
+    def _human_size(size_bytes: int) -> str:
+        value = float(max(size_bytes, 0))
+        for unit in ("B", "KB", "MB", "GB"):
+            if value < 1024 or unit == "GB":
+                return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+            value /= 1024
+        return f"{value:.1f} GB"
 
     @staticmethod
     def _uncompressed_frame_size(dataset) -> int | None:

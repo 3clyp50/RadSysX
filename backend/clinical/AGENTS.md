@@ -15,7 +15,7 @@
 - Do not accept browser-supplied `role`, `user_id`, `requestedBy`, or equivalent actor identity for governed APIs.
 - Keep launch sessions opaque. PHI-bearing context must be resolved server-side and not encoded directly into viewer URLs.
 - Keep DICOM SR/SEG and other derived object writeback mediated by the backend, including STOW via `POST /api/derived-results/stow`.
-- Keep local imaging import and local DICOMweb serving backend-owned through `local_imaging.py`; imported files must stay in private local storage, not public frontend paths.
+- Keep local imaging import, safe imported-study asset summaries, and local DICOMweb serving backend-owned through `local_imaging.py`; imported files must stay in private local storage, not public frontend paths.
 - `contracts.py` must stay aligned with `packages/clinical-web/src/contracts.ts`.
 - `config.py` owns mode, auth, cookie, viewer, archive, AI, and database settings. Governed modes must not silently fall back to insecure secrets.
 
@@ -25,7 +25,7 @@
 - Put orchestration and policy in `services.py`.
 - Put persistence in `repositories.py` and `models.py`.
 - Put DICOMweb/Orthanc boundary logic in `dicomweb.py`.
-- Put local DICOM/DICOMDIR/NIFTI/fallback-file import detection, storage, and local DICOMweb metadata/frame serving logic in `local_imaging.py`.
+- Put local DICOM/DICOMDIR/NIFTI/fallback-file import detection, storage, asset summaries, NIFTI header inspection, and local DICOMweb metadata/frame serving logic in `local_imaging.py`.
 - Keep audit events meaningful but avoid recording unnecessary identifiers or payload detail.
 
 ## Verification

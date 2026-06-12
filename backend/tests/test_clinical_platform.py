@@ -1,6 +1,8 @@
 import asyncio
+import gzip
 import json
 import os
+import struct
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -108,6 +110,10 @@ def make_test_dicomdir_bytes() -> bytes:
 def make_test_nifti_bytes() -> bytes:
     header = bytearray(352)
     header[0:4] = (348).to_bytes(4, "little")
+    header[40:56] = struct.pack("<8h", 3, 2, 3, 4, 1, 1, 1, 1)
+    header[70:72] = (2).to_bytes(2, "little", signed=True)
+    header[72:74] = (8).to_bytes(2, "little", signed=True)
+    header[108:112] = struct.pack("<f", 352.0)
     header[344:348] = b"n+1\0"
     return bytes(header)
 
@@ -310,6 +316,57 @@ def test_local_imaging_import_registers_dicom_and_nifti_worklist_row(
     assert "DO-NOT-LOG" not in manifest_text
 
 
+def test_local_imaging_study_assets_describe_nifti_gz_and_image(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={
+            "relativePaths": json.dumps(
+                ["case-b/volume.nii.gz", "case-b/slice.png"],
+            ),
+        },
+        files=[
+            ("files", ("volume.nii.gz", gzip.compress(make_test_nifti_bytes()), "application/gzip")),
+            ("files", ("slice.png", b"\x89PNG\r\n\x1a\npytest", "image/png")),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 2
+    imported = payload["importedStudies"][0]
+    assert imported["formats"] == ["nifti", "png"]
+
+    assets_response = client.get(
+        f"/api/local-imaging/studies/{imported['studyInstanceUID']}/assets",
+    )
+    assert assets_response.status_code == 200
+    assets_payload = assets_response.json()
+    assert assets_payload["studyInstanceUID"] == imported["studyInstanceUID"]
+    assert assets_payload["archiveRef"].startswith("local://")
+    assert assets_payload["formats"] == ["nifti", "png"]
+    assert assets_payload["fileCount"] == 2
+    assert "backend-side analysis" in assets_payload["summary"]
+
+    assets = assets_payload["assets"]
+    assert {asset["format"] for asset in assets} == {"nifti", "png"}
+    nifti_asset = next(asset for asset in assets if asset["format"] == "nifti")
+    assert nifti_asset["relativePath"] == "case-b/volume.nii.gz"
+    assert nifti_asset["analysisSupported"] is True
+    assert nifti_asset["viewerSupported"] is False
+
+    findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
+    assert findings["Files"] == "2"
+    assert "2 x 3 x 4 voxels" in findings["NIFTI volume"]
+    assert findings["Image files"] == "1"
+
+
 def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
     monkeypatch,
     tmp_path,
@@ -373,6 +430,14 @@ def test_local_dicomweb_serves_imported_dicom_metadata_and_frame(
         ],
     )
     assert import_response.status_code == 200
+
+    assets_response = client.get(f"/api/local-imaging/studies/{study_uid}/assets")
+    assert assets_response.status_code == 200
+    assets_payload = assets_response.json()
+    assert assets_payload["formats"] == ["dicom"]
+    assert assets_payload["assets"][0]["viewerSupported"] is True
+    assert assets_payload["assets"][0]["analysisSupported"] is True
+    assert any(finding["label"] == "DICOM instances" for finding in assets_payload["findings"])
 
     studies_response = client.get(f"/dicom-web/studies?StudyInstanceUID={study_uid}")
     assert studies_response.status_code == 200

@@ -267,6 +267,36 @@ class LocalImagingImportResponse(ClinicalModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class LocalImagingStudyAsset(ClinicalModel):
+    relative_path: str = Field(alias="relativePath")
+    format: str
+    modality: str | None = None
+    size: int
+    study_instance_uid: str | None = Field(default=None, alias="studyInstanceUID")
+    series_instance_uid: str | None = Field(default=None, alias="seriesInstanceUID")
+    sop_instance_uid: str | None = Field(default=None, alias="sopInstanceUID")
+    analysis_supported: bool = Field(default=True, alias="analysisSupported")
+    viewer_supported: bool = Field(default=False, alias="viewerSupported")
+
+
+class LocalImagingStudyFinding(ClinicalModel):
+    label: str
+    value: str
+
+
+class LocalImagingStudyAssetsResponse(ClinicalModel):
+    study_instance_uid: str = Field(alias="studyInstanceUID")
+    archive_ref: str = Field(alias="archiveRef")
+    modality: str
+    description: str
+    file_count: int = Field(alias="fileCount")
+    formats: list[str] = Field(default_factory=list)
+    summary: str
+    findings: list[LocalImagingStudyFinding] = Field(default_factory=list)
+    assets: list[LocalImagingStudyAsset] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ReportDraftRequest(ClinicalModel):
     report_id: str | None = None
     study_instance_uid: str = Field(alias="studyInstanceUID")
