@@ -2,12 +2,18 @@
   "name": "radsysx",
   "private": true,
   "workspaces": [
+    "desktop",
     "frontend",
     "viewer",
     "packages/*"
   ],
   "scripts": {
     "build": "npm run build --workspace viewer && npm run build --workspace frontend",
+    "desktop": "npm run dev --workspace @radsysx/desktop",
+    "desktop:bootstrap": "python3 -m venv .venv && . .venv/bin/activate && python3 -m pip install --upgrade pip && python3 -m pip install -r backend/requirements-clinical.txt && npm install --legacy-peer-deps",
+    "desktop:doctor": "npm run doctor --workspace @radsysx/desktop",
+    "desktop:smoke": "npm run smoke --workspace @radsysx/desktop",
+    "dev:desktop": "npm run desktop",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:viewer": "npm run dev --workspace viewer",
     "type-check": "npm run type-check --workspace frontend && npm run type-check --workspace viewer"

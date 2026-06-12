@@ -11,16 +11,20 @@ RadSysX has two product surfaces:
 
 The clinical path is the migration target. Do not plan against research-only seams when making clinical changes.
 
+There is also a desktop fast path in `desktop/`: Electron starts the local FastAPI backend, Next.js shell, and generated OHIF viewer bridge under one localhost origin for no-Docker local use.
+
 ## Environment Posture
 
 - Preferred host: native Linux
 - Do not assume WSL, Windows paths, Docker Desktop behavior, or machine-local temp dependency hacks
 - Prefer `.venv` for Python deps and workspace-managed Node deps rooted at the repo `package-lock.json`
+- Fastest local app path: `npm run desktop:bootstrap`, `npm run desktop:doctor`, then `npm run desktop`
 - After initial recon on the Linux host, wait for the user's first Linux runtime test report before widening the change scope
 
 ## Current Clinical Runtime
 
 - Backend authority: `backend/server.py` and `backend/clinical/*`
+- Desktop fast path: `desktop/src/main.mjs`, `desktop/scripts/doctor.mjs`
 - Shared frontend/viewer package: `packages/clinical-web/*`
 - Clinical shell: `frontend/app/login/page.tsx`, `frontend/app/worklist/page.tsx`
 - Authoritative viewer: `viewer/` with:
@@ -52,6 +56,8 @@ python3 -m pytest backend/tests/test_clinical_platform.py
 npm run type-check --workspace frontend
 npm run type-check --workspace viewer
 npm run build --workspace viewer
+npm run desktop:doctor
+npm run desktop:smoke
 ```
 
 ## Current Checklist

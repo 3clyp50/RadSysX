@@ -1,4 +1,18 @@
-# RadSysX — Local Development Guide (Frontend local, GPU Backend on Cloud VM)
+# RadSysX Local Development Guide
+
+## Fast Local Desktop Path
+
+For the shortest no-Docker local run of RadSysX, use the Electron desktop path from the repo root:
+
+```bash
+npm run desktop:bootstrap
+npm run desktop:doctor
+npm run desktop
+```
+
+This starts the local clinical FastAPI backend, Next.js shell, and OHIF viewer bridge under one localhost origin. It is the preferred quick path for local login, worklist, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or a configured local DICOMweb target.
+
+## Frontend Local, GPU Backend On Cloud VM
 
 This guide explains how to run RadSysX locally while using a remote GPU VM for the BiomedParse backend, mirroring production for the model service.
 

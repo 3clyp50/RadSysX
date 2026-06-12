@@ -1,6 +1,6 @@
 # RadSysX Agent Guidance
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 ## Purpose
 
@@ -8,6 +8,7 @@ Last updated: 2026-06-11
 - RadSysX has two parallel product surfaces:
   - `research`: rapid experimentation, legacy viewer flows, browser-side AI prototypes, and agent/MCP exploration.
   - `clinical`: governed FastAPI contracts, worklist-driven launch, opaque viewer sessions, OHIF reading, audited reporting, AI workflow state, and backend-mediated derived DICOM writeback.
+- RadSysX now also has a `desktop` runtime path: an Electron fast path that starts the local backend, Next.js shell, and OHIF viewer bridge under one localhost origin without Docker.
 - Do not treat the research and clinical surfaces as equivalent.
 
 ## Ownership
@@ -45,6 +46,10 @@ Last updated: 2026-06-11
   - `python3 -m pip install --upgrade pip`
   - `python3 -m pip install -r backend/requirements-clinical.txt`
   - `npm install --legacy-peer-deps`
+- Desktop fast-path bootstrap:
+  - `npm run desktop:bootstrap`
+  - `npm run desktop:doctor`
+  - `npm run desktop`
 - `backend/requirements.txt` is the broader research/agent dependency set. Use it only when intentionally working on the research surface and its extra dependencies.
 - Use Python `3.12` if one interpreter must install both clinical and broader research dependency sets.
 - If the host is missing a required system dependency, surface that explicitly instead of patching around it with host-local hacks.
@@ -69,6 +74,7 @@ Last updated: 2026-06-11
 - Only `research` may expose experimental upload/analyze flows.
 - `pilot` and `clinical` must use the clinical FastAPI surface and worklist/viewer flow.
 - Do not send DICOM bytes directly from the browser to third-party AI services in `pilot` or `clinical`.
+- The Electron desktop fast path defaults to `pilot` with local development secrets and seeded local auth; override via env only when intentionally validating another mode.
 
 ## Clinical Workflow Contract
 
@@ -108,6 +114,11 @@ Last updated: 2026-06-11
   - `viewer/assets/radsysx-ohif-extension.js`
   - `viewer/assets/radsysx-ohif-mode.js`
   - `viewer/assets/radsysx-viewer.css`
+- Desktop fast path:
+  - `desktop/package.json`
+  - `desktop/src/main.mjs`
+  - `desktop/src/preload.cjs`
+  - `desktop/scripts/doctor.mjs`
 - Local clinical stack:
   - `docker-compose.yml`
   - `deploy/clinical-stack/nginx.conf`
@@ -155,6 +166,8 @@ Last updated: 2026-06-11
 - Preferred focused checks for the clinical slice:
   - `python3 -m pytest backend/tests/test_clinical_platform.py`
   - `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+  - `npm run desktop:doctor`
+  - `npm run desktop:smoke`
   - `npm run type-check --workspace frontend`
   - `npm run type-check --workspace viewer`
   - `npm run build --workspace viewer`
@@ -165,6 +178,10 @@ Last updated: 2026-06-11
 ## Commands
 
 - Backend dev server: `. .venv/bin/activate && python3 backend/server.py`
+- Desktop bootstrap: `npm run desktop:bootstrap`
+- Desktop preflight: `npm run desktop:doctor`
+- Desktop app: `npm run desktop`
+- Desktop startup smoke test: `npm run desktop:smoke`
 - Clinical backend tests: `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`
 - Whole backend runtime: `. .venv/bin/activate && RADSYSX_APP_MODE=research python3 backend/server.py`
 - Frontend dev server: `npm run dev --workspace frontend`
@@ -176,6 +193,12 @@ Last updated: 2026-06-11
 
 ## Local Clinical Stack
 
+- Fast local desktop path:
+  - Run `npm run desktop:bootstrap` once on a fresh clone.
+  - Run `npm run desktop` for the Electron app.
+  - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, Next.js, and the generated OHIF viewer bridge.
+  - This path validates local login, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
+  - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or an explicitly configured local DICOMweb target.
 - Before starting compose:
   - `export RADSYSX_ORTHANC_USERNAME=local-user`
   - `export RADSYSX_ORTHANC_PASSWORD=local-pass`
@@ -196,6 +219,7 @@ Last updated: 2026-06-11
 - `frontend/components/core/CoreViewer.tsx` is not the long-term clinical viewer shell.
 - Prisma is not the backend clinical runtime datastore.
 - Viewer launch should not trust raw query parameters like `study=...&patient=...`.
+- The Electron fast path is not a reason to reintroduce a Next.js `/viewer` fallback or browser-local clinical state.
 
 ## User Preferences
 
@@ -207,6 +231,7 @@ Last updated: 2026-06-11
 
 - `backend/AGENTS.md`: FastAPI backend, clinical/research backend split, Python dependencies, backend tests, MCP, skills, tools, and model utilities.
 - `deploy/AGENTS.md`: deploy/runtime configuration, especially the clinical nginx and Orthanc stack.
+- `desktop/AGENTS.md`: Electron desktop fast path, local process supervision, one-origin bridge, and desktop preflight/smoke checks.
 - `dicom-test-files/AGENTS.md`: local DICOM fixtures and non-production imaging test assets.
 - `frontend/AGENTS.md`: Next.js shell, clinical login/worklist pages, research UI, frontend libraries, and styling.
 - `ideas-inspo/AGENTS.md`: source inspiration documents and exploratory materials.

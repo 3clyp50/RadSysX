@@ -1,0 +1,15 @@
+{
+  "name": "@radsysx/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "dev": "electron --no-sandbox .",
+    "doctor": "node ./scripts/doctor.mjs",
+    "smoke": "RADSYSX_DESKTOP_EXIT_AFTER_READY_MS=1500 electron --no-sandbox ."
+  },
+  "devDependencies": {
+    "electron": "^39.2.6"
+  }
+}

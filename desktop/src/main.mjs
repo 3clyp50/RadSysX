@@ -1,0 +1,707 @@
+import { app, BrowserWindow, shell } from "electron";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const desktopRoot = path.resolve(path.dirname(__filename), "..");
+const workspaceRoot = path.resolve(desktopRoot, "..");
+const preloadPath = path.join(desktopRoot, "src", "preload.cjs");
+const logoPath = path.join(workspaceRoot, "RadSysX-Logo.png");
+const viewerDist = path.join(workspaceRoot, "viewer", "dist");
+
+const DEFAULT_APP_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_PORT ?? "3000", 10);
+const DEFAULT_FRONTEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "3010", 10);
+const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "8000", 10);
+
+const children = new Set();
+const logLines = [];
+let shuttingDown = false;
+let shutdownStarted = false;
+let bridgeServer = null;
+let mainWindow = null;
+let publicBaseUrl = null;
+
+function appendLog(scope, message) {
+  const lines = String(message)
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const entry = `[${scope}] ${line}`;
+    console.log(entry);
+    logLines.push(entry);
+  }
+
+  while (logLines.length > 240) {
+    logLines.shift();
+  }
+}
+
+function recentLogs() {
+  return logLines.slice(-80).join("\n");
+}
+
+function npmCommand() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function pythonCommand() {
+  const venvPython = path.join(workspaceRoot, ".venv", "bin", "python");
+  return fs.existsSync(venvPython) ? venvPython : "python3";
+}
+
+async function findAvailablePort(preferredPort, usedPorts = new Set()) {
+  for (let candidate = preferredPort; candidate < preferredPort + 100; candidate += 1) {
+    if (usedPorts.has(candidate)) {
+      continue;
+    }
+    if (await canListen(candidate)) {
+      usedPorts.add(candidate);
+      return candidate;
+    }
+  }
+
+  throw new Error(`Unable to find an available local port near ${preferredPort}.`);
+}
+
+function canListen(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+function spawnService(name, command, args, options = {}) {
+  appendLog(name, `${command} ${args.join(" ")}`);
+
+  const child = spawn(command, args, {
+    cwd: options.cwd ?? workspaceRoot,
+    env: {
+      ...process.env,
+      ...(options.env ?? {}),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+  });
+
+  children.add(child);
+
+  child.stdout?.on("data", (chunk) => appendLog(name, chunk));
+  child.stderr?.on("data", (chunk) => appendLog(name, chunk));
+  child.once("exit", (code, signal) => {
+    children.delete(child);
+    appendLog(name, `exited with ${signal ?? code ?? "unknown"}`);
+    if (!shuttingDown && code && code !== 0) {
+      showRuntimeFailure(`${name} stopped unexpectedly.`, recentLogs());
+    }
+  });
+
+  child.once("error", (error) => {
+    children.delete(child);
+    appendLog(name, error.message);
+    if (!shuttingDown) {
+      showRuntimeFailure(`Unable to start ${name}.`, recentLogs());
+    }
+  });
+
+  return child;
+}
+
+function stopChild(child) {
+  if (!child.pid || child.killed) {
+    return;
+  }
+
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-child.pid, "SIGTERM");
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      return;
+    }
+  }
+
+  setTimeout(() => {
+    if (child.killed) {
+      return;
+    }
+    try {
+      if (process.platform !== "win32") {
+        process.kill(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch {
+      // Process already exited.
+    }
+  }, 4000).unref();
+}
+
+async function runTask(name, command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnService(name, command, args, options);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${name} failed with ${signal ?? code ?? "unknown"}.`));
+    });
+    child.once("error", reject);
+  });
+}
+
+async function waitForHttp(url, label, timeoutMs = 120000) {
+  const startedAt = Date.now();
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.status < 500) {
+        appendLog("desktop", `${label} is ready at ${url}`);
+        return;
+      }
+      lastError = new Error(`${label} returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+
+  throw new Error(
+    `${label} did not become ready at ${url}.${lastError ? ` Last error: ${lastError.message}` : ""}`,
+  );
+}
+
+async function ensureViewerDist(env) {
+  const indexPath = path.join(viewerDist, "index.html");
+  if (fs.existsSync(indexPath)) {
+    appendLog("viewer", "using existing viewer/dist");
+    return;
+  }
+
+  appendLog("viewer", "viewer/dist is missing; building OHIF distribution");
+  await runTask("viewer", npmCommand(), ["run", "build", "--workspace", "viewer"], {
+    cwd: workspaceRoot,
+    env,
+  });
+}
+
+async function startRuntime() {
+  const usedPorts = new Set();
+  const appPort = await findAvailablePort(DEFAULT_APP_PORT, usedPorts);
+  const backendPort = await findAvailablePort(DEFAULT_BACKEND_PORT, usedPorts);
+  const frontendPort = await findAvailablePort(DEFAULT_FRONTEND_PORT, usedPorts);
+
+  publicBaseUrl = `http://127.0.0.1:${appPort}`;
+  const backendBaseUrl = `http://127.0.0.1:${backendPort}`;
+  const frontendBaseUrl = `http://127.0.0.1:${frontendPort}`;
+
+  const sharedEnv = {
+    RADSYSX_APP_MODE: process.env.RADSYSX_APP_MODE ?? "pilot",
+    RADSYSX_AUTH_MODE: process.env.RADSYSX_AUTH_MODE ?? "local",
+    RADSYSX_ALLOWED_ORIGINS:
+      process.env.RADSYSX_ALLOWED_ORIGINS ?? `${publicBaseUrl},http://localhost:${appPort}`,
+    RADSYSX_CLINICAL_API_SECRET:
+      process.env.RADSYSX_CLINICAL_API_SECRET ?? "radsysx-desktop-local-api-secret",
+    RADSYSX_SESSION_SECRET:
+      process.env.RADSYSX_SESSION_SECRET ?? "radsysx-desktop-local-session-secret",
+    RADSYSX_SESSION_COOKIE_SECURE: process.env.RADSYSX_SESSION_COOKIE_SECURE ?? "false",
+    RADSYSX_VIEWER_BASE_URL: process.env.RADSYSX_VIEWER_BASE_URL ?? `${publicBaseUrl}/viewer`,
+    RADSYSX_VIEWER_BASE_PATH: process.env.RADSYSX_VIEWER_BASE_PATH ?? "/viewer",
+    RADSYSX_DICOMWEB_PUBLIC_BASE_URL:
+      process.env.RADSYSX_DICOMWEB_PUBLIC_BASE_URL ?? "/dicom-web",
+    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL ?? publicBaseUrl,
+    NEXT_PUBLIC_VIEWER_BASE_URL:
+      process.env.NEXT_PUBLIC_VIEWER_BASE_URL ?? `${publicBaseUrl}/viewer`,
+    NEXT_PUBLIC_RADSYSX_APP_MODE:
+      process.env.NEXT_PUBLIC_RADSYSX_APP_MODE ?? (process.env.RADSYSX_APP_MODE ?? "pilot"),
+  };
+
+  await ensureViewerDist(sharedEnv);
+
+  bridgeServer = await startDesktopBridge({
+    appPort,
+    backendBaseUrl,
+    frontendBaseUrl,
+  });
+
+  spawnService(
+    "backend",
+    pythonCommand(),
+    ["-m", "uvicorn", "backend.server:app", "--host", "127.0.0.1", "--port", String(backendPort)],
+    {
+      cwd: workspaceRoot,
+      env: sharedEnv,
+    },
+  );
+
+  spawnService(
+    "frontend",
+    npmCommand(),
+    [
+      "run",
+      "dev",
+      "--workspace",
+      "frontend",
+      "--",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      String(frontendPort),
+    ],
+    {
+      cwd: workspaceRoot,
+      env: sharedEnv,
+    },
+  );
+
+  await Promise.all([
+    waitForHttp(`${backendBaseUrl}/api/platform/config`, "FastAPI backend"),
+    waitForHttp(frontendBaseUrl, "Next.js shell"),
+  ]);
+
+  appendLog("desktop", `RadSysX desktop is ready at ${publicBaseUrl}`);
+  return { publicBaseUrl };
+}
+
+function startDesktopBridge({ appPort, backendBaseUrl, frontendBaseUrl }) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((request, response) => {
+      handleBridgeRequest(request, response, {
+        backendBaseUrl,
+        frontendBaseUrl,
+      });
+    });
+
+    server.once("error", reject);
+    server.listen(appPort, "127.0.0.1", () => {
+      appendLog("desktop", `local bridge listening on http://127.0.0.1:${appPort}`);
+      resolve(server);
+    });
+  });
+}
+
+function handleBridgeRequest(request, response, runtime) {
+  const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+  const pathname = requestUrl.pathname;
+
+  if (pathname === "/_radsysx/desktop/health") {
+    writeJson(response, 200, {
+      ok: true,
+      frontend: runtime.frontendBaseUrl,
+      backend: runtime.backendBaseUrl,
+      viewerDist,
+    });
+    return;
+  }
+
+  if (pathname === "/viewer" || pathname.startsWith("/viewer/")) {
+    serveViewer(requestUrl, response);
+    return;
+  }
+
+  if (pathname === "/dicom-web" || pathname.startsWith("/dicom-web/")) {
+    const target = process.env.RADSYSX_DESKTOP_DICOMWEB_TARGET;
+    proxyRequest(request, response, target || runtime.backendBaseUrl, target ? "/dicom-web" : "");
+    return;
+  }
+
+  if (isBackendRoute(pathname)) {
+    proxyRequest(request, response, runtime.backendBaseUrl);
+    return;
+  }
+
+  proxyRequest(request, response, runtime.frontendBaseUrl);
+}
+
+function isBackendRoute(pathname) {
+  return [
+    "/api",
+    "/process",
+    "/stream",
+    "/chat",
+    "/tools",
+    "/execute_tool",
+    "/fhir",
+    "/mcp",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/static",
+  ].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
+  const targetUrl = buildProxyUrl(targetBaseUrl, request.url ?? "/", stripPrefix);
+  const headers = {
+    ...request.headers,
+    host: targetUrl.host,
+  };
+
+  const transport = targetUrl.protocol === "https:" ? https : http;
+  const proxy = transport.request(
+    {
+      protocol: targetUrl.protocol,
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      method: request.method,
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      headers,
+    },
+    (proxyResponse) => {
+      response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
+      proxyResponse.pipe(response);
+    },
+  );
+
+  proxy.once("error", (error) => {
+    appendLog("bridge", `proxy error for ${targetUrl.href}: ${error.message}`);
+    if (!response.headersSent) {
+      writeText(
+        response,
+        502,
+        "RadSysX local bridge could not reach an internal service.\n\n" +
+          `${error.message}\n\n` +
+          recentLogs(),
+      );
+    } else {
+      response.end();
+    }
+  });
+
+  request.pipe(proxy);
+}
+
+function buildProxyUrl(targetBaseUrl, originalUrl, stripPrefix) {
+  const target = new URL(targetBaseUrl);
+  const source = new URL(originalUrl, "http://127.0.0.1");
+  let sourcePathname = source.pathname;
+
+  if (stripPrefix && sourcePathname.startsWith(stripPrefix)) {
+    sourcePathname = sourcePathname.slice(stripPrefix.length) || "/";
+  }
+
+  const basePath = target.pathname.replace(/\/$/, "");
+  const pathSuffix = sourcePathname.startsWith("/") ? sourcePathname : `/${sourcePathname}`;
+  target.pathname = `${basePath}${pathSuffix}`.replace(/\/{2,}/g, "/");
+  target.search = source.search;
+  return target;
+}
+
+function serveViewer(requestUrl, response) {
+  if (requestUrl.pathname === "/viewer") {
+    response.writeHead(302, { location: "/viewer/" });
+    response.end();
+    return;
+  }
+
+  let relativePath = "";
+  try {
+    relativePath = decodeURIComponent(requestUrl.pathname.replace(/^\/viewer\/?/, ""));
+  } catch {
+    writeText(response, 400, "Viewer asset path is invalid.");
+    return;
+  }
+
+  const normalized = path.normalize(relativePath || "index.html").replace(/^(\.\.(\/|\\|$))+/, "");
+  const candidatePath = safeJoin(viewerDist, normalized);
+  const resolvedPath = candidatePath ?? path.join(viewerDist, "index.html");
+  const hasExtension = path.extname(resolvedPath) !== "";
+  const filePath = fileExists(resolvedPath)
+    ? resolvedPath
+    : hasExtension
+      ? null
+      : path.join(viewerDist, "index.html");
+
+  if (!filePath || !fileExists(filePath)) {
+    writeText(response, 404, "Viewer asset was not found.");
+    return;
+  }
+
+  response.writeHead(200, {
+    "content-type": contentTypeFor(filePath),
+    "cache-control": filePath.endsWith("index.html") ? "no-store" : "public, max-age=300",
+  });
+  fs.createReadStream(filePath).pipe(response);
+}
+
+function safeJoin(root, relativePath) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  if (resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    return resolvedPath;
+  }
+  return null;
+}
+
+function fileExists(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function contentTypeFor(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  const types = {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
+    ".webmanifest": "application/manifest+json",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+  };
+  return types[extension] ?? "application/octet-stream";
+}
+
+function writeJson(response, status, payload) {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(JSON.stringify(payload, null, 2));
+}
+
+function writeText(response, status, text) {
+  response.writeHead(status, {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(text);
+}
+
+function createMainWindow() {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 980,
+    minWidth: 1100,
+    minHeight: 760,
+    backgroundColor: "#020617",
+    icon: fs.existsSync(logoPath) ? logoPath : undefined,
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: preloadPath,
+      sandbox: false,
+    },
+  });
+
+  window.once("ready-to-show", () => window.show());
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (publicBaseUrl && url.startsWith(publicBaseUrl)) {
+      return { action: "allow" };
+    }
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  return window;
+}
+
+function loadingHtml() {
+  return htmlDocument({
+    title: "Starting RadSysX",
+    heading: "Starting RadSysX",
+    body:
+      "Preparing the local backend, clinical shell, and OHIF viewer bridge. The first run may build the viewer assets.",
+    details: "",
+  });
+}
+
+function failureHtml(title, details) {
+  return htmlDocument({
+    title,
+    heading: title,
+    body:
+      "The desktop fast path could not finish startup. Run `npm run desktop:doctor` from the repo root for the shortest repair path.",
+    details,
+  });
+}
+
+function htmlDocument({ title, heading, body, details }) {
+  const escapedDetails = escapeHtml(details);
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.16), transparent 38%), #020617;
+        color: #e2e8f0;
+      }
+      main {
+        width: min(720px, calc(100vw - 48px));
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        background: rgba(15, 23, 42, 0.88);
+        padding: 32px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 700;
+      }
+      p {
+        margin: 16px 0 0;
+        line-height: 1.6;
+        color: #cbd5e1;
+      }
+      pre {
+        margin: 24px 0 0;
+        max-height: 360px;
+        overflow: auto;
+        white-space: pre-wrap;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background: #020617;
+        padding: 16px;
+        color: #bae6fd;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(heading)}</h1>
+      <p>${escapeHtml(body)}</p>
+      ${details ? `<pre>${escapedDetails}</pre>` : ""}
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function showRuntimeFailure(title, details) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(failureHtml(title, details))}`);
+}
+
+function scheduleSmokeExit() {
+  const exitAfterReadyMs = Number.parseInt(process.env.RADSYSX_DESKTOP_EXIT_AFTER_READY_MS ?? "", 10);
+  if (!Number.isFinite(exitAfterReadyMs) || exitAfterReadyMs <= 0) {
+    return;
+  }
+
+  appendLog("desktop", `smoke exit scheduled in ${exitAfterReadyMs}ms`);
+  setTimeout(() => app.quit(), exitAfterReadyMs).unref();
+}
+
+async function shutdown() {
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+  shuttingDown = true;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy();
+  }
+
+  for (const child of children) {
+    stopChild(child);
+  }
+  children.clear();
+
+  if (bridgeServer) {
+    bridgeServer.closeAllConnections?.();
+    await new Promise((resolve) => bridgeServer.close(resolve));
+    bridgeServer = null;
+  }
+}
+
+app.setName("RadSysX");
+
+app.whenReady().then(async () => {
+  mainWindow = createMainWindow();
+  await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
+
+  try {
+    const runtime = await startRuntime();
+    await mainWindow.loadURL(runtime.publicBaseUrl);
+    scheduleSmokeExit();
+  } catch (error) {
+    appendLog("desktop", error instanceof Error ? error.stack ?? error.message : String(error));
+    showRuntimeFailure("RadSysX startup failed", recentLogs());
+  }
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createMainWindow();
+      mainWindow.loadURL(publicBaseUrl ?? `data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
+    }
+  });
+});
+
+app.on("before-quit", (event) => {
+  if (shutdownStarted || (children.size === 0 && !bridgeServer)) {
+    return;
+  }
+
+  event.preventDefault();
+  shutdown()
+    .catch((error) => appendLog("desktop", error instanceof Error ? error.message : String(error)))
+    .finally(() => app.quit());
+});
+
+app.on("window-all-closed", async () => {
+  await shutdown();
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+process.on("SIGINT", async () => {
+  await shutdown();
+  app.quit();
+});
+
+process.on("SIGTERM", async () => {
+  await shutdown();
+  app.quit();
+});

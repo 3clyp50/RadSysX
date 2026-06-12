@@ -14,6 +14,7 @@ RadSysX is a medical imaging and analysis platform with two distinct product sur
 - `research`: the experimentation surface for prototype workflows, a LangGraph/deepagents-based multi-agent stack, MCP/FHIR integrations, and imaging/AI exploration that is explicitly not the clinical source of truth.
 
 The two surfaces are not interchangeable.
+The repo also includes an Electron desktop fast path that runs the local clinical shell without the Docker/nginx/Orthanc composition required for full governed archive validation.
 
 ## Platform Overview
 
@@ -34,6 +35,7 @@ The current clinical baseline on this branch is:
 - Backend-issued signed cookies provide local seeded clinical identity until institutional auth replaces them.
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
+- The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path.
 
 The current research/agent baseline still includes:
 
@@ -90,6 +92,12 @@ Those capabilities remain part of RadSysX, but they are not the clinical source 
 - `viewer/assets/radsysx-ohif-extension.js`
 - `viewer/assets/radsysx-ohif-mode.js`
 - `viewer/assets/radsysx-viewer.css`
+
+### Electron desktop fast path
+
+- `desktop/src/main.mjs`
+- `desktop/src/preload.cjs`
+- `desktop/scripts/doctor.mjs`
 
 ### Local one-origin stack
 
@@ -188,6 +196,13 @@ The most important clinical env vars are:
 - `NEXT_PUBLIC_BACKEND_URL`
 - `NEXT_PUBLIC_VIEWER_BASE_URL`
 
+Desktop-only knobs:
+
+- `RADSYSX_DESKTOP_PORT`
+- `RADSYSX_DESKTOP_BACKEND_PORT`
+- `RADSYSX_DESKTOP_FRONTEND_PORT`
+- `RADSYSX_DESKTOP_DICOMWEB_TARGET`
+
 Research-only integrations such as MCP/FHIR tools and BiomedParse still exist, but they do not define the clinical architecture.
 
 ## Host Assumptions
@@ -225,6 +240,26 @@ npm install --legacy-peer-deps
 Backend dependencies should be installed into `.venv`, not into ad hoc machine-local paths.
 Node dependencies should be installed from the repo root so the workspace-managed root `package-lock.json` remains authoritative.
 `backend/requirements-clinical.txt` is the governed clinical bootstrap set. `backend/requirements.txt` remains the broader research/agent dependency set and may carry tighter interpreter constraints than the clinical slice.
+
+### Run the desktop app fast path
+
+On a fresh clone, the shortest local path is:
+
+```bash
+npm run desktop:bootstrap
+npm run desktop:doctor
+npm run desktop
+```
+
+`desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
+
+This path is intentionally no-Docker. It is enough for seeded login, worklist, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+
+For a quick startup and cleanup check:
+
+```bash
+npm run desktop:smoke
+```
 
 ### Install the full backend/runtime dependency set
 
@@ -297,24 +332,27 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 3. `python3 -m pip install --upgrade pip`
 4. `python3 -m pip install -r backend/requirements.txt`
 5. `npm install --legacy-peer-deps`
-6. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-7. `python3 -m pytest backend/tests/test_clinical_platform.py`
-8. `npm run type-check --workspace frontend`
-9. `npm run type-check --workspace viewer`
-10. `npm run build --workspace viewer`
-11. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-12. Separately validate the governed clinical surface with `docker compose up --build`
+6. `npm run desktop:doctor`
+7. `npm run desktop:smoke`
+8. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+9. `python3 -m pytest backend/tests/test_clinical_platform.py`
+10. `npm run type-check --workspace frontend`
+11. `npm run type-check --workspace viewer`
+12. `npm run build --workspace viewer`
+13. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+14. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run the focused backend and viewer checks
-3. attempt the actual app flow on Linux
-4. report what happened before widening the code-change scope
+2. run `npm run desktop:doctor` and `npm run desktop:smoke`
+3. run the focused backend and viewer checks
+4. attempt the actual app flow on Linux
+5. report what happened before widening the code-change scope
 
-That first report should ideally cover backend startup, frontend startup, viewer build/load, login, worklist, viewer launch, and compose-stack behavior if Docker is available.
+That first report should ideally cover desktop startup, backend startup, frontend startup, viewer build/load, login, worklist, viewer launch, and compose-stack behavior if Docker is available.
 
 Public routes:
 

@@ -10,6 +10,7 @@ This repository’s authoritative implementation guidance is [AGENTS.md](AGENTS.
 - Clinical `/viewer` fallback: none
 - Shared browser clinical package: `packages/clinical-web/*`
 - Clinical shell: `frontend/app/login/page.tsx`, `frontend/app/worklist/page.tsx`
+- Desktop fast path: `desktop/`, launched with `npm run desktop`
 - Root `frontend/app/page.tsx`: landing/surface selector, not the clinical viewer
 - Preferred host: native Linux, not WSL-specific tooling assumptions
 
@@ -34,9 +35,21 @@ python3 -m pytest backend/tests/test_clinical_platform.py
 npm run type-check --workspace frontend
 npm run type-check --workspace viewer
 npm run build --workspace viewer
+npm run desktop:doctor
+npm run desktop:smoke
 ```
 
 Install Node dependencies from the repo root so the workspace-managed root `package-lock.json` is the only active lockfile.
+
+Fast local Electron path:
+
+```bash
+npm run desktop:bootstrap
+npm run desktop:doctor
+npm run desktop
+```
+
+The desktop app defaults to local `pilot` mode and supervises FastAPI, Next.js, and the OHIF viewer bridge behind one localhost origin. Use compose when you need Orthanc-backed DICOMweb validation.
 
 After initial recon on the Linux host, wait for the user's first app test report before widening the code-change scope.
 
