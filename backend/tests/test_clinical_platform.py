@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import tempfile
+import zipfile
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
@@ -167,6 +168,14 @@ def make_test_tiff_bytes() -> bytes:
         + b"".join(entries)
         + struct.pack("<I", 0)
     )
+
+
+def make_test_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
+    output = BytesIO()
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, payload in entries:
+            archive.writestr(relative_path, payload)
+    return output.getvalue()
 
 
 def test_auth_session_lifecycle() -> None:
@@ -589,6 +598,79 @@ def test_local_imaging_import_supports_paired_nifti_hdr_img(
     )
     assert data_analysis["metrics"] == []
     assert "matching .hdr" in data_analysis["summary"]
+
+
+def test_local_imaging_import_expands_zip_archives(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    study_uid = "1.2.826.0.1.3680043.10.54321.250"
+    paired_header, paired_voxels = make_test_paired_nifti_bytes()
+    archive_bytes = make_test_zip_bytes(
+        [
+            ("CASEZ/DICOMDIR", make_test_dicomdir_bytes([["SCAN1DCM"]])),
+            ("CASEZ/SCAN1DCM", make_test_dicom_bytes(study_uid=study_uid)),
+            ("NIFTI/volume.nii", make_test_nifti_bytes()),
+            ("NIFTI/paired.hdr", paired_header),
+            ("NIFTI/paired.img", paired_voxels),
+            ("README.txt", b"not a medical image"),
+        ],
+    )
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={"relativePaths": json.dumps(["archives/case.zip"])},
+        files=[("files", ("case.zip", archive_bytes, "application/zip"))],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 5
+    assert payload["rejectedFiles"] == 1
+    assert any("Expanded archive case.zip into 6 file(s)." == warning for warning in payload["warnings"])
+    assert len(payload["importedStudies"]) == 2
+
+    dicom_import = next(study for study in payload["importedStudies"] if "dicom" in study["formats"])
+    assert dicom_import["studyInstanceUID"] == study_uid
+    assert dicom_import["formats"] == ["dicom", "dicomdir"]
+    assert dicom_import["fileCount"] == 2
+
+    nifti_import = next(study for study in payload["importedStudies"] if "nifti" in study["formats"])
+    assert nifti_import["formats"] == ["nifti", "nifti-data"]
+    assert nifti_import["fileCount"] == 3
+
+    manifest_path = next(tmp_path.glob("import-*/manifest.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    relative_paths = {entry["relativePath"] for entry in manifest["files"]}
+    assert "archives/case/CASEZ/DICOMDIR" in relative_paths
+    assert "archives/case/CASEZ/SCAN1DCM" in relative_paths
+    assert "archives/case/NIFTI/volume.nii" in relative_paths
+    assert "archives/case/NIFTI/paired.hdr" in relative_paths
+    assert "archives/case/NIFTI/paired.img" in relative_paths
+    assert "archives/case/README.txt" not in relative_paths
+
+    assets_response = client.get(
+        f"/api/local-imaging/studies/{nifti_import['studyInstanceUID']}/assets",
+    )
+    assert assets_response.status_code == 200
+    assets_payload = assets_response.json()
+    findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
+    assert findings["Paired NIFTI data files"] == "1"
+
+    analysis_response = client.get(
+        f"/api/local-imaging/studies/{nifti_import['studyInstanceUID']}/analysis",
+    )
+    assert analysis_response.status_code == 200
+    analysis_payload = analysis_response.json()
+    archive_nifti_analysis = next(
+        item for item in analysis_payload["analyses"] if item["relativePath"].endswith("NIFTI/volume.nii")
+    )
+    metrics = {metric["label"]: metric["value"] for metric in archive_nifti_analysis["metrics"]}
+    assert metrics["Voxel count"] == "24"
+    assert metrics["Mean intensity"] == "11.5"
 
 
 def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(

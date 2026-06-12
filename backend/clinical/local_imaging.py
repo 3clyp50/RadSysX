@@ -6,6 +6,7 @@ import math
 import re
 import shutil
 import struct
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -113,7 +114,8 @@ class LocalImagingImporter:
         rejected_files = 0
 
         try:
-            for index, upload in enumerate(uploads, start=1):
+            expanded_uploads = self._expand_archive_uploads(uploads, warnings)
+            for index, upload in enumerate(expanded_uploads, start=1):
                 detected = self._store_and_detect(upload, import_root, index)
                 if detected.format == "unknown":
                     unknown_files.append((index, detected))
@@ -293,6 +295,80 @@ class LocalImagingImporter:
             studies.append(summary)
 
         return studies, file_study_uids
+
+    def _expand_archive_uploads(
+        self,
+        uploads: list[LocalImagingUploadPart],
+        warnings: list[str],
+    ) -> list[LocalImagingUploadPart]:
+        expanded_uploads: list[LocalImagingUploadPart] = []
+        for upload in uploads:
+            if not self._is_zip_archive(upload):
+                expanded_uploads.append(upload)
+                continue
+
+            expanded_uploads.extend(self._zip_upload_parts(upload, warnings))
+
+        if len(expanded_uploads) > self._settings.local_imaging_max_files:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Too many files for local import after archive expansion. Limit is {self._settings.local_imaging_max_files}.",
+            )
+        return expanded_uploads
+
+    def _zip_upload_parts(
+        self,
+        upload: LocalImagingUploadPart,
+        warnings: list[str],
+    ) -> list[LocalImagingUploadPart]:
+        archive_path = self._safe_relative_path(upload.relative_path or upload.filename)
+        archive_label = PurePosixPath(archive_path).name
+        archive_base = self._archive_member_base_path(archive_path)
+        archive_uploads: list[LocalImagingUploadPart] = []
+
+        try:
+            with zipfile.ZipFile(BytesIO(upload.data)) as archive:
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+
+                    member_path = self._safe_archive_member_path(member.filename)
+                    if member_path is None:
+                        warnings.append(f"Skipped unsafe member in archive {archive_label}.")
+                        continue
+                    if member.file_size > self._settings.local_imaging_max_file_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="One or more archive members exceed the local import size limit.",
+                        )
+
+                    try:
+                        with archive.open(member) as member_stream:
+                            member_data = member_stream.read(self._settings.local_imaging_max_file_bytes + 1)
+                    except RuntimeError as exc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Archive {archive_label} contains an encrypted or unreadable member.",
+                        ) from exc
+                    if len(member_data) > self._settings.local_imaging_max_file_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="One or more archive members exceed the local import size limit.",
+                        )
+
+                    archive_uploads.append(
+                        LocalImagingUploadPart(
+                            filename=PurePosixPath(member_path).name,
+                            content_type="application/octet-stream",
+                            relative_path=f"{archive_base}/{member_path}",
+                            data=member_data,
+                        )
+                    )
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status_code=400, detail=f"Archive {archive_label} could not be read.") from exc
+
+        warnings.append(f"Expanded archive {archive_label} into {len(archive_uploads)} file(s).")
+        return archive_uploads
 
     def _attach_paired_nifti_data(
         self,
@@ -1744,6 +1820,36 @@ class LocalImagingImporter:
         if len(header) < 348:
             return False
         return header[344:348] in {b"n+1\x00", b"ni1\x00"}
+
+    @staticmethod
+    def _is_zip_archive(upload: LocalImagingUploadPart) -> bool:
+        lower_name = str(upload.relative_path or upload.filename or "").lower()
+        if not lower_name.endswith(".zip"):
+            return False
+        return zipfile.is_zipfile(BytesIO(upload.data))
+
+    @classmethod
+    def _archive_member_base_path(cls, archive_path: str) -> str:
+        safe_path = cls._safe_relative_path(archive_path)
+        path = PurePosixPath(safe_path)
+        name = path.name
+        base_name = name[:-4] if name.lower().endswith(".zip") else name
+        parent = path.parent.as_posix()
+        if parent in {"", "."}:
+            return cls._safe_relative_path(base_name)
+        return cls._safe_relative_path(f"{parent}/{base_name}")
+
+    @classmethod
+    def _safe_archive_member_path(cls, member_path: str) -> str | None:
+        raw_path = str(member_path or "").replace("\\", "/").strip()
+        if not raw_path or raw_path.startswith("/"):
+            return None
+        path = PurePosixPath(raw_path)
+        if path.is_absolute():
+            return None
+        if any(part in {"", ".", ".."} or part.endswith(":") for part in path.parts):
+            return None
+        return cls._safe_relative_path(raw_path)
 
     @classmethod
     def _paired_nifti_key(cls, relative_path: str) -> str | None:

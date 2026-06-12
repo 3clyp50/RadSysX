@@ -124,6 +124,7 @@ import base64
 import gzip
 import struct
 import sys
+import zipfile
 from pathlib import Path
 
 import pydicom
@@ -244,7 +245,7 @@ if large_payload:
             chunk = pattern[: min(len(pattern), remaining)]
             handle.write(chunk)
             remaining -= len(chunk)
-(root / "slice.png").write_bytes(
+png_bytes = (
     b"\\x89PNG\\r\\n\\x1a\\n"
     b"\\x00\\x00\\x00\\rIHDR"
     b"\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x08\\x02\\x00\\x00\\x00"
@@ -253,6 +254,7 @@ if large_payload:
     b"\\xdc\\xccY\\xe7"
     b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
 )
+(root / "slice.png").write_bytes(png_bytes)
 (root / "slice.jpeg").write_bytes(base64.b64decode(
     "/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUG"
     "CQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA"
@@ -271,6 +273,9 @@ tiff_entries = [
     + b"".join(tiff_entries)
     + struct.pack("<I", 0)
 )
+with zipfile.ZipFile(root / "archive.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("zipped-volume.nii", bytes(header) + voxels)
+    archive.writestr("zipped-slice.png", png_bytes)
 `,
       outputDir,
       largePayload ? "large" : "standard",
@@ -712,6 +717,7 @@ function pickerTestPathsForSmokeMode() {
     "slice.png",
     "slice.jpeg",
     "slice.tiff",
+    "archive.zip",
   ].map((name) => path.join(fixtureRoot, name));
 }
 
@@ -726,6 +732,7 @@ function readFixturePayloads() {
     ["slice.png", "ui-smoke/slice.png", "image/png"],
     ["slice.jpeg", "ui-smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "ui-smoke/slice.tiff", "image/tiff"],
+    ["archive.zip", "ui-smoke/archive.zip", "application/zip"],
   ].map(([name, relativePath, type]) => ({
     base64: fs.readFileSync(path.join(fixtureRoot, name)).toString("base64"),
     name,
@@ -833,7 +840,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
-  const expectedAcceptedFiles = 9 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedAcceptedFiles = 11 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
   const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
@@ -1020,6 +1027,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "11.5",
       "paired.hdr",
       "matching .hdr",
+      "zipped-volume.nii",
       "Image dimensions",
       "1 x 1",
       "Precision",

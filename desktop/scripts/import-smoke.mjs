@@ -61,6 +61,7 @@ import base64
 import gzip
 import struct
 import sys
+import zipfile
 from pathlib import Path
 
 import pydicom
@@ -131,7 +132,7 @@ paired_header[108:112] = struct.pack("<f", 0.0)
 paired_header[344:348] = b"ni1\\0"
 (root / "paired.hdr").write_bytes(bytes(paired_header))
 (root / "paired.img").write_bytes(voxels)
-(root / "slice.png").write_bytes(
+png_bytes = (
     b"\\x89PNG\\r\\n\\x1a\\n"
     b"\\x00\\x00\\x00\\rIHDR"
     b"\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x08\\x02\\x00\\x00\\x00"
@@ -140,6 +141,7 @@ paired_header[344:348] = b"ni1\\0"
     b"\\xdc\\xccY\\xe7"
     b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
 )
+(root / "slice.png").write_bytes(png_bytes)
 (root / "slice.jpeg").write_bytes(base64.b64decode(
     "/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUG"
     "CQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA"
@@ -158,6 +160,9 @@ tiff_entries = [
     + b"".join(tiff_entries)
     + struct.pack("<I", 0)
 )
+with zipfile.ZipFile(root / "archive.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("zipped-volume.nii", bytes(header) + voxels)
+    archive.writestr("zipped-slice.png", png_bytes)
 `,
       outputDir,
     ],
@@ -254,8 +259,12 @@ function startDesktopRuntime() {
 async function runImportSmoke(publicBaseUrl) {
   const cookie = await login(publicBaseUrl);
   const importPayload = await importLocalFiles(publicBaseUrl, cookie);
-  assert(importPayload.acceptedFiles === 9, `Expected 9 accepted files, got ${importPayload.acceptedFiles}.`);
+  assert(importPayload.acceptedFiles === 11, `Expected 11 accepted files, got ${importPayload.acceptedFiles}.`);
   assert(importPayload.rejectedFiles === 0, `Expected 0 rejected files, got ${importPayload.rejectedFiles}.`);
+  assert(
+    importPayload.warnings.some((warning) => warning === "Expanded archive archive.zip into 2 file(s)."),
+    "ZIP archive expansion warning was not returned.",
+  );
 
   const worklist = await getJson(`${publicBaseUrl}/api/worklist`, cookie);
   for (const study of importPayload.importedStudies) {
@@ -304,8 +313,16 @@ async function runImportSmoke(publicBaseUrl) {
     "Paired NIFTI data count was not reported.",
   );
   assert(
-    niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "3"),
+    niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "4"),
     "Fallback image count was not reported.",
+  );
+  assert(
+    niftiSummary.assets.some((asset) => asset.relativePath.endsWith("archive/zipped-volume.nii")),
+    "NIFTI asset expanded from ZIP archive was not returned.",
+  );
+  assert(
+    niftiSummary.assets.some((asset) => asset.relativePath.endsWith("archive/zipped-slice.png")),
+    "PNG asset expanded from ZIP archive was not returned.",
   );
   const niftiPreviewAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("volume.nii.gz"));
   assert(niftiPreviewAsset?.previewSupported, "NIFTI asset was not marked preview-supported.");
@@ -417,6 +434,12 @@ async function runImportSmoke(publicBaseUrl) {
     pairedNiftiDataAnalysis.summary.includes("matching .hdr"),
     "Paired NIFTI data row did not explain matching header analysis.",
   );
+  const archiveNiftiAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.relativePath.endsWith("archive/zipped-volume.nii"));
+  assert(archiveNiftiAssetAnalysis, "ZIP-expanded NIFTI technical analysis row was not returned.");
+  assert(
+    archiveNiftiAssetAnalysis.metrics.some((metric) => metric.label === "Voxel count" && metric.value === "24"),
+    "ZIP-expanded NIFTI voxel count was not analyzed.",
+  );
   const imageAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "png");
   assert(imageAssetAnalysis, "PNG technical analysis was not returned.");
   assert(
@@ -496,6 +519,7 @@ async function importLocalFiles(publicBaseUrl, cookie) {
     ["slice.png", "smoke/slice.png", "image/png"],
     ["slice.jpeg", "smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "smoke/slice.tiff", "image/tiff"],
+    ["archive.zip", "smoke/archive.zip", "application/zip"],
   ];
 
   const form = new FormData();

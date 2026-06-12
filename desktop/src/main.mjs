@@ -52,6 +52,7 @@ const LOCAL_IMAGING_EXTENSIONS = new Set([
   ".png",
   ".tif",
   ".tiff",
+  ".zip",
 ]);
 
 const children = new Set();
@@ -135,6 +136,9 @@ function guessContentType(filePath) {
   }
   if (fileName.endsWith(".gif")) {
     return "image/gif";
+  }
+  if (fileName.endsWith(".zip")) {
+    return "application/zip";
   }
   return "application/dicom";
 }
@@ -1029,6 +1033,7 @@ async function selectLocalImagingPaths(sender, mode) {
           "png",
           "tif",
           "tiff",
+          "zip",
         ],
       },
       { name: "All files", extensions: ["*"] },
