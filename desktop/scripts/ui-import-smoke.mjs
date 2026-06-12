@@ -239,6 +239,18 @@ if large_payload:
     b"\\xdc\\xccY\\xe7"
     b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
 )
+tiff_entries = [
+    struct.pack("<HHI", 256, 4, 1) + struct.pack("<I", 2),
+    struct.pack("<HHI", 257, 4, 1) + struct.pack("<I", 3),
+    struct.pack("<HHI", 258, 3, 1) + struct.pack("<H", 8) + b"\\x00\\x00",
+]
+(root / "slice.tiff").write_bytes(
+    b"II"
+    + struct.pack("<HI", 42, 8)
+    + struct.pack("<H", len(tiff_entries))
+    + b"".join(tiff_entries)
+    + struct.pack("<I", 0)
+)
 `,
       outputDir,
       largePayload ? "large" : "standard",
@@ -672,6 +684,7 @@ function readFixturePayloads() {
     ["volume.nii", "ui-smoke/volume.nii", "application/octet-stream"],
     ["volume.nii.gz", "ui-smoke/volume.nii.gz", "application/gzip"],
     ["slice.png", "ui-smoke/slice.png", "image/png"],
+    ["slice.tiff", "ui-smoke/slice.tiff", "image/tiff"],
   ].map(([name, relativePath, type]) => ({
     base64: fs.readFileSync(path.join(fixtureRoot, name)).toString("base64"),
     name,
@@ -777,7 +790,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
-  const expectedAcceptedFiles = 5 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedAcceptedFiles = 6 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
   const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
@@ -954,6 +967,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "11.5",
       "Image dimensions",
       "1 x 1",
+      "2 x 3",
     ]);
 
     const dicomRow = rowContaining("Local DICOMDIR import");

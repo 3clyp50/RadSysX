@@ -38,6 +38,7 @@ PREVIEW_IMAGE_MEDIA_TYPES = {
     "jpeg": "image/jpeg",
     "png": "image/png",
 }
+TIFF_PREVIEW_FORMATS = {"tif", "tiff"}
 NIFTI_PREVIEW_MAX_DIMENSION = 96
 NIFTI_NUMERIC_DATATYPES: dict[int, tuple[str, int]] = {
     2: ("B", 1),
@@ -480,6 +481,8 @@ class LocalImagingImporter:
         media_type = PREVIEW_IMAGE_MEDIA_TYPES.get(file_format)
         if file_format == "nifti":
             return self._nifti_preview(file_entry, axis=axis, slice_index=slice_index)
+        if file_format in TIFF_PREVIEW_FORMATS:
+            return self._tiff_preview(file_entry)
         if media_type is None:
             raise HTTPException(status_code=415, detail="Local imaging asset preview is not available.")
 
@@ -1076,20 +1079,20 @@ class LocalImagingImporter:
         return [], ["JPEG dimensions could not be read."]
 
     @staticmethod
-    def _tiff_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+    def _tiff_header_tags(payload: bytes) -> tuple[dict[int, int] | None, list[str]]:
         if len(payload) < 8:
-            return [], ["TIFF header could not be read."]
+            return None, ["TIFF header could not be read."]
         if payload[:2] == b"II":
             endian = "little"
         elif payload[:2] == b"MM":
             endian = "big"
         else:
-            return [], ["TIFF byte order could not be read."]
+            return None, ["TIFF byte order could not be read."]
         if int.from_bytes(payload[2:4], endian) != 42:
-            return [], ["TIFF magic value could not be read."]
+            return None, ["TIFF magic value could not be read."]
         ifd_offset = int.from_bytes(payload[4:8], endian)
         if ifd_offset + 2 > len(payload):
-            return [], ["TIFF image directory could not be read."]
+            return None, ["TIFF image directory could not be read."]
         entry_count = int.from_bytes(payload[ifd_offset:ifd_offset + 2], endian)
         tags: dict[int, int] = {}
         for index in range(entry_count):
@@ -1104,6 +1107,13 @@ class LocalImagingImporter:
                 tags[tag] = int.from_bytes(raw_value[:2], endian)
             elif field_type == 4 and count == 1:
                 tags[tag] = int.from_bytes(raw_value, endian)
+        return tags, []
+
+    @staticmethod
+    def _tiff_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        tags, warnings = LocalImagingImporter._tiff_header_tags(payload)
+        if tags is None:
+            return [], warnings
         width = tags.get(256)
         height = tags.get(257)
         metrics: list[LocalImagingStudyFinding] = []
@@ -1268,6 +1278,67 @@ class LocalImagingImporter:
             slice_index=selected_slice,
         )
         return LocalImagingPreview(content=svg, media_type="image/svg+xml")
+
+    def _tiff_preview(self, file_entry: dict) -> LocalImagingPreview:
+        path = self._stored_file_path(file_entry)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Local imaging asset is missing from storage.")
+
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="Local imaging asset is missing from storage.") from exc
+
+        tags, warnings = self._tiff_header_tags(payload)
+        if tags is None:
+            raise HTTPException(
+                status_code=422,
+                detail=warnings[0] if warnings else "TIFF header could not be read.",
+            )
+
+        width = tags.get(256)
+        height = tags.get(257)
+        if not width or not height or width < 1 or height < 1:
+            raise HTTPException(status_code=422, detail="TIFF dimensions are not previewable.")
+
+        svg = self._tiff_header_preview_svg(
+            width=width,
+            height=height,
+            bits_per_sample=tags.get(258),
+        )
+        return LocalImagingPreview(content=svg, media_type="image/svg+xml")
+
+    @staticmethod
+    def _tiff_header_preview_svg(
+        *,
+        width: int,
+        height: int,
+        bits_per_sample: int | None,
+    ) -> bytes:
+        preview_box_width = 224
+        preview_box_height = 112
+        scale = min(preview_box_width / width, preview_box_height / height)
+        display_width = max(10, min(preview_box_width, round(width * scale)))
+        display_height = max(10, min(preview_box_height, round(height * scale)))
+        display_x = 48 + ((preview_box_width - display_width) // 2)
+        display_y = 30 + ((preview_box_height - display_height) // 2)
+        bits_text = f"{bits_per_sample} bits/sample" if bits_per_sample else "bits/sample unavailable"
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img">'
+            f'<title>TIFF header preview {width} x {height}</title>'
+            '<rect width="320" height="220" fill="#020617"/>'
+            '<rect x="24" y="20" width="272" height="132" rx="8" fill="#0f172a" stroke="#334155"/>'
+            f'<rect x="{display_x}" y="{display_y}" width="{display_width}" height="{display_height}" '
+            'fill="#1e293b" stroke="#67e8f9" stroke-width="2"/>'
+            '<path d="M48 142 L272 30" stroke="#334155" stroke-width="1" opacity="0.65"/>'
+            '<path d="M48 30 L272 142" stroke="#334155" stroke-width="1" opacity="0.65"/>'
+            '<text x="160" y="178" fill="#cffafe" font-family="Arial, sans-serif" '
+            'font-size="18" text-anchor="middle">TIFF header preview</text>'
+            f'<text x="160" y="200" fill="#94a3b8" font-family="Arial, sans-serif" '
+            f'font-size="14" text-anchor="middle">{width} x {height} pixels; {bits_text}</text>'
+            "</svg>"
+        )
+        return svg.encode("utf-8")
 
     @staticmethod
     def _nifti_plane_dimensions(
@@ -1497,7 +1568,11 @@ class LocalImagingImporter:
 
     @staticmethod
     def _preview_supported(file_format: str) -> bool:
-        return file_format == "nifti" or file_format in PREVIEW_IMAGE_MEDIA_TYPES
+        return (
+            file_format == "nifti"
+            or file_format in PREVIEW_IMAGE_MEDIA_TYPES
+            or file_format in TIFF_PREVIEW_FORMATS
+        )
 
     @staticmethod
     def _read_dicom_metadata(data: bytes, *, force: bool = False):
