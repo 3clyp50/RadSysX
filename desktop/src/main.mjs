@@ -40,6 +40,7 @@ const children = new Set();
 const logLines = [];
 let shuttingDown = false;
 let shutdownStarted = false;
+let smokeExitScheduled = false;
 let bridgeServer = null;
 let mainWindow = null;
 let publicBaseUrl = null;
@@ -601,6 +602,7 @@ function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
       path: `${targetUrl.pathname}${targetUrl.search}`,
       headers,
       agent: false,
+      insecureHTTPParser: isLoopbackHost(targetUrl.hostname),
     },
     (proxyResponse) => {
       response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
@@ -609,6 +611,15 @@ function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
   );
 
   proxy.once("error", (error) => {
+    if (
+      smokeExitScheduled &&
+      isLoopbackHost(targetUrl.hostname) &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      error.message.startsWith("Parse Error")
+    ) {
+      return;
+    }
+
     appendLog("bridge", `proxy error for ${targetUrl.href}: ${error.message}`);
     if (!response.headersSent) {
       writeText(
@@ -623,7 +634,28 @@ function proxyRequest(request, response, targetBaseUrl, stripPrefix = "") {
     }
   });
 
+  if (request.method === "GET" || request.method === "HEAD") {
+    proxy.end();
+    return;
+  }
+
   request.pipe(proxy);
+}
+
+function writeRawHeaders(socket, headers) {
+  for (const [name, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        socket.write(`${name}: ${item}\r\n`);
+      }
+    } else if (value != null) {
+      socket.write(`${name}: ${value}\r\n`);
+    }
+  }
+}
+
+function isLoopbackHost(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 function handleBridgeUpgrade(request, socket, head, runtime) {
@@ -647,15 +679,7 @@ function handleBridgeUpgrade(request, socket, head, runtime) {
     targetUrl.hostname,
     () => {
       upstream.write(`${request.method} ${targetUrl.pathname}${targetUrl.search} HTTP/${request.httpVersion}\r\n`);
-      for (const [name, value] of Object.entries(headers)) {
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            upstream.write(`${name}: ${item}\r\n`);
-          }
-        } else if (value != null) {
-          upstream.write(`${name}: ${value}\r\n`);
-        }
-      }
+      writeRawHeaders(upstream, headers);
       upstream.write("\r\n");
       if (head.length) {
         upstream.write(head);
@@ -666,6 +690,9 @@ function handleBridgeUpgrade(request, socket, head, runtime) {
   );
 
   upstream.once("error", (error) => {
+    if (shuttingDown || socket.destroyed) {
+      return;
+    }
     appendLog("bridge", `upgrade proxy error for ${targetUrl.href}: ${error.message}`);
     if (!socket.destroyed) {
       socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
@@ -1002,6 +1029,7 @@ function scheduleSmokeExit() {
   }
 
   appendLog("desktop", `smoke exit scheduled in ${exitAfterReadyMs}ms`);
+  smokeExitScheduled = true;
   setTimeout(() => app.quit(), exitAfterReadyMs).unref();
 }
 

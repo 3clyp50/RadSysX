@@ -15,22 +15,35 @@ const fixtureRoot = path.join(tmpRoot, "fixtures");
 const storageRoot = path.join(tmpRoot, "local-imaging-data");
 const dbPath = path.join(tmpRoot, "clinical.db");
 const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP_MS ?? "120000", 10);
-const smokeMode = process.argv.includes("--picker-large-folder")
-  ? "picker-large-folder"
-  : process.argv.includes("--picker-folder")
-    ? "picker-folder"
-    : "drag-drop";
-const pickerSmokeModes = new Set(["picker-folder", "picker-large-folder"]);
+const manyDicomCount = 32;
+const smokeMode = resolveSmokeMode();
+const pickerSmokeModes = new Set(["picker-folder", "picker-large-folder", "picker-many-folder"]);
 
 let desktopProcess = null;
 let desktopPublicBaseUrl = null;
+
+function resolveSmokeMode() {
+  if (process.argv.includes("--picker-many-folder")) {
+    return "picker-many-folder";
+  }
+  if (process.argv.includes("--picker-large-folder")) {
+    return "picker-large-folder";
+  }
+  if (process.argv.includes("--picker-folder")) {
+    return "picker-folder";
+  }
+  return "drag-drop";
+}
 
 async function main() {
   try {
     fs.mkdirSync(fixtureRoot, { recursive: true });
     fs.mkdirSync(storageRoot, { recursive: true });
 
-    generateFixtures(fixtureRoot, { largePayload: smokeMode === "picker-large-folder" });
+    generateFixtures(fixtureRoot, {
+      largePayload: smokeMode === "picker-large-folder",
+      manyDicomCount: smokeMode === "picker-many-folder" ? manyDicomCount : 0,
+    });
     const runtime = await startDesktopRuntime();
     const result = await runUiImportSmoke(runtime.publicBaseUrl, runtime.debugPort);
     console.log(JSON.stringify(result, null, 2));
@@ -90,7 +103,7 @@ function canListen(port) {
   });
 }
 
-function generateFixtures(outputDir, { largePayload = false } = {}) {
+function generateFixtures(outputDir, { largePayload = false, manyDicomCount = 0 } = {}) {
   const python = spawnSync(
     pythonCommand(),
     [
@@ -108,6 +121,7 @@ from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, MediaStorageDire
 
 root = Path(sys.argv[1])
 large_payload = sys.argv[2] == "large"
+many_dicom_count = int(sys.argv[3])
 root.mkdir(parents=True, exist_ok=True)
 
 study_uid = "1.2.826.0.1.3680043.10.54321.910"
@@ -138,6 +152,38 @@ dataset.PixelData = bytes([0, 1, 2, 3])
 dataset.is_little_endian = True
 dataset.is_implicit_VR = False
 dataset.save_as(root / "SCAN1DCM", enforce_file_format=True)
+
+if many_dicom_count:
+    many_root = root / "nested-dicom" / "series-a"
+    many_root.mkdir(parents=True, exist_ok=True)
+    many_series_uid = "1.2.826.0.1.3680043.10.54321.913"
+    for index in range(1, many_dicom_count + 1):
+        many_sop_uid = f"1.2.826.0.1.3680043.10.54321.{2000 + index}"
+        many_meta = FileMetaDataset()
+        many_meta.MediaStorageSOPClassUID = CTImageStorage
+        many_meta.MediaStorageSOPInstanceUID = many_sop_uid
+        many_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+        many_dataset = FileDataset(None, {}, file_meta=many_meta, preamble=b"\\0" * 128)
+        many_dataset.SOPClassUID = CTImageStorage
+        many_dataset.SOPInstanceUID = many_sop_uid
+        many_dataset.StudyInstanceUID = study_uid
+        many_dataset.SeriesInstanceUID = many_series_uid
+        many_dataset.Modality = "CT"
+        many_dataset.PatientID = "SMOKE-DO-NOT-LOG"
+        many_dataset.InstanceNumber = index + 1
+        many_dataset.Rows = 2
+        many_dataset.Columns = 2
+        many_dataset.SamplesPerPixel = 1
+        many_dataset.PhotometricInterpretation = "MONOCHROME2"
+        many_dataset.BitsAllocated = 8
+        many_dataset.BitsStored = 8
+        many_dataset.HighBit = 7
+        many_dataset.PixelRepresentation = 0
+        many_dataset.PixelData = bytes(((index + offset) % 256 for offset in range(4)))
+        many_dataset.is_little_endian = True
+        many_dataset.is_implicit_VR = False
+        many_dataset.save_as(many_root / f"IM{index:06d}", enforce_file_format=True)
 
 directory_meta = FileMetaDataset()
 directory_meta.MediaStorageSOPClassUID = MediaStorageDirectoryStorage
@@ -193,6 +239,7 @@ if large_payload:
 `,
       outputDir,
       largePayload ? "large" : "standard",
+      String(manyDicomCount),
     ],
     {
       cwd: workspaceRoot,
@@ -492,9 +539,14 @@ function formatCdpException(exceptionDetails) {
 function uiSmokeInRenderer(fixtures, smokeMode) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
-  const isPickerMode = smokeMode === "picker-folder" || smokeMode === "picker-large-folder";
+  const isPickerMode = smokeMode === "picker-folder" ||
+    smokeMode === "picker-large-folder" ||
+    smokeMode === "picker-many-folder";
   const isLargePickerMode = smokeMode === "picker-large-folder";
-  const expectedAcceptedFiles = isLargePickerMode ? 6 : 5;
+  const isManyPickerMode = smokeMode === "picker-many-folder";
+  const manyDicomCount = 32;
+  const expectedAcceptedFiles = 5 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
     const startedAt = Date.now();
@@ -630,6 +682,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     const dicomPanel = await clickInspect("Local DICOMDIR import");
     await waitFor(
       () => textMatches(dicomPanel.innerText, "DICOM instances") &&
+        textMatches(dicomPanel.innerText, String(expectedDicomInstances)) &&
         textMatches(dicomPanel.innerText, "DICOMDIR files"),
       "DICOMDIR asset summary",
     );

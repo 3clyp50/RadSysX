@@ -171,6 +171,7 @@ Last updated: 2026-06-12
   - `npm run desktop:smoke`
   - `npm run desktop:smoke:import`
   - `npm run desktop:smoke:picker-large-import`
+  - `npm run desktop:smoke:picker-many-import`
   - `npm run desktop:smoke:picker-import`
   - `npm run desktop:smoke:ui-import`
   - `npm run type-check --workspace frontend`
@@ -189,6 +190,7 @@ Last updated: 2026-06-12
 - Desktop startup smoke test: `npm run desktop:smoke`
 - Desktop local import smoke test: `npm run desktop:smoke:import`
 - Desktop large native picker import smoke test: `npm run desktop:smoke:picker-large-import`
+- Desktop many-file native picker import smoke test: `npm run desktop:smoke:picker-many-import`
 - Desktop native picker bridge import smoke test: `npm run desktop:smoke:picker-import`
 - Desktop hydrated UI local import smoke test: `npm run desktop:smoke:ui-import`
 - Clinical backend tests: `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`
@@ -211,6 +213,7 @@ Last updated: 2026-06-12
   - Run `npm run desktop:smoke:ui-import` to drive the hydrated Electron worklist UI, dispatch a local imaging drag/drop import, inspect imported studies, verify NIFTI previews including a coronal slice, run backend technical analysis, and cleanly shut down.
   - Run `npm run desktop:smoke:picker-import` to drive the hydrated Electron worklist UI through the native picker bridge using smoke-injected test paths, proving the renderer button, preload IPC, main-process recursive collector, direct main-process upload to backend import, inspection, NIFTI preview controls, and analysis path without automating the OS dialog itself.
   - Run `npm run desktop:smoke:picker-large-import` to repeat the native picker bridge path with an additional 8 MiB synthetic NIFTI volume, proving direct main-process upload and backend preview/analysis behavior beyond the tiny focused fixtures.
+  - Run `npm run desktop:smoke:picker-many-import` to repeat the native picker bridge path with 32 additional nested extensionless DICOM instances, proving recursive folder traversal and many-file upload behavior.
   - Local imaging import is controlled by `RADSYSX_LOCAL_IMAGING_ENABLED`; the Electron desktop runtime enables it by default for the fast path.
   - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or an explicitly configured local DICOMweb target.
 - Before starting compose:

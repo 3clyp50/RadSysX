@@ -11,6 +11,7 @@ npm run desktop:smoke:import
 npm run desktop:smoke:ui-import
 npm run desktop:smoke:picker-import
 npm run desktop:smoke:picker-large-import
+npm run desktop:smoke:picker-many-import
 npm run desktop
 ```
 
@@ -23,6 +24,8 @@ This starts the local clinical FastAPI backend, Next.js shell, and OHIF viewer b
 `npm run desktop:smoke:picker-import` drives the hydrated Electron worklist `Import folder` action through the preload IPC/native picker bridge with smoke-injected fixture paths, uploads selected files from Electron main to the backend import endpoint with the existing session cookie, verifies the same import, inspection, preview, and analysis behavior, and shuts the runtime down. It proves the bridge path without replacing a real native OS-dialog smoke.
 
 `npm run desktop:smoke:picker-large-import` repeats that direct native picker path with an additional 8 MiB synthetic NIFTI volume and verifies backend asset summary, preview, and technical analysis for the larger payload.
+
+`npm run desktop:smoke:picker-many-import` repeats that direct native picker path with a nested folder of 32 additional extensionless DICOM instances and verifies recursive collection, import of 37 files into 2 local studies, DICOM asset summary, and backend technical analysis.
 
 ## Frontend Local, GPU Backend On Cloud VM
 
