@@ -51,8 +51,9 @@ async function checkBootstrap(python) {
 
 function findPython() {
   const candidates = [];
-  if (process.env.PYTHON) {
-    candidates.push({ command: process.env.PYTHON, args: [], label: process.env.PYTHON });
+  const configuredPython = process.env.RADSYSX_DESKTOP_PYTHON ?? process.env.PYTHON;
+  if (configuredPython) {
+    candidates.push({ command: configuredPython, args: [], label: configuredPython });
   }
 
   if (process.platform === "win32") {

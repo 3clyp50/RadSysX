@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 const __filename = fileURLToPath(import.meta.url);
 const desktopRoot = path.resolve(path.dirname(__filename), "..");
 const workspaceRoot = path.resolve(desktopRoot, "..");
-const pythonPath = path.join(workspaceRoot, ".venv", "bin", "python");
+const pythonPath = venvPythonPath();
 
 const results = [];
 
@@ -49,7 +49,7 @@ function checkPythonVenv() {
   if (!fs.existsSync(pythonPath)) {
     fail(
       "The repo-local Python virtual environment is missing.",
-      "Run: python3 -m venv .venv && . .venv/bin/activate && python3 -m pip install -r backend/requirements-clinical.txt",
+      "Run: npm run desktop:bootstrap",
     );
     return;
   }
@@ -58,7 +58,7 @@ function checkPythonVenv() {
     pythonPath,
     [
       "-c",
-      "import fastapi, sqlalchemy, uvicorn, pydantic, multipart; print('clinical imports ok')",
+      "import fastapi, multipart, pydicom, pydantic, sqlalchemy, uvicorn; print('clinical imports ok')",
     ],
     {
       cwd: workspaceRoot,
@@ -73,8 +73,14 @@ function checkPythonVenv() {
 
   fail(
     "Python clinical dependencies are incomplete.",
-    "Run: . .venv/bin/activate && python3 -m pip install -r backend/requirements-clinical.txt",
+    "Run: npm run desktop:bootstrap",
   );
+}
+
+function venvPythonPath() {
+  return process.platform === "win32"
+    ? path.join(workspaceRoot, ".venv", "Scripts", "python.exe")
+    : path.join(workspaceRoot, ".venv", "bin", "python");
 }
 
 function checkNodeDependencies() {

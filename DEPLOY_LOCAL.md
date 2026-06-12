@@ -27,6 +27,8 @@ The desktop launcher builds and stamps the frontend production shell for its sel
 
 `npm run desktop:bootstrap` is a cross-platform Node bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. Use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
 
+The desktop runtime, doctor, bootstrap, and smoke helpers use the platform-correct venv Python path (`.venv/bin/python` on Unix-like hosts, `.venv/Scripts/python.exe` on Windows). Set `RADSYSX_DESKTOP_PYTHON=/path/to/python` if a machine needs an explicit interpreter override.
+
 `npm run desktop:smoke:local-start` starts Electron at the OHIF local-start screen, verifies the visible URL is cleaned to `/viewer/`, imports synthetic local files through the primary desktop import action, opens the imported DICOM study in OHIF via a governed launch, checks same-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
 `npm run desktop:smoke:local-start-nondicom` starts from the same OHIF local-start screen, imports only NIFTI/image/ZIP fixtures, verifies the fallback to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and confirms no OHIF viewer action is exposed for the non-DICOM row.

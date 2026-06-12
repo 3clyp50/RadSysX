@@ -322,8 +322,22 @@ async function cookieHeaderForSender(sender) {
 }
 
 function pythonCommand() {
-  const venvPython = path.join(workspaceRoot, ".venv", "bin", "python");
-  return fs.existsSync(venvPython) ? venvPython : "python3";
+  const configuredPython = process.env.RADSYSX_DESKTOP_PYTHON ?? process.env.PYTHON;
+  if (configuredPython) {
+    return configuredPython;
+  }
+
+  const venvPython = venvPythonPath();
+  if (fs.existsSync(venvPython)) {
+    return venvPython;
+  }
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+function venvPythonPath() {
+  return process.platform === "win32"
+    ? path.join(workspaceRoot, ".venv", "Scripts", "python.exe")
+    : path.join(workspaceRoot, ".venv", "bin", "python");
 }
 
 async function findAvailablePort(preferredPort, usedPorts = new Set()) {
