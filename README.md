@@ -36,6 +36,7 @@ The current clinical baseline on this branch is:
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
 - The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path.
+- The desktop app enables backend-owned local imaging import for DICOM, DICOMDIR, NIFTI, and common image files.
 
 The current research/agent baseline still includes:
 
@@ -65,6 +66,7 @@ Those capabilities remain part of RadSysX, but they are not the clinical source 
 
 - `backend/server.py`
 - `backend/clinical/*`
+- `backend/clinical/local_imaging.py`
 - `backend/tests/test_clinical_platform.py`
 
 ### Research and agent stack
@@ -142,6 +144,7 @@ Research-only imaging/AI experimentation still includes:
 - `GET /api/worklist`
 - `POST /api/imaging/launch`
 - `GET /api/imaging/launch/resolve`
+- `POST /api/local-imaging/import`
 - `GET /api/studies/{studyUid}/workspace`
 - `POST /api/reports/draft`
 - `POST /api/ai/jobs`
@@ -189,6 +192,8 @@ The most important clinical env vars are:
 - `RADSYSX_VIEWER_BASE_URL`
 - `RADSYSX_VIEWER_BASE_PATH`
 - `RADSYSX_DICOMWEB_PUBLIC_BASE_URL`
+- `RADSYSX_LOCAL_IMAGING_ENABLED`
+- `RADSYSX_LOCAL_IMAGING_STORAGE_DIR`
 - `RADSYSX_ORTHANC_DICOMWEB_URL`
 - `RADSYSX_ORTHANC_USERNAME`
 - `RADSYSX_ORTHANC_PASSWORD`
@@ -253,7 +258,7 @@ npm run desktop
 
 `desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, worklist, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, local import of DICOM/DICOMDIR/NIFTI/common image files, worklist registration, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
 For a quick startup and cleanup check:
 

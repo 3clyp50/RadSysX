@@ -11,6 +11,7 @@ This repository’s authoritative implementation guidance is [AGENTS.md](AGENTS.
 - Shared browser clinical package: `packages/clinical-web/*`
 - Clinical shell: `frontend/app/login/page.tsx`, `frontend/app/worklist/page.tsx`
 - Desktop fast path: `desktop/`, launched with `npm run desktop`
+- Local imaging import: `backend/clinical/local_imaging.py` and `POST /api/local-imaging/import`
 - Root `frontend/app/page.tsx`: landing/surface selector, not the clinical viewer
 - Preferred host: native Linux, not WSL-specific tooling assumptions
 
@@ -49,7 +50,7 @@ npm run desktop:doctor
 npm run desktop
 ```
 
-The desktop app defaults to local `pilot` mode and supervises FastAPI, Next.js, and the OHIF viewer bridge behind one localhost origin. Use compose when you need Orthanc-backed DICOMweb validation.
+The desktop app defaults to local `pilot` mode, enables backend-owned local imaging import, and supervises FastAPI, Next.js, and the OHIF viewer bridge behind one localhost origin. Use compose when you need Orthanc-backed DICOMweb validation.
 
 After initial recon on the Linux host, wait for the user's first app test report before widening the code-change scope.
 

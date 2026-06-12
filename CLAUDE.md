@@ -11,7 +11,7 @@ RadSysX has two product surfaces:
 
 The clinical path is the migration target. Do not plan against research-only seams when making clinical changes.
 
-There is also a desktop fast path in `desktop/`: Electron starts the local FastAPI backend, Next.js shell, and generated OHIF viewer bridge under one localhost origin for no-Docker local use.
+There is also a desktop fast path in `desktop/`: Electron starts the local FastAPI backend, Next.js shell, and generated OHIF viewer bridge under one localhost origin for no-Docker local use, with backend-owned local imaging import enabled.
 
 ## Environment Posture
 
@@ -24,6 +24,7 @@ There is also a desktop fast path in `desktop/`: Electron starts the local FastA
 ## Current Clinical Runtime
 
 - Backend authority: `backend/server.py` and `backend/clinical/*`
+- Local imaging import: `backend/clinical/local_imaging.py` plus `POST /api/local-imaging/import`
 - Desktop fast path: `desktop/src/main.mjs`, `desktop/scripts/doctor.mjs`
 - Shared frontend/viewer package: `packages/clinical-web/*`
 - Clinical shell: `frontend/app/login/page.tsx`, `frontend/app/worklist/page.tsx`

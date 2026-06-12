@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, ShieldCheck, Stethoscope } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload } from "lucide-react";
 
 import { clinicalApi } from "@/lib/clinical/client";
 import type {
@@ -14,45 +14,57 @@ import type {
 
 export default function WorklistPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [config, setConfig] = useState<ClinicalPlatformConfig | null>(null);
   const [session, setSession] = useState<SessionClaims | null>(null);
   const [rows, setRows] = useState<WorklistRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
   const [launchingStudyUid, setLaunchingStudyUid] = useState<string | null>(null);
+
+  const directoryInputProps = {
+    directory: "",
+    webkitdirectory: "",
+  } as Record<string, string>;
+
+  const loadClinicalWorkspace = useCallback(async (cancelled?: () => boolean) => {
+    try {
+      const sessionResponse = await clinicalApi.getSession();
+      if (!sessionResponse.authenticated || !sessionResponse.session) {
+        router.replace("/login?next=%2Fworklist");
+        return;
+      }
+
+      const [platformConfig, worklist] = await Promise.all([
+        clinicalApi.getPlatformConfig(),
+        clinicalApi.getWorklist(),
+      ]);
+
+      if (cancelled?.()) {
+        return;
+      }
+
+      setSession(sessionResponse.session);
+      setConfig(platformConfig);
+      setRows(worklist.rows);
+    } catch (cause) {
+      if (!cancelled?.()) {
+        setError(cause instanceof Error ? cause.message : "Failed to load clinical worklist.");
+      }
+    }
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      try {
-        const sessionResponse = await clinicalApi.getSession();
-        if (!sessionResponse.authenticated || !sessionResponse.session) {
-          router.replace("/login?next=%2Fworklist");
-          return;
-        }
-
-        const [platformConfig, worklist] = await Promise.all([
-          clinicalApi.getPlatformConfig(),
-          clinicalApi.getWorklist(),
-        ]);
-
-        if (!cancelled) {
-          setSession(sessionResponse.session);
-          setConfig(platformConfig);
-          setRows(worklist.rows);
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : "Failed to load clinical worklist.");
-        }
-      }
-    }
-
-    load();
+    void loadClinicalWorkspace(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [loadClinicalWorkspace]);
 
   const headline = useMemo(() => {
     if (!config) {
@@ -72,6 +84,39 @@ export default function WorklistPage() {
       setError(cause instanceof Error ? cause.message : "Unable to launch viewer.");
     } finally {
       setLaunchingStudyUid(null);
+    }
+  };
+
+  const handleLocalImport = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) {
+      return;
+    }
+
+    setImporting(true);
+    setError(null);
+    setImportMessage(null);
+    setImportWarnings([]);
+
+    try {
+      const response = await clinicalApi.importLocalImaging(files);
+      const studyCount = response.importedStudies.length;
+      setImportMessage(
+        `Imported ${response.acceptedFiles} file${response.acceptedFiles === 1 ? "" : "s"} into ${studyCount} local stud${studyCount === 1 ? "y" : "ies"}.`,
+      );
+      setImportWarnings(response.warnings);
+      const worklist = await clinicalApi.getWorklist();
+      setRows(worklist.rows);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to import local imaging files.");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      if (folderInputRef.current) {
+        folderInputRef.current.value = "";
+      }
     }
   };
 
@@ -129,6 +174,61 @@ export default function WorklistPage() {
           {error && (
             <div className="mt-6 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
               {error}
+            </div>
+          )}
+
+          {config?.localImagingEnabled && (
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <div>
+                <div className="text-sm font-medium text-white">Local imaging import</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  DICOM, DICOMDIR, NIFTI, PNG, JPEG, TIFF
+                </div>
+                {importMessage && (
+                  <div className="mt-2 text-sm text-cyan-100">{importMessage}</div>
+                )}
+                {importWarnings.length > 0 && (
+                  <div className="mt-2 text-xs text-amber-200">
+                    {importWarnings.join(" ")}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".dcm,.dicom,.nii,.nii.gz,.png,.jpg,.jpeg,.tif,.tiff,DICOMDIR"
+                  className="hidden"
+                  onChange={(event) => void handleLocalImport(event.currentTarget.files)}
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => void handleLocalImport(event.currentTarget.files)}
+                  {...directoryInputProps}
+                />
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
+                >
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Import files
+                </button>
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => folderInputRef.current?.click()}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/50 hover:text-white disabled:cursor-wait disabled:opacity-70"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Import folder
+                </button>
+              </div>
             </div>
           )}
 

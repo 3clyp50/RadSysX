@@ -10,6 +10,7 @@ import type {
   ImagingLaunchRequest,
   ImagingLaunchResolveResponse,
   ImagingLaunchResponse,
+  LocalImagingImportResponse,
   LocalLoginRequest,
   LocalLoginResponse,
   ReportDraftRequest,
@@ -89,6 +90,18 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
       return requestJson("/api/worklist", undefined, options);
     },
 
+    importLocalImaging(files: File[]): Promise<LocalImagingImportResponse> {
+      const form = new FormData();
+      const relativePaths: string[] = [];
+      for (const file of files) {
+        const relativePath = readBrowserRelativePath(file);
+        relativePaths.push(relativePath);
+        form.append("files", file, relativePath);
+      }
+      form.set("relativePaths", JSON.stringify(relativePaths));
+      return requestMultipart("/api/local-imaging/import", form, options);
+    },
+
     launchImaging(payload: ImagingLaunchRequest): Promise<ImagingLaunchResponse> {
       return requestJson("/api/imaging/launch", {
         method: "POST",
@@ -155,6 +168,11 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
       return requestJson(`/api/studies/${encodeURIComponent(studyInstanceUID)}/workspace`, undefined, options);
     },
   };
+}
+
+function readBrowserRelativePath(file: File): string {
+  const maybeRelative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  return maybeRelative && maybeRelative.trim() ? maybeRelative : file.name;
 }
 
 export const clinicalApi = createClinicalApi();

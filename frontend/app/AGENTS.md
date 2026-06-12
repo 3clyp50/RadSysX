@@ -12,6 +12,7 @@
 
 - `/login` establishes local seeded clinical sessions through the backend.
 - `/worklist` is the clinical launch surface and must create opaque imaging launch sessions through the backend.
+- `/worklist` may expose local imaging import controls when backend platform config enables them; imports must go through the backend local imaging contract.
 - `/` may help select or explain surfaces, but must not become a clinical viewer runtime.
 - Do not add a Next.js `/viewer` route for clinical fallback.
 - Route copy and behavior must preserve the distinction between research and governed clinical modes.

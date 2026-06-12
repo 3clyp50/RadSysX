@@ -10,7 +10,7 @@ npm run desktop:doctor
 npm run desktop
 ```
 
-This starts the local clinical FastAPI backend, Next.js shell, and OHIF viewer bridge under one localhost origin. It is the preferred quick path for local login, worklist, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or a configured local DICOMweb target.
+This starts the local clinical FastAPI backend, Next.js shell, and OHIF viewer bridge under one localhost origin. It is the preferred quick path for local login, local DICOM/DICOMDIR/NIFTI import, worklist registration, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or a configured local DICOMweb target.
 
 ## Frontend Local, GPU Backend On Cloud VM
 

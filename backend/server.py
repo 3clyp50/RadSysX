@@ -76,13 +76,16 @@ try:
     from backend.clinical.config import get_settings
     from backend.clinical.contracts import (
         AIJobCreateRequest,
+        AuditAction,
         AuthMode,
         ClinicalPlatformConfig,
         DerivedResultStowRequest,
         DerivedResultRequest,
         ImagingLaunchRequest,
+        LocalImagingImportResponse,
         LocalLoginRequest,
         ReportDraftRequest,
+        ResourceType,
         SessionClaims,
         SessionResponse,
     )
@@ -91,6 +94,7 @@ try:
         UploadedDicomPart,
         normalize_dicom_stow_content_type,
     )
+    from backend.clinical.local_imaging import LocalImagingImporter, LocalImagingUploadPart
     from backend.clinical.repositories import ClinicalRepository
     from backend.clinical.services import ClinicalPlatformService
 except ModuleNotFoundError:
@@ -98,13 +102,16 @@ except ModuleNotFoundError:
     from clinical.config import get_settings
     from clinical.contracts import (
         AIJobCreateRequest,
+        AuditAction,
         AuthMode,
         ClinicalPlatformConfig,
         DerivedResultStowRequest,
         DerivedResultRequest,
         ImagingLaunchRequest,
+        LocalImagingImportResponse,
         LocalLoginRequest,
         ReportDraftRequest,
+        ResourceType,
         SessionClaims,
         SessionResponse,
     )
@@ -113,6 +120,7 @@ except ModuleNotFoundError:
         UploadedDicomPart,
         normalize_dicom_stow_content_type,
     )
+    from clinical.local_imaging import LocalImagingImporter, LocalImagingUploadPart
     from clinical.repositories import ClinicalRepository
     from clinical.services import ClinicalPlatformService
 
@@ -333,6 +341,7 @@ clinical_service = ClinicalPlatformService(
     repository=clinical_repository,
     dicomweb_adapter=OrthancDICOMwebAdapter(settings),
 )
+local_imaging_importer = LocalImagingImporter(settings, clinical_repository)
 clinical_repository.initialize()
 
 # Initialize FHIR server on startup
@@ -436,6 +445,7 @@ async def clinical_platform_config() -> ClinicalPlatformConfig:
         auth_mode=settings.auth_mode,
         ai_default_workflow_mode=settings.ai_default_workflow_mode,
         ai_allow_active=settings.ai_allow_active,
+        local_imaging_enabled=settings.local_imaging_enabled,
     )
 
 
@@ -470,6 +480,75 @@ async def get_worklist(http_request: Request, trace_id: str | None = None):
         source_ip=_client_ip(http_request),
         trace_id=trace_id,
     )
+
+
+@app.post("/api/local-imaging/import")
+async def import_local_imaging(
+    http_request: Request,
+    relative_paths: str = Form(default="[]", alias="relativePaths"),
+    files: list[UploadFile] = File(...),
+) -> LocalImagingImportResponse:
+    """Import local medical image files into the local workspace store."""
+    if not settings.local_imaging_enabled:
+        raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
+    actor = _require_session(http_request)
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required.")
+    if len(files) > settings.local_imaging_max_files:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files for local import. Limit is {settings.local_imaging_max_files}.",
+        )
+
+    try:
+        decoded_relative_paths = json.loads(relative_paths) if relative_paths else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid relativePaths JSON: {exc.msg}") from exc
+    if not isinstance(decoded_relative_paths, list):
+        raise HTTPException(status_code=400, detail="relativePaths must be a JSON array.")
+
+    upload_parts: list[LocalImagingUploadPart] = []
+    try:
+        for index, upload in enumerate(files):
+            data = await upload.read(settings.local_imaging_max_file_bytes + 1)
+            if len(data) > settings.local_imaging_max_file_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="One or more files exceed the local import size limit.",
+                )
+            upload_parts.append(
+                LocalImagingUploadPart(
+                    filename=upload.filename or f"upload-{index + 1}",
+                    content_type=upload.content_type,
+                    relative_path=(
+                        str(decoded_relative_paths[index])
+                        if index < len(decoded_relative_paths)
+                        and decoded_relative_paths[index] is not None
+                        else upload.filename
+                    ),
+                    data=data,
+                )
+            )
+
+        result = local_imaging_importer.import_uploads(upload_parts)
+    finally:
+        for upload in files:
+            await upload.close()
+
+    for imported in result.imported_studies:
+        clinical_repository.add_audit_event(
+            clinical_service._build_audit_event(
+                actor_user_id=actor.username,
+                actor_role=actor.primary_role,
+                action=AuditAction.IMPORT_STUDY,
+                patient_ref="Patient/local-import",
+                study_instance_uid=imported.study_instance_uid,
+                resource_type=ResourceType.STUDY,
+                resource_id=imported.study_instance_uid,
+                source_ip=_client_ip(http_request),
+            )
+        )
+    return result
 
 
 @app.get("/api/studies/{study_uid}/workspace")

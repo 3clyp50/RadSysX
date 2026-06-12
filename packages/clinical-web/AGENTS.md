@@ -12,6 +12,7 @@
 
 - `src/contracts.ts` must mirror the backend clinical contract models in `backend/clinical/contracts.py`.
 - `src/client.ts` should call governed backend endpoints with cookies included and should not invent browser-local clinical state.
+- `src/client.ts` owns the browser client for backend local imaging import, including relative-path preservation for folder/DICOMDIR uploads.
 - `src/env.ts` owns app mode, backend base URL, viewer base URL, and experimental imaging flags shared by browser surfaces.
 - Keep exports stable for both `frontend` and `viewer` workspaces.
 

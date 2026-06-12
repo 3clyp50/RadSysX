@@ -94,6 +94,7 @@ Last updated: 2026-06-12
   - `backend/clinical/config.py`
   - `backend/clinical/contracts.py`
   - `backend/clinical/dicomweb.py`
+  - `backend/clinical/local_imaging.py`
   - `backend/clinical/models.py`
   - `backend/clinical/repositories.py`
   - `backend/clinical/seed_orthanc.py`
@@ -197,7 +198,8 @@ Last updated: 2026-06-12
   - Run `npm run desktop:bootstrap` once on a fresh clone.
   - Run `npm run desktop` for the Electron app.
   - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, Next.js, and the generated OHIF viewer bridge.
-  - This path validates local login, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
+  - This path validates local login, local imaging import, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
+  - Local imaging import is controlled by `RADSYSX_LOCAL_IMAGING_ENABLED`; the Electron desktop runtime enables it by default for the fast path.
   - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or an explicitly configured local DICOMweb target.
 - Before starting compose:
   - `export RADSYSX_ORTHANC_USERNAME=local-user`

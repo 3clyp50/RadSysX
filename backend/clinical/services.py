@@ -343,7 +343,7 @@ class ClinicalPlatformService:
             stow_root=self._settings.dicomweb_stow_root if direct_stow_enabled else "",
             auth_mode=self._settings.auth_mode,
             feature_flags=ViewerFeatureFlags(
-                local_file_import=False,
+                local_file_import=self._settings.local_imaging_enabled,
                 report_panel=True,
                 ai_panel=True,
                 derived_panel=True,

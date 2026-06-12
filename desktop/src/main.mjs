@@ -229,6 +229,10 @@ async function startRuntime() {
     RADSYSX_VIEWER_BASE_PATH: process.env.RADSYSX_VIEWER_BASE_PATH ?? "/viewer",
     RADSYSX_DICOMWEB_PUBLIC_BASE_URL:
       process.env.RADSYSX_DICOMWEB_PUBLIC_BASE_URL ?? "/dicom-web",
+    RADSYSX_LOCAL_IMAGING_ENABLED: process.env.RADSYSX_LOCAL_IMAGING_ENABLED ?? "true",
+    RADSYSX_LOCAL_IMAGING_STORAGE_DIR:
+      process.env.RADSYSX_LOCAL_IMAGING_STORAGE_DIR ??
+      path.join(workspaceRoot, "backend", "local-imaging-data"),
     NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL ?? publicBaseUrl,
     NEXT_PUBLIC_VIEWER_BASE_URL:
       process.env.NEXT_PUBLIC_VIEWER_BASE_URL ?? `${publicBaseUrl}/viewer`,

@@ -1,6 +1,8 @@
 import asyncio
+import json
 import os
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
@@ -35,6 +37,69 @@ def login(username: str = "demo-radiologist") -> None:
     body = response.json()
     assert body["session"]["username"] == username
     assert "expiresAt" in body["session"]
+
+
+def make_test_dicom_bytes(
+    *,
+    study_uid: str = "1.2.826.0.1.3680043.10.54321.1",
+    series_uid: str = "1.2.826.0.1.3680043.10.54321.2",
+) -> bytes:
+    pydicom = pytest.importorskip("pydicom")
+    from pydicom.dataset import FileDataset, FileMetaDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = CTImageStorage
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    dataset = FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
+    dataset.SOPClassUID = CTImageStorage
+    dataset.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+    dataset.StudyInstanceUID = study_uid
+    dataset.SeriesInstanceUID = series_uid
+    dataset.Modality = "CT"
+    dataset.PatientID = "DO-NOT-LOG"
+    dataset.is_little_endian = True
+    dataset.is_implicit_VR = False
+
+    output = BytesIO()
+    dataset.save_as(output, enforce_file_format=True)
+    return output.getvalue()
+
+
+def make_test_dicomdir_bytes() -> bytes:
+    pytest.importorskip("pydicom")
+    from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, MediaStorageDirectoryStorage, generate_uid
+
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = MediaStorageDirectoryStorage
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    dataset = FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
+    dataset.SOPClassUID = MediaStorageDirectoryStorage
+    dataset.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+    dataset.is_little_endian = True
+    dataset.is_implicit_VR = False
+
+    image_record = Dataset()
+    image_record.DirectoryRecordType = "IMAGE"
+    image_record.ReferencedFileID = ["CASEA", "SCAN1DCM"]
+    dataset.DirectoryRecordSequence = Sequence([image_record])
+
+    output = BytesIO()
+    dataset.save_as(output, enforce_file_format=True)
+    return output.getvalue()
+
+
+def make_test_nifti_bytes() -> bytes:
+    header = bytearray(352)
+    header[0:4] = (348).to_bytes(4, "little")
+    header[344:348] = b"n+1\0"
+    return bytes(header)
 
 
 def test_auth_session_lifecycle() -> None:
@@ -77,6 +142,7 @@ def test_platform_config_exposes_auth_and_viewer_shape() -> None:
     assert payload["authMode"] == "local"
     assert payload["aiDefaultWorkflowMode"] == "shadow"
     assert payload["aiAllowActive"] is False
+    assert payload["localImagingEnabled"] is False
 
 
 def test_research_mode_keeps_development_signing_secret_default(monkeypatch) -> None:
@@ -171,6 +237,100 @@ def test_worklist_returns_seeded_rows_for_authenticated_actor() -> None:
     assert payload["userId"] == "demo-radiologist"
     assert len(payload["rows"]) >= 1
     assert "studyInstanceUID" in payload["rows"][0]
+
+
+def test_local_imaging_import_requires_explicit_runtime_enablement(monkeypatch) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", False)
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={"relativePaths": "[]"},
+        files=[("files", ("scan.dcm", make_test_dicom_bytes(), "application/dicom"))],
+    )
+
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_local_imaging_import_registers_dicom_and_nifti_worklist_row(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    study_uid = "1.2.826.0.1.3680043.10.54321.100"
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={
+            "relativePaths": json.dumps(
+                ["case-a/scan-1.dcm", "case-a/volume.nii"],
+            ),
+        },
+        files=[
+            ("files", ("scan-1.dcm", make_test_dicom_bytes(study_uid=study_uid), "application/dicom")),
+            ("files", ("volume.nii", make_test_nifti_bytes(), "application/octet-stream")),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 2
+    assert payload["rejectedFiles"] == 0
+    assert len(payload["importedStudies"]) == 2
+    dicom_import = next(
+        study for study in payload["importedStudies"] if study["studyInstanceUID"] == study_uid
+    )
+    assert dicom_import["archiveRef"].startswith("local://")
+    assert dicom_import["formats"] == ["dicom"]
+
+    worklist = client.get("/api/worklist")
+    assert worklist.status_code == 200
+    rows = worklist.json()["rows"]
+    assert any(row["studyInstanceUID"] == study_uid for row in rows)
+    local_row = next(row for row in rows if row["studyInstanceUID"] == study_uid)
+    assert local_row["patientRef"] == "Patient/local-import"
+    assert local_row["archiveRef"].startswith("local://")
+
+    manifests = list(tmp_path.glob("import-*/manifest.json"))
+    assert len(manifests) == 1
+    manifest_text = manifests[0].read_text(encoding="utf-8")
+    assert "DO-NOT-LOG" not in manifest_text
+
+
+def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    study_uid = "1.2.826.0.1.3680043.10.54321.200"
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={
+            "relativePaths": json.dumps(
+                ["CASEA/DICOMDIR", "CASEA/SCAN1DCM"],
+            ),
+        },
+        files=[
+            ("files", ("DICOMDIR", make_test_dicomdir_bytes(), "application/dicom")),
+            ("files", ("SCAN1DCM", make_test_dicom_bytes(study_uid=study_uid), "application/dicom")),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 2
+    assert payload["rejectedFiles"] == 0
+    assert len(payload["importedStudies"]) == 1
+    imported = payload["importedStudies"][0]
+    assert imported["studyInstanceUID"] == study_uid
+    assert imported["formats"] == ["dicom", "dicomdir"]
+    assert imported["warnings"] == []
 
 
 def test_imaging_launch_returns_opaque_token_and_viewer_url_without_phi_in_url() -> None:

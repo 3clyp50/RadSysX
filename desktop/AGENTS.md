@@ -4,6 +4,7 @@
 
 - Own the RadSysX Electron fast path for local, no-Docker startup.
 - Provide a friendly desktop entry point that starts the local FastAPI backend, Next.js shell, and OHIF viewer bridge under one localhost origin.
+- Enable the backend-owned local imaging import path for no-Docker DICOM/DICOMDIR/NIFTI/fallback-file ingestion.
 
 ## Ownership
 
@@ -18,6 +19,7 @@
 - Do not add PHI-bearing launch context to desktop URLs.
 - Do not let the browser write directly to Orthanc; backend-mediated derived result paths remain authoritative.
 - A missing local DICOMweb archive should degrade honestly. Full Orthanc-backed image retrieval remains the compose-stack path until a local archive bundle is added.
+- Desktop sets `RADSYSX_LOCAL_IMAGING_ENABLED=true` and stores local imports in an ignored repo-local backend data directory unless overridden.
 
 ## Work Guidance
 

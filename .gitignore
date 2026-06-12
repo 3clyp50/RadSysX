@@ -8,6 +8,7 @@ frontend/dist/*
 viewer/dist/*
 frontend/lib/api/.venv/*
 backend/.venv/*
+backend/local-imaging-data/*
 */.venv/*
 .venv/
 .env.local
@@ -24,6 +25,7 @@ viewer/dist
 .cursor/
 tmp/*
 tmp/
+local-imaging-data/*
 
 __pycache__/
 

@@ -75,6 +75,7 @@ class ReviewerDecision(str, Enum):
 
 
 class AuditAction(str, Enum):
+    IMPORT_STUDY = "IMPORT_STUDY"
     SEARCH_STUDY = "SEARCH_STUDY"
     OPEN_STUDY = "OPEN_STUDY"
     VIEW_SERIES = "VIEW_SERIES"
@@ -247,6 +248,25 @@ class WorklistResponse(ClinicalModel):
     rows: list[WorklistRow]
 
 
+class LocalImagingImportedStudy(ClinicalModel):
+    study_instance_uid: str = Field(alias="studyInstanceUID")
+    accession_number: str = Field(alias="accessionNumber")
+    modality: str
+    description: str
+    archive_ref: str = Field(alias="archiveRef")
+    file_count: int = Field(alias="fileCount")
+    formats: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LocalImagingImportResponse(ClinicalModel):
+    import_id: str = Field(alias="importId")
+    imported_studies: list[LocalImagingImportedStudy] = Field(alias="importedStudies")
+    accepted_files: int = Field(alias="acceptedFiles")
+    rejected_files: int = Field(alias="rejectedFiles")
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ReportDraftRequest(ClinicalModel):
     report_id: str | None = None
     study_instance_uid: str = Field(alias="studyInstanceUID")
@@ -382,6 +402,7 @@ class LaunchSessionRecord(ClinicalModel):
 class ClinicalPlatformConfig(ClinicalModel):
     mode: AppMode
     experimental_routes_enabled: bool = Field(alias="experimentalRoutesEnabled")
+    local_imaging_enabled: bool = Field(alias="localImagingEnabled")
     viewer_base_url: str = Field(alias="viewerBaseUrl")
     viewer_kind: str = Field(alias="viewerKind")
     viewer_base_path: str = Field(alias="viewerBasePath")

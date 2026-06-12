@@ -74,6 +74,25 @@ export type ViewerFeatureFlags = {
   directStow: boolean;
 };
 
+export type LocalImagingImportedStudy = {
+  studyInstanceUID: string;
+  accessionNumber: string;
+  modality: string;
+  description: string;
+  archiveRef: string;
+  fileCount: number;
+  formats: string[];
+  warnings: string[];
+};
+
+export type LocalImagingImportResponse = {
+  importId: string;
+  importedStudies: LocalImagingImportedStudy[];
+  acceptedFiles: number;
+  rejectedFiles: number;
+  warnings: string[];
+};
+
 export type ViewerRuntime = {
   viewerKind: string;
   viewerBasePath: string;
@@ -234,6 +253,7 @@ export type AuditEvent = {
   actorUserId: string;
   actorRole: string;
   action:
+    | "IMPORT_STUDY"
     | "SEARCH_STUDY"
     | "OPEN_STUDY"
     | "VIEW_SERIES"
@@ -269,6 +289,7 @@ export type StudyWorkspace = {
 export type ClinicalPlatformConfig = {
   mode: AppMode;
   experimentalRoutesEnabled: boolean;
+  localImagingEnabled: boolean;
   viewerBaseUrl: string;
   viewerKind: string;
   viewerBasePath: string;
