@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import gzip
 import json
 import os
@@ -130,6 +131,15 @@ def make_test_png_bytes() -> bytes:
         b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe"
         b"\xdc\xccY\xe7"
         b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+
+def make_test_jpeg_bytes() -> bytes:
+    return base64.b64decode(
+        "/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUG"
+        "CQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA"
+        "/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEA"
+        "AD8AVN//2Q=="
     )
 
 
@@ -346,7 +356,7 @@ def test_local_imaging_import_registers_dicom_and_nifti_worklist_row(
     assert "DO-NOT-LOG" not in manifest_text
 
 
-def test_local_imaging_study_assets_describe_nifti_gz_and_image(
+def test_local_imaging_study_assets_describe_nifti_gz_and_images(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -358,21 +368,27 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
         "/api/local-imaging/import",
         data={
             "relativePaths": json.dumps(
-                ["case-b/volume.nii.gz", "case-b/slice.png", "case-b/slice.tiff"],
+                [
+                    "case-b/volume.nii.gz",
+                    "case-b/slice.png",
+                    "case-b/slice.jpeg",
+                    "case-b/slice.tiff",
+                ],
             ),
         },
         files=[
             ("files", ("volume.nii.gz", gzip.compress(make_test_nifti_bytes()), "application/gzip")),
             ("files", ("slice.png", make_test_png_bytes(), "image/png")),
+            ("files", ("slice.jpeg", make_test_jpeg_bytes(), "image/jpeg")),
             ("files", ("slice.tiff", make_test_tiff_bytes(), "image/tiff")),
         ],
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["acceptedFiles"] == 3
+    assert payload["acceptedFiles"] == 4
     imported = payload["importedStudies"][0]
-    assert imported["formats"] == ["nifti", "png", "tiff"]
+    assert imported["formats"] == ["jpeg", "nifti", "png", "tiff"]
 
     assets_response = client.get(
         f"/api/local-imaging/studies/{imported['studyInstanceUID']}/assets",
@@ -381,12 +397,12 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assets_payload = assets_response.json()
     assert assets_payload["studyInstanceUID"] == imported["studyInstanceUID"]
     assert assets_payload["archiveRef"].startswith("local://")
-    assert assets_payload["formats"] == ["nifti", "png", "tiff"]
-    assert assets_payload["fileCount"] == 3
+    assert assets_payload["formats"] == ["jpeg", "nifti", "png", "tiff"]
+    assert assets_payload["fileCount"] == 4
     assert "backend-side analysis" in assets_payload["summary"]
 
     assets = assets_payload["assets"]
-    assert {asset["format"] for asset in assets} == {"nifti", "png", "tiff"}
+    assert {asset["format"] for asset in assets} == {"jpeg", "nifti", "png", "tiff"}
     nifti_asset = next(asset for asset in assets if asset["format"] == "nifti")
     assert nifti_asset["relativePath"] == "case-b/volume.nii.gz"
     assert nifti_asset["analysisSupported"] is True
@@ -402,14 +418,18 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert png_asset["previewSupported"] is True
     assert png_asset["previewUrl"].endswith(f"/assets/{png_asset['assetId']}/preview")
 
+    jpeg_asset = next(asset for asset in assets if asset["format"] == "jpeg")
+    assert jpeg_asset["previewSupported"] is True
+    assert jpeg_asset["previewUrl"].endswith(f"/assets/{jpeg_asset['assetId']}/preview")
+
     tiff_asset = next(asset for asset in assets if asset["format"] == "tiff")
     assert tiff_asset["previewSupported"] is True
     assert tiff_asset["previewUrl"].endswith(f"/assets/{tiff_asset['assetId']}/preview")
 
     findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
-    assert findings["Files"] == "3"
+    assert findings["Files"] == "4"
     assert "2 x 3 x 4 voxels" in findings["NIFTI volume"]
-    assert findings["Image files"] == "2"
+    assert findings["Image files"] == "3"
 
     nifti_preview = client.get(nifti_asset["previewUrl"])
     assert nifti_preview.status_code == 200
@@ -433,6 +453,11 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert png_preview.status_code == 200
     assert png_preview.headers["content-type"].startswith("image/png")
     assert png_preview.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+    jpeg_preview = client.get(jpeg_asset["previewUrl"])
+    assert jpeg_preview.status_code == 200
+    assert jpeg_preview.headers["content-type"].startswith("image/jpeg")
+    assert jpeg_preview.content.startswith(b"\xff\xd8")
 
     tiff_preview = client.get(tiff_asset["previewUrl"])
     assert tiff_preview.status_code == 200
@@ -458,6 +483,12 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     png_metrics = {metric["label"]: metric["value"] for metric in png_analysis["metrics"]}
     assert png_metrics["Image dimensions"] == "1 x 1"
     assert png_metrics["Bit depth"] == "8"
+
+    jpeg_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "jpeg")
+    jpeg_metrics = {metric["label"]: metric["value"] for metric in jpeg_analysis["metrics"]}
+    assert jpeg_metrics["Image dimensions"] == "1 x 1"
+    assert jpeg_metrics["Precision"] == "8"
+    assert jpeg_metrics["Color components"] == "1"
 
     tiff_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "tiff")
     tiff_metrics = {metric["label"]: metric["value"] for metric in tiff_analysis["metrics"]}

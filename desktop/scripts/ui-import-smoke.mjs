@@ -120,6 +120,7 @@ function generateFixtures(outputDir, { largePayload = false, manyDicomCount = 0 
     [
       "-c",
       `
+import base64
 import gzip
 import struct
 import sys
@@ -247,6 +248,12 @@ if large_payload:
     b"\\xdc\\xccY\\xe7"
     b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
 )
+(root / "slice.jpeg").write_bytes(base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUG"
+    "CQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA"
+    "/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEA"
+    "AD8AVN//2Q=="
+))
 tiff_entries = [
     struct.pack("<HHI", 256, 4, 1) + struct.pack("<I", 2),
     struct.pack("<HHI", 257, 4, 1) + struct.pack("<I", 3),
@@ -696,6 +703,7 @@ function pickerTestPathsForSmokeMode() {
     "volume.nii",
     "volume.nii.gz",
     "slice.png",
+    "slice.jpeg",
     "slice.tiff",
   ].map((name) => path.join(fixtureRoot, name));
 }
@@ -707,6 +715,7 @@ function readFixturePayloads() {
     ["volume.nii", "ui-smoke/volume.nii", "application/octet-stream"],
     ["volume.nii.gz", "ui-smoke/volume.nii.gz", "application/gzip"],
     ["slice.png", "ui-smoke/slice.png", "image/png"],
+    ["slice.jpeg", "ui-smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "ui-smoke/slice.tiff", "image/tiff"],
   ].map(([name, relativePath, type]) => ({
     base64: fs.readFileSync(path.join(fixtureRoot, name)).toString("base64"),
@@ -815,7 +824,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
-  const expectedAcceptedFiles = 6 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedAcceptedFiles = 7 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
   const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
@@ -993,6 +1002,8 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "11.5",
       "Image dimensions",
       "1 x 1",
+      "Precision",
+      "8",
       "2 x 3",
     ]);
 

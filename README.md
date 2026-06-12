@@ -289,7 +289,7 @@ For a hydrated UI-level import check:
 npm run desktop:smoke:ui-import
 ```
 
-That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI/PNG/TIFF files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
+That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI/PNG/JPEG/TIFF files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
 
 For a native file picker bridge check:
 
@@ -321,7 +321,7 @@ For a many-file native picker import check:
 npm run desktop:smoke:picker-many-import
 ```
 
-That variant adds a nested folder of 32 additional extensionless DICOM instances to the picker fixture folder and verifies recursive collection, import of 38 files into 2 local studies, DICOM asset summary, and technical analysis through the same direct Electron-main upload path.
+That variant adds a nested folder of 32 additional extensionless DICOM instances to the picker fixture folder and verifies recursive collection, import of 39 files into 2 local studies, DICOM asset summary, and technical analysis through the same direct Electron-main upload path.
 
 For an imported-DICOM viewer handoff check:
 

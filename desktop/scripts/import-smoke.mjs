@@ -57,6 +57,7 @@ function generateFixtures(outputDir) {
     [
       "-c",
       `
+import base64
 import gzip
 import struct
 import sys
@@ -134,6 +135,12 @@ voxels = bytes(range(24))
     b"\\xdc\\xccY\\xe7"
     b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
 )
+(root / "slice.jpeg").write_bytes(base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUG"
+    "CQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA"
+    "/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEA"
+    "AD8AVN//2Q=="
+))
 tiff_entries = [
     struct.pack("<HHI", 256, 4, 1) + struct.pack("<I", 2),
     struct.pack("<HHI", 257, 4, 1) + struct.pack("<I", 3),
@@ -242,7 +249,7 @@ function startDesktopRuntime() {
 async function runImportSmoke(publicBaseUrl) {
   const cookie = await login(publicBaseUrl);
   const importPayload = await importLocalFiles(publicBaseUrl, cookie);
-  assert(importPayload.acceptedFiles === 6, `Expected 6 accepted files, got ${importPayload.acceptedFiles}.`);
+  assert(importPayload.acceptedFiles === 7, `Expected 7 accepted files, got ${importPayload.acceptedFiles}.`);
   assert(importPayload.rejectedFiles === 0, `Expected 0 rejected files, got ${importPayload.rejectedFiles}.`);
 
   const worklist = await getJson(`${publicBaseUrl}/api/worklist`, cookie);
@@ -288,7 +295,7 @@ async function runImportSmoke(publicBaseUrl) {
     "NIFTI dimensions were not reported.",
   );
   assert(
-    niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "2"),
+    niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "3"),
     "Fallback image count was not reported.",
   );
   const niftiPreviewAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("volume.nii.gz"));
@@ -325,6 +332,16 @@ async function runImportSmoke(publicBaseUrl) {
     `PNG preview returned ${imagePreview.contentType}.`,
   );
   assert(imagePreview.buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "PNG preview did not return PNG bytes.");
+
+  const jpegPreviewAsset = niftiSummary.assets.find((asset) => asset.format === "jpeg");
+  assert(jpegPreviewAsset?.previewSupported, "JPEG asset was not marked preview-supported.");
+  assert(jpegPreviewAsset?.previewUrl, "JPEG asset did not include a preview URL.");
+  const jpegPreview = await getRaw(resolveLocalUrl(publicBaseUrl, jpegPreviewAsset.previewUrl), cookie);
+  assert(
+    jpegPreview.contentType.startsWith("image/jpeg"),
+    `JPEG preview returned ${jpegPreview.contentType}.`,
+  );
+  assert(jpegPreview.buffer.subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), "JPEG preview did not return JPEG bytes.");
 
   const tiffPreviewAsset = niftiSummary.assets.find((asset) => asset.format === "tiff");
   assert(tiffPreviewAsset?.previewSupported, "TIFF asset was not marked preview-supported.");
@@ -366,6 +383,16 @@ async function runImportSmoke(publicBaseUrl) {
   assert(
     imageAssetAnalysis.metrics.some((metric) => metric.label === "Image dimensions" && metric.value === "1 x 1"),
     "PNG dimensions were not analyzed.",
+  );
+  const jpegAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "jpeg");
+  assert(jpegAssetAnalysis, "JPEG technical analysis was not returned.");
+  assert(
+    jpegAssetAnalysis.metrics.some((metric) => metric.label === "Image dimensions" && metric.value === "1 x 1"),
+    "JPEG dimensions were not analyzed.",
+  );
+  assert(
+    jpegAssetAnalysis.metrics.some((metric) => metric.label === "Precision" && metric.value === "8"),
+    "JPEG precision was not analyzed.",
   );
   const tiffAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "tiff");
   assert(tiffAssetAnalysis, "TIFF technical analysis was not returned.");
@@ -426,6 +453,7 @@ async function importLocalFiles(publicBaseUrl, cookie) {
     ["volume.nii", "smoke/volume.nii", "application/octet-stream"],
     ["volume.nii.gz", "smoke/volume.nii.gz", "application/gzip"],
     ["slice.png", "smoke/slice.png", "image/png"],
+    ["slice.jpeg", "smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "smoke/slice.tiff", "image/tiff"],
   ];
 
