@@ -223,6 +223,11 @@ header[344:348] = b"n+1\\0"
 voxels = bytes(range(24))
 (root / "volume.nii").write_bytes(bytes(header) + voxels)
 (root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header) + voxels))
+paired_header = bytearray(header)
+paired_header[108:112] = struct.pack("<f", 0.0)
+paired_header[344:348] = b"ni1\\0"
+(root / "paired.hdr").write_bytes(bytes(paired_header))
+(root / "paired.img").write_bytes(voxels)
 if large_payload:
     large_header = bytearray(352)
     large_header[0:4] = (348).to_bytes(4, "little")
@@ -702,6 +707,8 @@ function pickerTestPathsForSmokeMode() {
     "SCAN1DCM",
     "volume.nii",
     "volume.nii.gz",
+    "paired.hdr",
+    "paired.img",
     "slice.png",
     "slice.jpeg",
     "slice.tiff",
@@ -714,6 +721,8 @@ function readFixturePayloads() {
     ["SCAN1DCM", "ui-smoke/SCAN1DCM", "application/dicom"],
     ["volume.nii", "ui-smoke/volume.nii", "application/octet-stream"],
     ["volume.nii.gz", "ui-smoke/volume.nii.gz", "application/gzip"],
+    ["paired.hdr", "ui-smoke/paired.hdr", "application/octet-stream"],
+    ["paired.img", "ui-smoke/paired.img", "application/octet-stream"],
     ["slice.png", "ui-smoke/slice.png", "image/png"],
     ["slice.jpeg", "ui-smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "ui-smoke/slice.tiff", "image/tiff"],
@@ -824,7 +833,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
-  const expectedAcceptedFiles = 7 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedAcceptedFiles = 9 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
   const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
@@ -931,6 +940,13 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     button.click();
   };
 
+  const triggerPreviewImageLoading = () => {
+    for (const image of document.querySelectorAll('[data-testid="local-asset-preview"]')) {
+      image.loading = "eager";
+      image.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  };
+
   return (async () => {
     await waitFor(
       () => window.location.pathname === "/worklist" &&
@@ -973,10 +989,12 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       () => textMatches(niftiPanel.innerText, "NIFTI volume") &&
         textMatches(niftiPanel.innerText, "2 x 3 x 4") &&
         (!isLargePickerMode || textMatches(niftiPanel.innerText, "256 x 256 x 128")) &&
+        textMatches(niftiPanel.innerText, "Paired NIFTI data files") &&
         textMatches(niftiPanel.innerText, "Image files"),
       "NIFTI and image asset summary",
     );
 
+    triggerPreviewImageLoading();
     await waitFor(
       () => Array.from(document.querySelectorAll('[data-testid="local-asset-preview"]'))
         .some((image) => image.complete && image.naturalWidth > 0),
@@ -1000,6 +1018,8 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       ...(isLargePickerMode ? ["8388608"] : []),
       "Mean intensity",
       "11.5",
+      "paired.hdr",
+      "matching .hdr",
       "Image dimensions",
       "1 x 1",
       "Precision",

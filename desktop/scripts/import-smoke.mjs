@@ -126,6 +126,11 @@ header[344:348] = b"n+1\\0"
 voxels = bytes(range(24))
 (root / "volume.nii").write_bytes(bytes(header) + voxels)
 (root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header) + voxels))
+paired_header = bytearray(header)
+paired_header[108:112] = struct.pack("<f", 0.0)
+paired_header[344:348] = b"ni1\\0"
+(root / "paired.hdr").write_bytes(bytes(paired_header))
+(root / "paired.img").write_bytes(voxels)
 (root / "slice.png").write_bytes(
     b"\\x89PNG\\r\\n\\x1a\\n"
     b"\\x00\\x00\\x00\\rIHDR"
@@ -249,7 +254,7 @@ function startDesktopRuntime() {
 async function runImportSmoke(publicBaseUrl) {
   const cookie = await login(publicBaseUrl);
   const importPayload = await importLocalFiles(publicBaseUrl, cookie);
-  assert(importPayload.acceptedFiles === 7, `Expected 7 accepted files, got ${importPayload.acceptedFiles}.`);
+  assert(importPayload.acceptedFiles === 9, `Expected 9 accepted files, got ${importPayload.acceptedFiles}.`);
   assert(importPayload.rejectedFiles === 0, `Expected 0 rejected files, got ${importPayload.rejectedFiles}.`);
 
   const worklist = await getJson(`${publicBaseUrl}/api/worklist`, cookie);
@@ -295,6 +300,10 @@ async function runImportSmoke(publicBaseUrl) {
     "NIFTI dimensions were not reported.",
   );
   assert(
+    niftiSummary.findings.some((finding) => finding.label === "Paired NIFTI data files" && finding.value === "1"),
+    "Paired NIFTI data count was not reported.",
+  );
+  assert(
     niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "3"),
     "Fallback image count was not reported.",
   );
@@ -322,6 +331,20 @@ async function runImportSmoke(publicBaseUrl) {
     coronalPreview.body.includes("NIFTI coronal slice 2 preview"),
     "NIFTI coronal preview was not returned.",
   );
+  const pairedNiftiPreviewAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("paired.hdr"));
+  assert(pairedNiftiPreviewAsset?.previewSupported, "Paired NIFTI header asset was not marked preview-supported.");
+  assert(pairedNiftiPreviewAsset?.previewUrl, "Paired NIFTI header asset did not include a preview URL.");
+  const pairedNiftiPreview = await getRaw(
+    resolveLocalUrl(publicBaseUrl, `${pairedNiftiPreviewAsset.previewUrl}?axis=sagittal&slice=1`),
+    cookie,
+  );
+  assert(
+    pairedNiftiPreview.body.includes("NIFTI sagittal slice 2 preview"),
+    "Paired NIFTI sagittal preview was not returned.",
+  );
+  const pairedNiftiDataAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("paired.img"));
+  assert(pairedNiftiDataAsset, "Paired NIFTI .img asset was not returned.");
+  assert(!pairedNiftiDataAsset.previewSupported, "Paired NIFTI .img asset should not be preview-supported directly.");
 
   const imagePreviewAsset = niftiSummary.assets.find((asset) => asset.format === "png");
   assert(imagePreviewAsset?.previewSupported, "PNG asset was not marked preview-supported.");
@@ -377,6 +400,22 @@ async function runImportSmoke(publicBaseUrl) {
   assert(
     niftiAssetAnalysis.metrics.some((metric) => metric.label === "Mean intensity" && metric.value === "11.5"),
     "NIFTI mean intensity was not analyzed.",
+  );
+  const pairedNiftiAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.relativePath.endsWith("paired.hdr"));
+  assert(pairedNiftiAssetAnalysis, "Paired NIFTI header technical analysis was not returned.");
+  assert(
+    pairedNiftiAssetAnalysis.metrics.some((metric) => metric.label === "Voxel count" && metric.value === "24"),
+    "Paired NIFTI voxel count was not analyzed.",
+  );
+  assert(
+    pairedNiftiAssetAnalysis.metrics.some((metric) => metric.label === "Mean intensity" && metric.value === "11.5"),
+    "Paired NIFTI mean intensity was not analyzed.",
+  );
+  const pairedNiftiDataAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.relativePath.endsWith("paired.img"));
+  assert(pairedNiftiDataAnalysis, "Paired NIFTI data technical analysis row was not returned.");
+  assert(
+    pairedNiftiDataAnalysis.summary.includes("matching .hdr"),
+    "Paired NIFTI data row did not explain matching header analysis.",
   );
   const imageAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "png");
   assert(imageAssetAnalysis, "PNG technical analysis was not returned.");
@@ -452,6 +491,8 @@ async function importLocalFiles(publicBaseUrl, cookie) {
     ["SCAN1DCM", "smoke/SCAN1DCM", "application/dicom"],
     ["volume.nii", "smoke/volume.nii", "application/octet-stream"],
     ["volume.nii.gz", "smoke/volume.nii.gz", "application/gzip"],
+    ["paired.hdr", "smoke/paired.hdr", "application/octet-stream"],
+    ["paired.img", "smoke/paired.img", "application/octet-stream"],
     ["slice.png", "smoke/slice.png", "image/png"],
     ["slice.jpeg", "smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "smoke/slice.tiff", "image/tiff"],

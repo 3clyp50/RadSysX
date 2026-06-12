@@ -122,6 +122,17 @@ def make_test_nifti_bytes() -> bytes:
     return bytes(header) + bytes(range(24))
 
 
+def make_test_paired_nifti_bytes() -> tuple[bytes, bytes]:
+    header = bytearray(352)
+    header[0:4] = (348).to_bytes(4, "little")
+    header[40:56] = struct.pack("<8h", 3, 2, 3, 4, 1, 1, 1, 1)
+    header[70:72] = (2).to_bytes(2, "little", signed=True)
+    header[72:74] = (8).to_bytes(2, "little", signed=True)
+    header[108:112] = struct.pack("<f", 0.0)
+    header[344:348] = b"ni1\0"
+    return bytes(header), bytes(range(24))
+
+
 def make_test_png_bytes() -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -494,6 +505,90 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
     tiff_metrics = {metric["label"]: metric["value"] for metric in tiff_analysis["metrics"]}
     assert tiff_metrics["Image dimensions"] == "2 x 3"
     assert tiff_metrics["Bits per sample"] == "8"
+
+
+def test_local_imaging_import_supports_paired_nifti_hdr_img(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    header_bytes, voxel_bytes = make_test_paired_nifti_bytes()
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={
+            "relativePaths": json.dumps(
+                ["case-p/paired.hdr", "case-p/paired.img"],
+            ),
+        },
+        files=[
+            ("files", ("paired.hdr", header_bytes, "application/octet-stream")),
+            ("files", ("paired.img", voxel_bytes, "application/octet-stream")),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 2
+    assert payload["rejectedFiles"] == 0
+    imported = payload["importedStudies"][0]
+    assert imported["formats"] == ["nifti", "nifti-data"]
+    assert imported["fileCount"] == 2
+
+    manifest_path = next(tmp_path.glob("import-*/manifest.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    header_entry = next(entry for entry in manifest["files"] if entry["relativePath"] == "case-p/paired.hdr")
+    data_entry = next(entry for entry in manifest["files"] if entry["relativePath"] == "case-p/paired.img")
+    assert header_entry["pairedRelativePath"] == "case-p/paired.img"
+    assert header_entry["pairedStoredPath"] == data_entry["storedPath"]
+    assert data_entry["format"] == "nifti-data"
+
+    assets_response = client.get(
+        f"/api/local-imaging/studies/{imported['studyInstanceUID']}/assets",
+    )
+    assert assets_response.status_code == 200
+    assets_payload = assets_response.json()
+    assert assets_payload["formats"] == ["nifti", "nifti-data"]
+    assert assets_payload["fileCount"] == 2
+    findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
+    assert "2 x 3 x 4 voxels" in findings["NIFTI volume"]
+    assert findings["Paired NIFTI data files"] == "1"
+
+    assets = assets_payload["assets"]
+    header_asset = next(asset for asset in assets if asset["format"] == "nifti")
+    data_asset = next(asset for asset in assets if asset["format"] == "nifti-data")
+    assert header_asset["relativePath"] == "case-p/paired.hdr"
+    assert header_asset["previewSupported"] is True
+    assert header_asset["analysisSupported"] is True
+    assert header_asset["previewSlices"] == {"axial": 4, "coronal": 3, "sagittal": 2}
+    assert data_asset["relativePath"] == "case-p/paired.img"
+    assert data_asset["previewSupported"] is False
+    assert data_asset["analysisSupported"] is False
+
+    preview_response = client.get(f"{header_asset['previewUrl']}?axis=coronal&slice=1")
+    assert preview_response.status_code == 200
+    assert preview_response.headers["content-type"].startswith("image/svg+xml")
+    assert b"NIFTI coronal slice 2 preview" in preview_response.content
+
+    analysis_response = client.get(
+        f"/api/local-imaging/studies/{imported['studyInstanceUID']}/analysis",
+    )
+    assert analysis_response.status_code == 200
+    analysis_payload = analysis_response.json()
+    header_analysis = next(
+        item for item in analysis_payload["analyses"] if item["relativePath"] == "case-p/paired.hdr"
+    )
+    header_metrics = {metric["label"]: metric["value"] for metric in header_analysis["metrics"]}
+    assert header_metrics["Voxel count"] == "24"
+    assert header_metrics["Intensity range"] == "0 to 23"
+    assert header_metrics["Mean intensity"] == "11.5"
+    data_analysis = next(
+        item for item in analysis_payload["analyses"] if item["relativePath"] == "case-p/paired.img"
+    )
+    assert data_analysis["metrics"] == []
+    assert "matching .hdr" in data_analysis["summary"]
 
 
 def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(

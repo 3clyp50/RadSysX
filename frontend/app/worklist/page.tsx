@@ -406,7 +406,7 @@ export default function WorklistPage() {
               <div>
                 <div className="text-sm font-medium text-white">Local imaging import</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  DICOM, DICOMDIR, NIFTI, PNG, JPEG, TIFF · drop files or folders
+                  DICOM, DICOMDIR, NIFTI (.nii/.nii.gz/.hdr+.img), PNG, JPEG, TIFF · drop files or folders
                 </div>
                 {importMessage && (
                   <div data-testid="local-import-message" className="mt-2 text-sm text-cyan-100">
@@ -424,7 +424,7 @@ export default function WorklistPage() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".dcm,.dicom,.nii,.nii.gz,.png,.jpg,.jpeg,.tif,.tiff,DICOMDIR"
+                  accept=".dcm,.dicom,.nii,.nii.gz,.hdr,.img,.png,.jpg,.jpeg,.tif,.tiff,DICOMDIR"
                   className="hidden"
                   onChange={(event) => void handleLocalImport(event.currentTarget.files)}
                 />

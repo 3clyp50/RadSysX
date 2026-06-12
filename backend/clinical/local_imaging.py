@@ -7,7 +7,7 @@ import re
 import shutil
 import struct
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -72,6 +72,8 @@ class _DetectedFile:
     series_instance_uid: str | None = None
     sop_instance_uid: str | None = None
     modality: str | None = None
+    paired_stored_path: str | None = None
+    paired_relative_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,17 +109,31 @@ class LocalImagingImporter:
 
         warnings: list[str] = []
         detected_files: list[_DetectedFile] = []
+        unknown_files: list[tuple[int, _DetectedFile]] = []
         rejected_files = 0
 
         try:
             for index, upload in enumerate(uploads, start=1):
                 detected = self._store_and_detect(upload, import_root, index)
                 if detected.format == "unknown":
-                    rejected_files += 1
-                    warnings.append(f"Skipped unsupported file at position {index}.")
+                    unknown_files.append((index, detected))
                     continue
 
                 detected_files.append(detected)
+
+            paired_data_files: list[_DetectedFile]
+            detected_files, paired_data_files = self._attach_paired_nifti_data(
+                detected_files,
+                [file for _, file in unknown_files],
+                warnings,
+            )
+            paired_data_stored_paths = {file.stored_path for file in paired_data_files}
+            detected_files.extend(paired_data_files)
+            for index, unknown_file in unknown_files:
+                if unknown_file.stored_path in paired_data_stored_paths:
+                    continue
+                rejected_files += 1
+                warnings.append(f"Skipped unsupported file at position {index}.")
 
             dicomdir_study_uids = self._dicomdir_referenced_study_uids(detected_files, warnings)
             studies, file_study_uids = self._register_studies(
@@ -278,6 +294,64 @@ class LocalImagingImporter:
 
         return studies, file_study_uids
 
+    def _attach_paired_nifti_data(
+        self,
+        detected_files: list[_DetectedFile],
+        unknown_files: list[_DetectedFile],
+        warnings: list[str],
+    ) -> tuple[list[_DetectedFile], list[_DetectedFile]]:
+        data_files_by_key: dict[str, _DetectedFile] = {}
+        for unknown_file in unknown_files:
+            if self._extension(unknown_file.relative_path.lower()) != "img":
+                continue
+            key = self._paired_nifti_key(unknown_file.relative_path)
+            if key:
+                data_files_by_key[key] = unknown_file
+
+        if not data_files_by_key:
+            return detected_files, []
+
+        linked_files: list[_DetectedFile] = []
+        accepted_data_files: list[_DetectedFile] = []
+        accepted_data_paths: set[str] = set()
+        for detected_file in detected_files:
+            if detected_file.format != "nifti":
+                linked_files.append(detected_file)
+                continue
+
+            header = self._read_nifti_header_from_path(Path(detected_file.stored_path))
+            if header is None or header.get("magic") != "ni1":
+                linked_files.append(detected_file)
+                continue
+
+            key = self._paired_nifti_key(detected_file.relative_path)
+            paired_data_file = data_files_by_key.get(key or "")
+            if paired_data_file is None:
+                warnings.append(
+                    f"Paired NIFTI header {Path(detected_file.relative_path).name} was imported without its .img data file.",
+                )
+                linked_files.append(detected_file)
+                continue
+
+            linked_files.append(
+                replace(
+                    detected_file,
+                    paired_stored_path=paired_data_file.stored_path,
+                    paired_relative_path=paired_data_file.relative_path,
+                )
+            )
+            if paired_data_file.stored_path not in accepted_data_paths:
+                accepted_data_paths.add(paired_data_file.stored_path)
+                accepted_data_files.append(
+                    replace(
+                        paired_data_file,
+                        format="nifti-data",
+                        modality="NIFTI",
+                    )
+                )
+
+        return linked_files, accepted_data_files
+
     def _write_manifest(
         self,
         import_root: Path,
@@ -302,6 +376,8 @@ class LocalImagingImporter:
                     "seriesInstanceUID": file.series_instance_uid,
                     "sopInstanceUID": file.sop_instance_uid,
                     "modality": file.modality,
+                    "pairedStoredPath": file.paired_stored_path,
+                    "pairedRelativePath": file.paired_relative_path,
                 }
             )
 
@@ -740,6 +816,8 @@ class LocalImagingImporter:
             summary, metrics, warnings = self._analyze_dicom_asset(path)
         elif file_format == "nifti":
             summary, metrics, warnings = self._analyze_nifti_asset(file_entry)
+        elif file_format == "nifti-data":
+            summary = "Paired NIFTI voxel data stored; analyzed through the matching .hdr asset when present."
         elif file_format in COMMON_IMAGE_EXTENSIONS:
             summary, metrics, warnings = self._analyze_common_image_asset(file_format, path)
         elif file_format == "dicomdir":
@@ -1168,6 +1246,17 @@ class LocalImagingImporter:
                 )
             )
 
+        paired_nifti_data_entries = [
+            entry for entry in file_entries if entry.get("format") == "nifti-data"
+        ]
+        if paired_nifti_data_entries:
+            findings.append(
+                LocalImagingStudyFinding(
+                    label="Paired NIFTI data files",
+                    value=str(len(paired_nifti_data_entries)),
+                )
+            )
+
         image_entries = [
             entry
             for entry in file_entries
@@ -1184,6 +1273,9 @@ class LocalImagingImporter:
             return None
 
         lower_name = str(file_entry.get("relativePath") or path.name).lower()
+        if lower_name.endswith(".hdr"):
+            return self._read_nifti_header_from_path(path)
+
         try:
             if lower_name.endswith(".nii.gz") or path.name.lower().endswith(".gz"):
                 with gzip.open(path, "rb") as handle:
@@ -1194,6 +1286,14 @@ class LocalImagingImporter:
         except (OSError, EOFError, gzip.BadGzipFile):
             return None
 
+        return self._parse_nifti_header(header)
+
+    def _read_nifti_header_from_path(self, path: Path) -> dict[str, object] | None:
+        try:
+            with path.open("rb") as handle:
+                header = handle.read(352)
+        except OSError:
+            return None
         return self._parse_nifti_header(header)
 
     def _preview_slices(self, file_entry: dict) -> dict[str, int]:
@@ -1228,11 +1328,6 @@ class LocalImagingImporter:
         header = self._parse_nifti_header(payload[:352])
         if header is None:
             raise HTTPException(status_code=422, detail="NIFTI header could not be read.")
-        if header.get("magic") != "n+1":
-            raise HTTPException(
-                status_code=415,
-                detail="Paired NIFTI preview is not available for local imports.",
-            )
 
         dimensions = [int(value) for value in header.get("dimensions", [])]
         if len(dimensions) < 2:
@@ -1383,7 +1478,15 @@ class LocalImagingImporter:
             if lower_name.endswith(".nii.gz") or path.name.lower().endswith(".gz"):
                 with gzip.open(path, "rb") as handle:
                     return handle.read()
-            return path.read_bytes()
+            payload = path.read_bytes()
+            header = self._parse_nifti_header(payload[:352])
+            if header is not None and header.get("magic") == "ni1":
+                paired_path = self._paired_stored_file_path(file_entry)
+                if paired_path is None:
+                    return payload
+                header_payload = payload[:352].ljust(352, b"\x00")
+                return header_payload + paired_path.read_bytes()
+            return payload
         except (OSError, EOFError, gzip.BadGzipFile):
             return None
 
@@ -1463,7 +1566,12 @@ class LocalImagingImporter:
         return svg.encode("utf-8")
 
     def _stored_file_path(self, file_entry: dict) -> Path | None:
-        raw_path = str(file_entry.get("storedPath") or "")
+        return self._stored_file_path_from_raw(str(file_entry.get("storedPath") or ""))
+
+    def _paired_stored_file_path(self, file_entry: dict) -> Path | None:
+        return self._stored_file_path_from_raw(str(file_entry.get("pairedStoredPath") or ""))
+
+    def _stored_file_path_from_raw(self, raw_path: str) -> Path | None:
         if not raw_path:
             return None
         try:
@@ -1637,6 +1745,19 @@ class LocalImagingImporter:
             return False
         return header[344:348] in {b"n+1\x00", b"ni1\x00"}
 
+    @classmethod
+    def _paired_nifti_key(cls, relative_path: str) -> str | None:
+        safe_path = cls._safe_relative_path(relative_path)
+        path = PurePosixPath(safe_path)
+        lower_name = path.name.lower()
+        if not (lower_name.endswith(".hdr") or lower_name.endswith(".img")):
+            return None
+        stem = path.name[:-4].lower()
+        parent = path.parent.as_posix()
+        if parent in {"", "."}:
+            return stem
+        return f"{parent.lower()}/{stem}"
+
     @staticmethod
     def _extension(lower_name: str) -> str:
         if lower_name.endswith(".nii.gz"):
@@ -1684,7 +1805,7 @@ class LocalImagingImporter:
         formats = {file.format for file in files}
         if "dicomdir" in formats or "dicom" in formats:
             return "DICOM"
-        if "nifti" in formats:
+        if "nifti" in formats or "nifti-data" in formats:
             return "NIFTI"
         return "IMG"
 
@@ -1694,7 +1815,7 @@ class LocalImagingImporter:
             label = "DICOM"
         elif "dicomdir" in formats:
             label = "DICOMDIR"
-        elif "nifti" in formats:
+        elif "nifti" in formats or "nifti-data" in formats:
             label = "NIFTI"
         else:
             label = "image"
@@ -1713,7 +1834,7 @@ class LocalImagingImporter:
         has_preview = any(asset.preview_supported for asset in assets)
         if has_viewable_dicom:
             return "Local DICOM assets are available through the desktop DICOMweb bridge."
-        if "nifti" in format_set:
+        if "nifti" in format_set or "nifti-data" in format_set:
             if has_preview:
                 return "Local NIFTI assets are previewable and registered for backend-side analysis summary."
             return "Local NIFTI assets are registered for backend-side analysis summary."
