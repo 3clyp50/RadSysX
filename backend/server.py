@@ -596,6 +596,24 @@ async def get_local_imaging_study_assets(
     return local_imaging_importer.study_assets(study_uid)
 
 
+@app.get("/api/local-imaging/studies/{study_uid}/assets/{asset_id}/preview")
+async def get_local_imaging_asset_preview(
+    study_uid: str,
+    asset_id: str,
+    http_request: Request,
+) -> Response:
+    """Return a backend-mediated local asset preview without exposing private storage paths."""
+    if not settings.local_imaging_enabled:
+        raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
+    _require_session(http_request)
+    preview = local_imaging_importer.preview_asset(study_uid, asset_id)
+    return Response(
+        content=preview.content,
+        media_type=preview.media_type,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/dicom-web/studies")
 async def local_dicomweb_search_studies(StudyInstanceUID: str | None = None):
     """Return DICOM JSON study metadata for local desktop imports."""

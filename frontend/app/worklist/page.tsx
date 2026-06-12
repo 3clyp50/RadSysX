@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload, X } from "lucide-react";
 
-import { clinicalApi } from "@/lib/clinical/client";
+import { clinicalApi, resolveClinicalApiUrl } from "@/lib/clinical/client";
 import type {
   ClinicalPlatformConfig,
   LocalImagingStudyAssetsResponse,
@@ -346,17 +346,35 @@ export default function WorklistPage() {
               </div>
 
               <div className="mt-4 divide-y divide-slate-800 overflow-hidden rounded-xl border border-slate-800">
-                {localStudyAssets.assets.map((asset, index) => (
+                {localStudyAssets.assets.map((asset) => (
                   <div
-                    key={`${asset.relativePath}-${index}`}
-                    className="grid gap-2 bg-slate-950/40 px-3 py-2 text-sm text-slate-300 md:grid-cols-[88px_minmax(0,1fr)_92px_92px]"
+                    key={asset.assetId}
+                    className="grid gap-3 bg-slate-950/40 px-3 py-3 text-sm text-slate-300 md:grid-cols-[104px_minmax(0,1fr)_92px_92px]"
                   >
-                    <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
-                      {asset.format}
+                    <div className="flex h-20 w-24 items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-900/80">
+                      {asset.previewSupported && asset.previewUrl ? (
+                        <img
+                          src={resolveClinicalApiUrl(asset.previewUrl)}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="px-2 text-center text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                          {asset.format}
+                        </span>
+                      )}
                     </div>
-                    <div className="min-w-0 break-all text-slate-100">{asset.relativePath}</div>
-                    <div>{formatFileSize(asset.size)}</div>
-                    <div>{asset.viewerSupported ? "Viewer" : asset.analysisSupported ? "Analysis" : "Stored"}</div>
+                    <div className="min-w-0 self-center">
+                      <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                        {asset.format}
+                      </div>
+                      <div className="mt-1 break-all text-slate-100">{asset.relativePath}</div>
+                    </div>
+                    <div className="self-center">{formatFileSize(asset.size)}</div>
+                    <div className="self-center">
+                      {asset.viewerSupported ? "Viewer" : asset.analysisSupported ? "Analysis" : "Stored"}
+                    </div>
                   </div>
                 ))}
               </div>

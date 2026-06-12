@@ -36,7 +36,7 @@ The current clinical baseline on this branch is:
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
 - The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path.
-- The desktop app enables native local file/folder selection and backend-owned local imaging import for DICOM, DICOMDIR, NIFTI, and common image files, with safe imported-study asset summaries for local analysis readiness.
+- The desktop app enables native local file/folder selection and backend-owned local imaging import for DICOM, DICOMDIR, NIFTI, and common image files, with safe imported-study asset summaries and backend-mediated NIFTI/image previews for local analysis readiness.
 
 The current research/agent baseline still includes:
 
@@ -146,6 +146,7 @@ Research-only imaging/AI experimentation still includes:
 - `GET /api/imaging/launch/resolve`
 - `POST /api/local-imaging/import`
 - `GET /api/local-imaging/studies/{studyUid}/assets`
+- `GET /api/local-imaging/studies/{studyUid}/assets/{assetId}/preview`
 - `GET /api/studies/{studyUid}/workspace`
 - `POST /api/reports/draft`
 - `POST /api/ai/jobs`
@@ -259,7 +260,7 @@ npm run desktop
 
 `desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection, local import of DICOM/DICOMDIR/NIFTI/common image files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection, local import of DICOM/DICOMDIR/NIFTI/common image files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated NIFTI central-slice previews, common image previews, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
 For a quick startup and cleanup check:
 
@@ -273,7 +274,7 @@ For a stronger no-Docker import/use check:
 npm run desktop:smoke:import
 ```
 
-That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
+That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries/previews, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
 
 ### Install the full backend/runtime dependency set
 

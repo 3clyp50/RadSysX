@@ -59,10 +59,11 @@ This is not merely an upload button. The desired end state is a local app that c
 - There is now an ignored repo-local storage default at `backend/local-imaging-data/`, enabled by Electron.
 - There is now a minimal backend local DICOMweb surface for imported DICOM: study/series/instance metadata, whole-instance multipart retrieval, bulk-data multipart retrieval, and simple frame multipart retrieval.
 - There is now a backend-owned imported-study asset summary endpoint at `GET /api/local-imaging/studies/{studyUid}/assets`.
-- The local asset endpoint reads private stored files server-side and returns safe technical metadata, including NIFTI header dimensions/datatype and DICOM/image counts, without exposing stored paths or PHI-bearing DICOM tags.
+- There is now a backend-owned imported-asset preview endpoint at `GET /api/local-imaging/studies/{studyUid}/assets/{assetId}/preview`.
+- The local asset endpoints read private stored files server-side and return safe technical metadata/previews, including NIFTI header dimensions/datatype, NIFTI central-slice SVG previews, DICOM/image counts, and common image previews, without exposing stored paths or PHI-bearing DICOM tags.
 - There is now a reproducible desktop import smoke at `npm run desktop:smoke:import`; it starts Electron on high local ports, generates PHI-free synthetic imaging files, imports them, verifies worklist rows, asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the runtime down.
 - There is now an Electron-native file/folder selection bridge at `window.radsysxDesktop.selectLocalImagingFiles`; it reads selected files in the desktop main process, preserves folder-relative paths as `radsysxRelativePath`, and then the frontend imports through the same backend local imaging contract.
-- NIFTI display still needs a dedicated volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries.
+- NIFTI display still needs a dedicated volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries plus a central-slice preview.
 - DICOMDIR expansion needs parsing and file-path resolution rules.
 - Cross-platform file picker and directory upload behavior needs explicit testing.
 
@@ -173,6 +174,11 @@ Likely components:
 - [x] Return DICOM/NIFTI/image asset capability flags without exposing private stored paths.
 - [x] Parse NIFTI headers server-side for dimensions, datatype code, bit depth, and storage summary.
 - [x] Keep local asset summaries behind `RADSYSX_LOCAL_IMAGING_ENABLED` and an authenticated backend session.
+- [x] Add stable opaque local asset IDs for imported-study assets.
+- [x] Add `GET /api/local-imaging/studies/{studyUid}/assets/{assetId}/preview` for backend-mediated local previews.
+- [x] Serve common image previews through the backend without public static file exposure.
+- [x] Render NIFTI central-slice previews server-side as dependency-free SVG from private voxel bytes.
+- [x] Keep local previews behind `RADSYSX_LOCAL_IMAGING_ENABLED` and an authenticated backend session.
 
 ### Frontend Local Import
 
@@ -185,6 +191,7 @@ Likely components:
 - [x] Refresh worklist after import.
 - [x] Route imported DICOM studies to viewer/workspace launch path; backend now serves minimal local DICOMweb for imported DICOM.
 - [x] Route NIFTI/fallback images to a backend-owned inspection/analysis-summary path when OHIF is not immediately suitable.
+- [x] Show backend-mediated preview thumbnails for previewable imported NIFTI and common image assets in the worklist inspection panel.
 - [x] Keep text inside buttons/cards from overflowing on mobile and desktop in the worklist controls touched by this tranche.
 - [x] Prefer the Electron native file/folder picker when available, while retaining browser input fallback.
 - [ ] Add richer drag-and-drop affordance for local import if it can stay compatible with governed backend upload.
@@ -209,6 +216,8 @@ Likely components:
 - [x] For DICOM, choose whether fast path serves a simple local DICOMweb endpoint or uses existing research DICOM viewer components first: first pass is simple local DICOMweb endpoint.
 - [x] For DICOMDIR, ensure referenced DICOM files become a series/study collection.
 - [x] For NIFTI, choose and implement the short-term metadata path: backend asset summary plus header inspection.
+- [x] For NIFTI, add a short-term backend-mediated central-slice preview path.
+- [x] For PNG/JPEG/GIF/BMP, add backend-mediated local preview retrieval for the inspection panel.
 - [ ] For NIFTI, implement longer-term volume rendering, conversion, or analysis viewer path.
 - [x] Avoid claiming full OHIF image rendering until a real DICOMweb or compatible local source is verified; docs call this minimal local DICOM metadata/frame serving, not full archive parity.
 - [x] Ensure the local asset-summary path consumes private local stored files server-side without browser direct third-party transfer.
@@ -221,7 +230,9 @@ Likely components:
 - [x] Unit-test DICOMDIR reference handling for an included referenced DICOM.
 - [x] Unit-test NIFTI detection for `.nii`.
 - [x] Unit-test NIFTI detection and header summary for `.nii.gz`.
+- [x] Unit-test NIFTI central-slice preview retrieval for `.nii.gz`.
 - [x] Unit-test common image fallback import and asset-summary reporting with a synthetic PNG payload.
+- [x] Unit-test common image preview retrieval with a synthetic PNG payload.
 - [x] Unit-test local DICOM asset summary reports viewer eligibility for DICOMweb-backed imports.
 - [x] Add backend API test for local import with synthetic/safe files.
 - [x] Add frontend type-check coverage for import UI.
@@ -234,6 +245,7 @@ Likely components:
 - [x] Run `npm run build --workspace viewer`.
 - [x] Perform a live no-Docker runtime upload smoke through the desktop bridge API with synthetic DICOMDIR+DICOM+`.nii.gz`+PNG files.
 - [x] Replace the one-off live no-Docker import smoke with a committed `desktop:smoke:import` command covering DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG.
+- [x] Extend `desktop:smoke:import` to verify backend-mediated NIFTI SVG preview and PNG byte preview retrieval.
 - [ ] Perform a true native UI file-picker or drag-and-drop upload smoke once browser automation can reliably exercise hydrated worklist controls and OS dialogs.
 
 ### Documentation
@@ -253,6 +265,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: `npm run desktop:doctor` and `npm run desktop:smoke` also passed after the imported-study asset-summary tranche.
   - Evidence: `npm run desktop:smoke:import` passed after being added as a committed script.
   - Evidence: Electron now exposes a native local imaging file/folder picker through `window.radsysxDesktop.selectLocalImagingFiles`.
+  - Evidence: `desktop:smoke:import` now also fetches backend-mediated NIFTI SVG and PNG previews through the local bridge.
   - Remaining gap: needs manual or automation-backed native OS dialog upload smoke before final completion.
 - Upload/select local DICOM:
   - Evidence: backend endpoint tests import synthetic DICOM through `POST /api/local-imaging/import`; local DICOMweb and asset summary tests prove the stored DICOM is discoverable and viewer-eligible; `npm run desktop:smoke:import` imports synthetic DICOM and reports viewer eligibility.
@@ -264,27 +277,31 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: native OS directory-picker runtime smoke with a realistic DICOMDIR folder remains open.
 - Upload/select NIFTI `.nii`:
   - Evidence: backend endpoint tests import a synthetic `.nii` file and register a local worklist row; `npm run desktop:smoke:import` imports `.nii` and verifies analysis-supported asset summary.
-  - Remaining gap: native OS dialog upload/inspection of `.nii` remains open.
+  - Evidence: the shared local asset contract now exposes opaque asset IDs plus preview capability flags/URLs for NIFTI assets.
+  - Remaining gap: native OS dialog upload/inspection of `.nii` remains open; rich volume navigation is still future work.
 - Upload/select NIFTI `.nii.gz`:
   - Evidence: backend endpoint tests import synthetic gzipped NIFTI, preserve relative path, and extract `2 x 3 x 4` dimensions through the asset-summary endpoint; `npm run desktop:smoke:import` imports `.nii.gz` and returns the same dimension summary.
-  - Remaining gap: native OS dialog upload/inspection of `.nii.gz` remains open.
+  - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch an authenticated backend-mediated SVG central-slice preview for `.nii.gz`.
+  - Remaining gap: native OS dialog upload/inspection of `.nii.gz` remains open; full NIFTI volume rendering/analysis remains open.
 - Generic suitable medical files:
   - Evidence: backend endpoint tests import a synthetic PNG fallback and report it through the asset-summary endpoint; importer accepts PNG/JPEG/TIFF/BMP/GIF extensions; `npm run desktop:smoke:import` imports a PNG fallback and reports it as analysis-supported.
-  - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open.
+  - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch authenticated PNG preview bytes through the backend preview endpoint.
+  - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; TIFF is accepted as an analyzable local image file but does not yet have a guaranteed browser-renderable preview.
 - Files become usable in worklist/viewer/analysis:
-  - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries in the worklist UI.
+  - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
   - Remaining gap: full OHIF pixel rendering across real-world DICOM and a richer NIFTI/image analysis workflow remain unproven.
 - No Docker required for the fast path:
-  - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
+  - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
   - Remaining gap: final UI runtime smoke should be repeated through hydrated worklist controls and the native OS dialog.
 - Cross-platform design:
   - Evidence: browser file inputs preserve `webkitRelativePath` when available; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
   - Remaining gap: Windows/macOS native directory picker behavior is implemented via Electron but not yet tested on those OSes.
 - PHI/security guardrails preserved:
-  - Evidence: imported files stay outside public static routes; manifests avoid raw DICOM patient identifiers in tests; local asset summaries omit private stored paths and raw DICOM tags; endpoints require signed backend session and `RADSYSX_LOCAL_IMAGING_ENABLED`.
+  - Evidence: imported files stay outside public static routes; manifests avoid raw DICOM patient identifiers in tests; local asset summaries/previews omit private stored paths and raw DICOM tags; endpoints require signed backend session and `RADSYSX_LOCAL_IMAGING_ENABLED`.
   - Remaining gap: broader real-world PHI log audit remains open.
 - Tests and runtime smoke:
   - Evidence: focused local imaging backend tests and Python compile checks passed during this tranche; full clinical platform test suite passed; frontend/viewer type-checks passed; viewer build passed; desktop doctor and desktop smoke passed; committed desktop import smoke passed.
+  - Evidence: after the preview tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings.
   - Remaining gap: true native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

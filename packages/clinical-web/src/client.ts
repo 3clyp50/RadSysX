@@ -25,12 +25,19 @@ type ClinicalApiOptions = {
   baseUrl?: string;
 };
 
+export function resolveClinicalApiUrl(path: string, options?: ClinicalApiOptions): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  return `${options?.baseUrl ?? getBackendBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 async function requestJson<T>(
   path: string,
   init?: RequestInit,
   options?: ClinicalApiOptions,
 ): Promise<T> {
-  const response = await fetch(`${options?.baseUrl ?? getBackendBaseUrl()}${path}`, {
+  const response = await fetch(resolveClinicalApiUrl(path, options), {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
@@ -52,7 +59,7 @@ async function requestMultipart<T>(
   form: FormData,
   options?: ClinicalApiOptions,
 ): Promise<T> {
-  const response = await fetch(`${options?.baseUrl ?? getBackendBaseUrl()}${path}`, {
+  const response = await fetch(resolveClinicalApiUrl(path, options), {
     method: "POST",
     body: form,
     credentials: "include",

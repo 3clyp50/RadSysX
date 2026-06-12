@@ -268,6 +268,7 @@ class LocalImagingImportResponse(ClinicalModel):
 
 
 class LocalImagingStudyAsset(ClinicalModel):
+    asset_id: str = Field(alias="assetId")
     relative_path: str = Field(alias="relativePath")
     format: str
     modality: str | None = None
@@ -277,6 +278,8 @@ class LocalImagingStudyAsset(ClinicalModel):
     sop_instance_uid: str | None = Field(default=None, alias="sopInstanceUID")
     analysis_supported: bool = Field(default=True, alias="analysisSupported")
     viewer_supported: bool = Field(default=False, alias="viewerSupported")
+    preview_supported: bool = Field(default=False, alias="previewSupported")
+    preview_url: str | None = Field(default=None, alias="previewUrl")
 
 
 class LocalImagingStudyFinding(ClinicalModel):

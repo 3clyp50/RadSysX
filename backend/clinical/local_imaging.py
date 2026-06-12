@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 import re
 import shutil
 import struct
@@ -27,6 +28,24 @@ from .repositories import ClinicalRepository
 
 DICOMDIR_SOP_CLASS_UID = "1.2.840.10008.1.3.10"
 COMMON_IMAGE_EXTENSIONS = {"bmp", "gif", "jpg", "jpeg", "png", "tif", "tiff"}
+PREVIEW_IMAGE_MEDIA_TYPES = {
+    "bmp": "image/bmp",
+    "gif": "image/gif",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+}
+NIFTI_PREVIEW_MAX_DIMENSION = 96
+NIFTI_NUMERIC_DATATYPES: dict[int, tuple[str, int]] = {
+    2: ("B", 1),
+    4: ("h", 2),
+    8: ("i", 4),
+    16: ("f", 4),
+    64: ("d", 8),
+    256: ("b", 1),
+    512: ("H", 2),
+    768: ("I", 4),
+}
 
 
 @dataclass(frozen=True)
@@ -56,6 +75,12 @@ class LocalDicomInstance:
     series_instance_uid: str
     sop_instance_uid: str
     stored_path: str
+
+
+@dataclass(frozen=True)
+class LocalImagingPreview:
+    content: bytes
+    media_type: str
 
 
 class LocalImagingImporter:
@@ -383,12 +408,21 @@ class LocalImagingImporter:
                 continue
 
             file_entries = [
-                file_entry
-                for file_entry in manifest.get("files", [])
+                (file_index, file_entry)
+                for file_index, file_entry in enumerate(manifest.get("files", []))
                 if self._manifest_file_belongs_to_study(file_entry, study, manifest)
             ]
-            assets = [self._asset_from_manifest_entry(file_entry) for file_entry in file_entries]
-            findings, analysis_warnings = self._study_findings(file_entries)
+            study_file_entries = [file_entry for _, file_entry in file_entries]
+            assets = [
+                self._asset_from_manifest_entry(
+                    manifest=manifest,
+                    file_entry_index=file_index,
+                    file_entry=file_entry,
+                    study_instance_uid=study_instance_uid,
+                )
+                for file_index, file_entry in file_entries
+            ]
+            findings, analysis_warnings = self._study_findings(study_file_entries)
             warnings = [str(warning) for warning in study.get("warnings", []) if warning]
             warnings.extend(analysis_warnings)
             formats = [str(file_format) for file_format in study.get("formats", []) if file_format]
@@ -409,6 +443,25 @@ class LocalImagingImporter:
             )
 
         raise HTTPException(status_code=404, detail="Local imaging study was not found.")
+
+    def preview_asset(self, study_instance_uid: str, asset_id: str) -> LocalImagingPreview:
+        _, _, file_entry = self._resolve_asset_entry(study_instance_uid, asset_id)
+        file_format = str(file_entry.get("format") or "unknown")
+
+        media_type = PREVIEW_IMAGE_MEDIA_TYPES.get(file_format)
+        if file_format == "nifti":
+            return self._nifti_preview(file_entry)
+        if media_type is None:
+            raise HTTPException(status_code=415, detail="Local imaging asset preview is not available.")
+
+        path = self._stored_file_path(file_entry)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Local imaging asset is missing from storage.")
+
+        try:
+            return LocalImagingPreview(content=path.read_bytes(), media_type=media_type)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="Local imaging asset is missing from storage.") from exc
 
     def _dicomdir_warnings(self, detected_files: list[_DetectedFile]) -> list[str]:
         warnings: list[str] = []
@@ -476,7 +529,14 @@ class LocalImagingImporter:
             return True
         return file_format != "dicom" and not source_study_uid
 
-    def _asset_from_manifest_entry(self, file_entry: dict) -> LocalImagingStudyAsset:
+    def _asset_from_manifest_entry(
+        self,
+        *,
+        manifest: dict,
+        file_entry_index: int,
+        file_entry: dict,
+        study_instance_uid: str,
+    ) -> LocalImagingStudyAsset:
         file_format = str(file_entry.get("format") or "unknown")
         study_uid = str(
             file_entry.get("studyInstanceUID")
@@ -486,7 +546,10 @@ class LocalImagingImporter:
         series_uid = str(file_entry.get("seriesInstanceUID") or "") or None
         sop_uid = str(file_entry.get("sopInstanceUID") or "") or None
         viewer_supported = bool(file_format == "dicom" and study_uid and series_uid and sop_uid)
+        asset_id = self._asset_id(manifest, file_entry_index)
+        preview_supported = self._preview_supported(file_format)
         return LocalImagingStudyAsset(
+            asset_id=asset_id,
             relative_path=str(file_entry.get("relativePath") or "local-file"),
             format=file_format,
             modality=str(file_entry.get("modality") or "") or None,
@@ -496,7 +559,39 @@ class LocalImagingImporter:
             sop_instance_uid=sop_uid,
             analysis_supported=file_format in {"dicom", "dicomdir", "nifti", *COMMON_IMAGE_EXTENSIONS},
             viewer_supported=viewer_supported,
+            preview_supported=preview_supported,
+            preview_url=(
+                f"/api/local-imaging/studies/{study_instance_uid}/assets/{asset_id}/preview"
+                if preview_supported
+                else None
+            ),
         )
+
+    def _resolve_asset_entry(
+        self,
+        study_instance_uid: str,
+        asset_id: str,
+    ) -> tuple[dict, int, dict]:
+        parsed = self._parse_asset_id(asset_id)
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="Local imaging asset was not found.")
+
+        import_id, file_index = parsed
+        for manifest in self._iter_manifests():
+            if str(manifest.get("importId") or "") != import_id:
+                continue
+            study = self._find_manifest_study(manifest, study_instance_uid)
+            if study is None:
+                raise HTTPException(status_code=404, detail="Local imaging study was not found.")
+            files = manifest.get("files", []) or []
+            if file_index < 0 or file_index >= len(files):
+                raise HTTPException(status_code=404, detail="Local imaging asset was not found.")
+            file_entry = files[file_index]
+            if not self._manifest_file_belongs_to_study(file_entry, study, manifest):
+                raise HTTPException(status_code=404, detail="Local imaging asset was not found.")
+            return manifest, file_index, file_entry
+
+        raise HTTPException(status_code=404, detail="Local imaging asset was not found.")
 
     def _study_findings(
         self,
@@ -568,6 +663,132 @@ class LocalImagingImporter:
             return None
 
         return self._parse_nifti_header(header)
+
+    def _nifti_preview(self, file_entry: dict) -> LocalImagingPreview:
+        payload = self._read_nifti_file_bytes(file_entry)
+        if payload is None:
+            raise HTTPException(status_code=422, detail="NIFTI asset could not be read.")
+
+        header = self._parse_nifti_header(payload[:352])
+        if header is None:
+            raise HTTPException(status_code=422, detail="NIFTI header could not be read.")
+        if header.get("magic") != "n+1":
+            raise HTTPException(
+                status_code=415,
+                detail="Paired NIFTI preview is not available for local imports.",
+            )
+
+        dimensions = [int(value) for value in header.get("dimensions", [])]
+        if len(dimensions) < 2:
+            raise HTTPException(status_code=422, detail="NIFTI dimensions are not previewable.")
+
+        width = dimensions[0]
+        height = dimensions[1]
+        depth = dimensions[2] if len(dimensions) >= 3 else 1
+        if width < 1 or height < 1 or depth < 1:
+            raise HTTPException(status_code=422, detail="NIFTI dimensions are not previewable.")
+
+        datatype = int(header.get("datatypeCode") or 0)
+        decoder = NIFTI_NUMERIC_DATATYPES.get(datatype)
+        if decoder is None:
+            raise HTTPException(status_code=415, detail="NIFTI datatype is not previewable.")
+
+        voxel_offset = float(header.get("voxOffset") or 352.0)
+        if not math.isfinite(voxel_offset) or voxel_offset < 0:
+            voxel_offset = 352.0
+        data_offset = max(int(voxel_offset), 352)
+        if data_offset >= len(payload):
+            raise HTTPException(status_code=422, detail="NIFTI voxel data is missing.")
+
+        format_code, bytes_per_voxel = decoder
+        slice_index = min(depth - 1, depth // 2)
+        svg = self._nifti_slice_svg(
+            payload=payload,
+            data_offset=data_offset,
+            endian=str(header.get("endian") or "<"),
+            format_code=format_code,
+            bytes_per_voxel=bytes_per_voxel,
+            width=width,
+            height=height,
+            slice_index=slice_index,
+        )
+        return LocalImagingPreview(content=svg, media_type="image/svg+xml")
+
+    def _read_nifti_file_bytes(self, file_entry: dict) -> bytes | None:
+        path = self._stored_file_path(file_entry)
+        if path is None:
+            return None
+
+        lower_name = str(file_entry.get("relativePath") or path.name).lower()
+        try:
+            if lower_name.endswith(".nii.gz") or path.name.lower().endswith(".gz"):
+                with gzip.open(path, "rb") as handle:
+                    return handle.read()
+            return path.read_bytes()
+        except (OSError, EOFError, gzip.BadGzipFile):
+            return None
+
+    def _nifti_slice_svg(
+        self,
+        *,
+        payload: bytes,
+        data_offset: int,
+        endian: str,
+        format_code: str,
+        bytes_per_voxel: int,
+        width: int,
+        height: int,
+        slice_index: int,
+    ) -> bytes:
+        x_step = max(1, math.ceil(width / NIFTI_PREVIEW_MAX_DIMENSION))
+        y_step = max(1, math.ceil(height / NIFTI_PREVIEW_MAX_DIMENSION))
+        values: list[list[float]] = []
+        flat_values: list[float] = []
+        row_stride = width
+        slice_offset = slice_index * width * height
+        unpack_format = f"{endian}{format_code}"
+
+        for y in range(0, height, y_step):
+            row: list[float] = []
+            for x in range(0, width, x_step):
+                voxel_index = slice_offset + (y * row_stride) + x
+                byte_index = data_offset + (voxel_index * bytes_per_voxel)
+                if byte_index + bytes_per_voxel > len(payload):
+                    raise HTTPException(status_code=422, detail="NIFTI voxel data is incomplete.")
+                try:
+                    value = float(struct.unpack_from(unpack_format, payload, byte_index)[0])
+                except struct.error as exc:
+                    raise HTTPException(status_code=422, detail="NIFTI voxel data is incomplete.") from exc
+                if not math.isfinite(value):
+                    value = 0.0
+                row.append(value)
+                flat_values.append(value)
+            values.append(row)
+
+        if not values or not values[0] or not flat_values:
+            raise HTTPException(status_code=422, detail="NIFTI dimensions are not previewable.")
+
+        minimum = min(flat_values)
+        maximum = max(flat_values)
+        span = maximum - minimum
+        rects: list[str] = []
+        for y, row in enumerate(values):
+            for x, value in enumerate(row):
+                shade = 128 if span <= 0 else round(((value - minimum) / span) * 255)
+                shade = max(0, min(255, int(shade)))
+                fill = f"#{shade:02x}{shade:02x}{shade:02x}"
+                rects.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{fill}"/>')
+
+        sample_width = len(values[0])
+        sample_height = len(values)
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {sample_width} {sample_height}" '
+            'shape-rendering="crispEdges" preserveAspectRatio="none">'
+            '<title>NIFTI central slice preview</title>'
+            '<rect width="100%" height="100%" fill="#000000"/>'
+            f'{"".join(rects)}</svg>'
+        )
+        return svg.encode("utf-8")
 
     def _stored_file_path(self, file_entry: dict) -> Path | None:
         raw_path = str(file_entry.get("storedPath") or "")
@@ -644,6 +865,22 @@ class LocalImagingImporter:
         return referenced
 
     @staticmethod
+    def _asset_id(manifest: dict, file_entry_index: int) -> str:
+        import_id = str(manifest.get("importId") or "")
+        return f"{import_id}.{file_entry_index}"
+
+    @staticmethod
+    def _parse_asset_id(asset_id: str) -> tuple[str, int] | None:
+        import_id, separator, index_text = str(asset_id or "").rpartition(".")
+        if separator != "." or not import_id.startswith("import-") or not index_text.isdigit():
+            return None
+        return import_id, int(index_text)
+
+    @staticmethod
+    def _preview_supported(file_format: str) -> bool:
+        return file_format == "nifti" or file_format in PREVIEW_IMAGE_MEDIA_TYPES
+
+    @staticmethod
     def _read_dicom_metadata(data: bytes, *, force: bool = False):
         if len(data) >= 132 and data[128:132] == b"DICM":
             force = False
@@ -686,6 +923,8 @@ class LocalImagingImporter:
             "datatypeCode": int(datatype_code),
             "bitsPerVoxel": int(bits_per_voxel),
             "voxOffset": float(vox_offset),
+            "endian": endian,
+            "magic": header[344:347].decode("ascii", errors="ignore"),
         }
 
     @staticmethod
@@ -777,11 +1016,16 @@ class LocalImagingImporter:
     def _study_summary(formats: list[str], assets: list[LocalImagingStudyAsset]) -> str:
         format_set = set(formats)
         has_viewable_dicom = any(asset.viewer_supported for asset in assets)
+        has_preview = any(asset.preview_supported for asset in assets)
         if has_viewable_dicom:
             return "Local DICOM assets are available through the desktop DICOMweb bridge."
         if "nifti" in format_set:
+            if has_preview:
+                return "Local NIFTI assets are previewable and registered for backend-side analysis summary."
             return "Local NIFTI assets are registered for backend-side analysis summary."
         if format_set.intersection(COMMON_IMAGE_EXTENSIONS):
+            if has_preview:
+                return "Local image assets are previewable and registered for backend-side analysis summary."
             return "Local image assets are registered for backend-side analysis summary."
         return "Local imaging assets are registered in private storage."
 

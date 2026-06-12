@@ -122,9 +122,18 @@ header[70:72] = (2).to_bytes(2, "little", signed=True)
 header[72:74] = (8).to_bytes(2, "little", signed=True)
 header[108:112] = struct.pack("<f", 352.0)
 header[344:348] = b"n+1\\0"
-(root / "volume.nii").write_bytes(bytes(header))
-(root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header)))
-(root / "slice.png").write_bytes(b"\\x89PNG\\r\\n\\x1a\\nsmoke")
+voxels = bytes(range(24))
+(root / "volume.nii").write_bytes(bytes(header) + voxels)
+(root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header) + voxels))
+(root / "slice.png").write_bytes(
+    b"\\x89PNG\\r\\n\\x1a\\n"
+    b"\\x00\\x00\\x00\\rIHDR"
+    b"\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x08\\x02\\x00\\x00\\x00"
+    b"\\x90wS\\xde"
+    b"\\x00\\x00\\x00\\x0cIDATx\\x9cc\\xf8\\xff\\xff?\\x00\\x05\\xfe\\x02\\xfe"
+    b"\\xdc\\xccY\\xe7"
+    b"\\x00\\x00\\x00\\x00IEND\\xaeB\\x60\\x82"
+)
 `,
       outputDir,
     ],
@@ -270,6 +279,25 @@ async function runImportSmoke(publicBaseUrl) {
     niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "1"),
     "Fallback image count was not reported.",
   );
+  const niftiPreviewAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("volume.nii.gz"));
+  assert(niftiPreviewAsset?.previewSupported, "NIFTI asset was not marked preview-supported.");
+  assert(niftiPreviewAsset?.previewUrl, "NIFTI asset did not include a preview URL.");
+  const niftiPreview = await getRaw(resolveLocalUrl(publicBaseUrl, niftiPreviewAsset.previewUrl), cookie);
+  assert(
+    niftiPreview.contentType.startsWith("image/svg+xml"),
+    `NIFTI preview returned ${niftiPreview.contentType}.`,
+  );
+  assert(niftiPreview.body.includes("<svg"), "NIFTI preview did not return SVG content.");
+
+  const imagePreviewAsset = niftiSummary.assets.find((asset) => asset.format === "png");
+  assert(imagePreviewAsset?.previewSupported, "PNG asset was not marked preview-supported.");
+  assert(imagePreviewAsset?.previewUrl, "PNG asset did not include a preview URL.");
+  const imagePreview = await getRaw(resolveLocalUrl(publicBaseUrl, imagePreviewAsset.previewUrl), cookie);
+  assert(
+    imagePreview.contentType.startsWith("image/png"),
+    `PNG preview returned ${imagePreview.contentType}.`,
+  );
+  assert(imagePreview.buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "PNG preview did not return PNG bytes.");
 
   const launch = await postJson(
     `${publicBaseUrl}/api/imaging/launch`,
@@ -344,6 +372,17 @@ async function getJson(url, cookie) {
   return JSON.parse(text);
 }
 
+async function getRaw(url, cookie) {
+  const response = await fetch(url, { headers: { cookie } });
+  const buffer = Buffer.from(await response.arrayBuffer());
+  assert(response.ok, `GET ${url} failed: ${response.status} ${buffer.toString("utf-8")}`);
+  return {
+    body: buffer.toString("utf-8"),
+    buffer,
+    contentType: response.headers.get("content-type") ?? "",
+  };
+}
+
 async function postJson(url, cookie, payload) {
   const response = await fetch(url, {
     method: "POST",
@@ -356,6 +395,10 @@ async function postJson(url, cookie, payload) {
   const text = await response.text();
   assert(response.ok, `POST ${url} failed: ${response.status} ${text}`);
   return JSON.parse(text);
+}
+
+function resolveLocalUrl(publicBaseUrl, maybeRelativeUrl) {
+  return /^https?:\/\//i.test(maybeRelativeUrl) ? maybeRelativeUrl : `${publicBaseUrl}${maybeRelativeUrl}`;
 }
 
 function assert(condition, message) {

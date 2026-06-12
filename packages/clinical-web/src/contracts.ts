@@ -94,6 +94,7 @@ export type LocalImagingImportResponse = {
 };
 
 export type LocalImagingStudyAsset = {
+  assetId: string;
   relativePath: string;
   format: string;
   modality?: string | null;
@@ -103,6 +104,8 @@ export type LocalImagingStudyAsset = {
   sopInstanceUID?: string | null;
   analysisSupported: boolean;
   viewerSupported: boolean;
+  previewSupported: boolean;
+  previewUrl?: string | null;
 };
 
 export type LocalImagingStudyFinding = {

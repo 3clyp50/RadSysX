@@ -115,7 +115,19 @@ def make_test_nifti_bytes() -> bytes:
     header[72:74] = (8).to_bytes(2, "little", signed=True)
     header[108:112] = struct.pack("<f", 352.0)
     header[344:348] = b"n+1\0"
-    return bytes(header)
+    return bytes(header) + bytes(range(24))
+
+
+def make_test_png_bytes() -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+        b"\x90wS\xde"
+        b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe"
+        b"\xdc\xccY\xe7"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
 
 
 def test_auth_session_lifecycle() -> None:
@@ -333,7 +345,7 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
         },
         files=[
             ("files", ("volume.nii.gz", gzip.compress(make_test_nifti_bytes()), "application/gzip")),
-            ("files", ("slice.png", b"\x89PNG\r\n\x1a\npytest", "image/png")),
+            ("files", ("slice.png", make_test_png_bytes(), "image/png")),
         ],
     )
 
@@ -360,11 +372,30 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert nifti_asset["relativePath"] == "case-b/volume.nii.gz"
     assert nifti_asset["analysisSupported"] is True
     assert nifti_asset["viewerSupported"] is False
+    assert nifti_asset["assetId"].startswith("import-")
+    assert nifti_asset["previewSupported"] is True
+    assert nifti_asset["previewUrl"].endswith(f"/assets/{nifti_asset['assetId']}/preview")
+
+    png_asset = next(asset for asset in assets if asset["format"] == "png")
+    assert png_asset["previewSupported"] is True
+    assert png_asset["previewUrl"].endswith(f"/assets/{png_asset['assetId']}/preview")
 
     findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
     assert findings["Files"] == "2"
     assert "2 x 3 x 4 voxels" in findings["NIFTI volume"]
     assert findings["Image files"] == "1"
+
+    nifti_preview = client.get(nifti_asset["previewUrl"])
+    assert nifti_preview.status_code == 200
+    assert nifti_preview.headers["content-type"].startswith("image/svg+xml")
+    assert nifti_preview.headers["cache-control"] == "no-store"
+    assert b"<svg" in nifti_preview.content
+    assert b"NIFTI central slice preview" in nifti_preview.content
+
+    png_preview = client.get(png_asset["previewUrl"])
+    assert png_preview.status_code == 200
+    assert png_preview.headers["content-type"].startswith("image/png")
+    assert png_preview.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
