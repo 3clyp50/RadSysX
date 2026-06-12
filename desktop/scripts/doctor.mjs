@@ -106,10 +106,25 @@ function checkViewerDist() {
   );
 }
 
+function checkFrontendBuild() {
+  const frontendBuild = path.join(workspaceRoot, "frontend", ".next", "BUILD_ID");
+  if (fs.existsSync(frontendBuild)) {
+    pass("Next.js production shell is already built.");
+    return;
+  }
+
+  warn(
+    "Next.js production shell is not built yet.",
+    "The desktop launcher will run `npm run build --workspace frontend` on first production-mode launch.",
+  );
+}
+
 function checkDesktopFiles() {
   const required = [
     "desktop/src/main.mjs",
     "desktop/src/preload.cjs",
+    "desktop/scripts/dev-frontend.mjs",
+    "desktop/scripts/startup-smoke.mjs",
     "frontend/package.json",
     "viewer/package.json",
     "backend/server.py",
@@ -130,6 +145,7 @@ checkDesktopFiles();
 checkPythonVenv();
 checkNodeDependencies();
 checkViewerDist();
+checkFrontendBuild();
 
 console.log("RadSysX desktop doctor");
 console.log("----------------------");

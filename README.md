@@ -259,9 +259,15 @@ npm run desktop:doctor
 npm run desktop
 ```
 
-`desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
+`desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+
+The desktop launcher builds the frontend production shell on first launch for the selected local bridge URL, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the stamp matches. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
+
+```bash
+npm run desktop:dev-frontend
+```
 
 For a quick startup and cleanup check:
 
@@ -390,10 +396,11 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 13. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
 14. `python3 -m pytest backend/tests/test_clinical_platform.py`
 15. `npm run type-check --workspace frontend`
-16. `npm run type-check --workspace viewer`
-17. `npm run build --workspace viewer`
-18. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-19. Separately validate the governed clinical surface with `docker compose up --build`
+16. `npm run build --workspace frontend`
+17. `npm run type-check --workspace viewer`
+18. `npm run build --workspace viewer`
+19. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+20. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 

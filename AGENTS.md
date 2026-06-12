@@ -175,6 +175,7 @@ Last updated: 2026-06-12
   - `npm run desktop:smoke:picker-import`
   - `npm run desktop:smoke:ui-import`
   - `npm run type-check --workspace frontend`
+  - `npm run build --workspace frontend`
   - `npm run type-check --workspace viewer`
   - `npm run build --workspace viewer`
 - Use broader suites only when the change demands it.
@@ -187,6 +188,7 @@ Last updated: 2026-06-12
 - Desktop bootstrap: `npm run desktop:bootstrap`
 - Desktop preflight: `npm run desktop:doctor`
 - Desktop app: `npm run desktop`
+- Desktop app with live Next.js dev frontend: `npm run desktop:dev-frontend`
 - Desktop startup smoke test: `npm run desktop:smoke`
 - Desktop local import smoke test: `npm run desktop:smoke:import`
 - Desktop large native picker import smoke test: `npm run desktop:smoke:picker-large-import`
@@ -198,6 +200,7 @@ Last updated: 2026-06-12
 - Frontend dev server: `npm run dev --workspace frontend`
 - Viewer dev server: `npm run dev --workspace viewer`
 - Frontend type check: `npm run type-check --workspace frontend`
+- Frontend build: `npm run build --workspace frontend`
 - Viewer type check: `npm run type-check --workspace viewer`
 - Viewer build: `npm run build --workspace viewer`
 - Root type check: `npm run type-check`
@@ -207,7 +210,8 @@ Last updated: 2026-06-12
 - Fast local desktop path:
   - Run `npm run desktop:bootstrap` once on a fresh clone.
   - Run `npm run desktop` for the Electron app.
-  - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, Next.js, and the generated OHIF viewer bridge.
+  - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, a stamped production Next.js standalone shell, and the generated OHIF viewer bridge.
+  - The desktop launcher builds or refreshes the frontend production shell when the expected desktop build stamp is missing or mismatched; use `npm run desktop:dev-frontend` or `RADSYSX_DESKTOP_FRONTEND_MODE=development npm run desktop` only when intentionally doing live Next.js UI development.
   - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries/previews/technical analysis, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI/image files, verify worklist/asset-summary/analysis/DICOMweb/launch behavior, and cleanly shut down.
   - Run `npm run desktop:smoke:ui-import` to drive the hydrated Electron worklist UI, dispatch a local imaging drag/drop import, inspect imported studies, verify NIFTI previews including a coronal slice, run backend technical analysis, and cleanly shut down.

@@ -14,10 +14,26 @@ const workspaceRoot = path.resolve(desktopRoot, "..");
 const preloadPath = path.join(desktopRoot, "src", "preload.cjs");
 const logoPath = path.join(workspaceRoot, "RadSysX-Logo.png");
 const viewerDist = path.join(workspaceRoot, "viewer", "dist");
+const frontendBuildId = path.join(workspaceRoot, "frontend", ".next", "BUILD_ID");
+const frontendDesktopBuildStamp = path.join(workspaceRoot, "frontend", ".next", "radsysx-desktop-build.json");
+const frontendStandaloneServer = path.join(
+  workspaceRoot,
+  "frontend",
+  ".next",
+  "standalone",
+  "frontend",
+  "server.js",
+);
+const frontendStandaloneRoot = path.dirname(frontendStandaloneServer);
+const frontendStaticSource = path.join(workspaceRoot, "frontend", ".next", "static");
+const frontendStaticTarget = path.join(frontendStandaloneRoot, ".next", "static");
+const frontendPublicSource = path.join(workspaceRoot, "frontend", "public");
+const frontendPublicTarget = path.join(frontendStandaloneRoot, "public");
 
 const DEFAULT_APP_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_PORT ?? "3000", 10);
 const DEFAULT_FRONTEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "3010", 10);
 const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "8000", 10);
+const DESKTOP_FRONTEND_MODE = normalizeFrontendMode(process.env.RADSYSX_DESKTOP_FRONTEND_MODE);
 const DESKTOP_PICKER_MAX_FILES = Number.parseInt(process.env.RADSYSX_DESKTOP_PICKER_MAX_FILES ?? "500", 10);
 const DESKTOP_PICKER_MAX_BYTES = Number.parseInt(
   process.env.RADSYSX_DESKTOP_PICKER_MAX_BYTES ?? String(1024 * 1024 * 1024),
@@ -68,6 +84,18 @@ function recentLogs() {
 
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function nodeCommand() {
+  return process.platform === "win32" ? "node.exe" : "node";
+}
+
+function normalizeFrontendMode(value) {
+  const mode = String(value ?? "").trim().toLowerCase();
+  if (mode === "development" || mode === "dev") {
+    return "development";
+  }
+  return "production";
 }
 
 function isLocalImagingFile(filePath) {
@@ -422,6 +450,94 @@ async function ensureViewerDist(env) {
   });
 }
 
+function frontendBuildSettings(env) {
+  return {
+    nextPublicBackendUrl: env.NEXT_PUBLIC_BACKEND_URL,
+    nextPublicViewerBaseUrl: env.NEXT_PUBLIC_VIEWER_BASE_URL,
+    nextPublicRadsysxAppMode: env.NEXT_PUBLIC_RADSYSX_APP_MODE,
+  };
+}
+
+function readFrontendBuildStamp() {
+  try {
+    return JSON.parse(fs.readFileSync(frontendDesktopBuildStamp, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function frontendBuildMatches(env) {
+  if (!fs.existsSync(frontendBuildId) || !fs.existsSync(frontendStandaloneServer)) {
+    return false;
+  }
+  const current = readFrontendBuildStamp();
+  return JSON.stringify(current) === JSON.stringify(frontendBuildSettings(env));
+}
+
+function syncFrontendStandaloneAssets({ force = false } = {}) {
+  if (fs.existsSync(frontendStaticSource) && (force || !fs.existsSync(frontendStaticTarget))) {
+    fs.rmSync(frontendStaticTarget, { force: true, recursive: true });
+    fs.mkdirSync(path.dirname(frontendStaticTarget), { recursive: true });
+    fs.cpSync(frontendStaticSource, frontendStaticTarget, { recursive: true });
+  }
+
+  if (fs.existsSync(frontendPublicSource) && (force || !fs.existsSync(frontendPublicTarget))) {
+    fs.rmSync(frontendPublicTarget, { force: true, recursive: true });
+    fs.cpSync(frontendPublicSource, frontendPublicTarget, { recursive: true });
+  }
+}
+
+async function ensureFrontendBuild(env) {
+  if (DESKTOP_FRONTEND_MODE === "development") {
+    appendLog("frontend", "using Next.js development server");
+    return;
+  }
+
+  if (process.env.RADSYSX_DESKTOP_REBUILD_FRONTEND !== "1" && frontendBuildMatches(env)) {
+    syncFrontendStandaloneAssets();
+    appendLog("frontend", "using existing desktop Next.js production build");
+    return;
+  }
+
+  appendLog("frontend", "building Next.js production shell for desktop");
+  await runTask("frontend-build", npmCommand(), ["run", "build", "--workspace", "frontend"], {
+    cwd: workspaceRoot,
+    env,
+  });
+  syncFrontendStandaloneAssets({ force: true });
+  fs.mkdirSync(path.dirname(frontendDesktopBuildStamp), { recursive: true });
+  fs.writeFileSync(frontendDesktopBuildStamp, JSON.stringify(frontendBuildSettings(env), null, 2), "utf-8");
+}
+
+function frontendService(frontendPort) {
+  if (DESKTOP_FRONTEND_MODE === "development") {
+    return {
+      command: npmCommand(),
+      args: [
+        "run",
+        "dev",
+        "--workspace",
+        "frontend",
+        "--",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        String(frontendPort),
+      ],
+      env: {},
+    };
+  }
+
+  return {
+    command: nodeCommand(),
+    args: [frontendStandaloneServer],
+    env: {
+      HOSTNAME: "127.0.0.1",
+      PORT: String(frontendPort),
+    },
+  };
+}
+
 async function startRuntime() {
   const usedPorts = new Set();
   const appPort = await findAvailablePort(DEFAULT_APP_PORT, usedPorts);
@@ -458,6 +574,7 @@ async function startRuntime() {
   };
 
   await ensureViewerDist(sharedEnv);
+  await ensureFrontendBuild(sharedEnv);
 
   bridgeServer = await startDesktopBridge({
     appPort,
@@ -475,25 +592,14 @@ async function startRuntime() {
     },
   );
 
-  spawnService(
-    "frontend",
-    npmCommand(),
-    [
-      "run",
-      "dev",
-      "--workspace",
-      "frontend",
-      "--",
-      "--hostname",
-      "127.0.0.1",
-      "--port",
-      String(frontendPort),
-    ],
-    {
-      cwd: workspaceRoot,
-      env: sharedEnv,
+  const frontend = frontendService(frontendPort);
+  spawnService("frontend", frontend.command, frontend.args, {
+    cwd: workspaceRoot,
+    env: {
+      ...sharedEnv,
+      ...frontend.env,
     },
-  );
+  });
 
   await Promise.all([
     waitForHttp(`${backendBaseUrl}/api/platform/config`, "FastAPI backend"),

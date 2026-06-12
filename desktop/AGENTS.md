@@ -15,6 +15,8 @@
 
 - The desktop path is a local convenience runtime, not a shortcut around governed clinical contracts.
 - Electron must keep the app shell, `/api`, and `/viewer` under one local origin so clinical cookies and opaque launch sessions work without nginx.
+- The default desktop frontend path is a production Next.js standalone shell built with the Electron bridge origin and reused via `frontend/.next/radsysx-desktop-build.json`; use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1` to force a rebuild.
+- `RADSYSX_DESKTOP_FRONTEND_MODE=development` is the explicit live-UI-development mode and may use the Next.js dev server; normal fast-path validation should prefer the production standalone frontend.
 - The local bridge may serve the generated `viewer/dist/` app and proxy backend routes, but durable OHIF behavior still belongs in `viewer/` assets or backend contracts.
 - The local bridge must proxy Next.js development static assets and WebSocket upgrades reliably enough for the Electron shell to hydrate through the one-origin desktop URL.
 - The bridge may use tolerant HTTP parsing only for trusted loopback upstreams that the desktop runtime starts itself; do not apply parser leniency to arbitrary remote archive targets.
@@ -54,8 +56,11 @@
 - `npm run desktop:smoke:picker-import`
 - `npm run desktop:smoke:ui-import`
 - `node --check desktop/src/main.mjs`
+- `node --check desktop/scripts/dev-frontend.mjs`
 - `node --check desktop/scripts/doctor.mjs`
 - `node --check desktop/scripts/import-smoke.mjs`
+- `node --check desktop/scripts/startup-smoke.mjs`
 - `node --check desktop/scripts/ui-import-smoke.mjs`
+- `npm run build --workspace frontend`
 
 ## Child DOX Index
