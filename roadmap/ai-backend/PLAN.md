@@ -8,6 +8,10 @@ Primary next environment: GPU machine to be provided in the next run.
 
 This file is the durable brain-extension plan for turning the current frontend-only RadSysX AI sidebar into a real backend-driven multimodal imaging assistant.
 
+Related research:
+
+- `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` distills an external GPT 5.5 Pro research pass on the realtime voice/chat architecture. Treat it as the source of record for the current transport split: HTTP POST for durable writes, SSE for ordinary chat/job/tool events, WebSocket for local ASR audio, provider-native WebRTC for OpenAI Realtime, and provider/stateful WSS for Gemini Live.
+
 Current baseline:
 
 - The Electron fast path opens directly into OHIF local DICOM mode at `/viewer/local`.
@@ -15,21 +19,24 @@ Current baseline:
 - The OHIF right sidebar has a RadSysX AI panel with local chat state, text composer, voice affordance, and `@` chips for ROI, segmentation, and measurement context.
 - The AI panel is intentionally frontend-only today. It does not call backend AI endpoints, does not persist clinical chat state, and does not execute model inference.
 - Existing clinical rules still apply: governed workflows must use backend-issued actor context, opaque launch sessions, audit events, backend-mediated AI jobs, and backend-mediated derived DICOM writeback.
+- RadSysX is an Electron desktop app and should remain cross-platform. Linux/NVIDIA is the first validation lane for heavy local model and ASR experiments, not a product boundary.
 
 North star:
 
 - Open the local RadSysX desktop app, load imaging, talk or type naturally, and have an AI assistant that can recognize, segment, annotate, explain, measure, report, and operate the viewer through safe, auditable tools.
-- Prefer local, open, inspectable models first. Use API realtime/audio models as adapters when they provide a better user experience or are needed on lower-resource machines.
+- Prefer local, open, inspectable models when they improve privacy, cost, control, offline use, or reproducibility. Do not treat APIs as inherently bad: a governed hospital-grade API path with contractual safeguards, explicit enablement, audit, retention controls, and user review can be a legitimate production lane.
 - Keep the result almost fully open-source, useful for research and education first, and engineered so clinical hardening can happen without rewriting the core architecture.
 
 Do not forget:
 
 - GPU evaluation has not happened yet. The next run should pull and test candidate models on the GPU machine.
 - Source facts below are snapshots checked on 2026-06-12. Revalidate before implementation.
-- BiomedParse appears to be Apache-2.0 in the current GitHub repository, not MIT. Do not repeat the MIT assumption until verified.
+- BiomedParse is not MIT. Treat the GitHub code license, Hugging Face model license, checkpoint terms, and research/clinical-use restrictions as separate checks before packaging or distribution.
+- Pillar-0, Sybil, RAVE, and related YalaLab repositories/checkpoints also need artifact-by-artifact license checks. Do not assume one license covers the whole ecosystem.
 - MedGemma and Pillar-0 model access may require accepting model terms on Hugging Face.
 - Sybil-1.5 is a risk model for future lung cancer risk, not a generic lesion detector.
 - RAVE is attractive because it is purpose-built to turn DICOM and NIfTI into ML-ready representations.
+- Cross-platform hardware matters: NVIDIA/Linux is only one validation lane. Apple Silicon/Metal, Windows CUDA/DirectML, CPU/no-GPU fallback, and governed API deployment should all stay visible in the architecture.
 
 ## Source Snapshot
 
@@ -38,13 +45,14 @@ Checked on 2026-06-12:
 | Candidate | Role in RadSysX | Source facts to retain | License/access notes | Link |
 | --- | --- | --- | --- | --- |
 | MedGemma 1.5 4B | General medical image/text-to-text assistant and report/chat model | Multimodal image-text-to-text model, local GPU usage through Transformers, vLLM, SGLang, or Docker Model Runner; supports high-dimensional CT/MRI representations, WSI patches, longitudinal CXR, localization, documents, and EHR text | Governed by Google's Health AI Developer Foundations terms; gated access on Hugging Face; not optimized for multi-turn apps per model card, so validate chat behavior carefully | <https://huggingface.co/google/medgemma-1.5-4b-it> |
-| Pillar-0 collection | Modality-specific radiology foundation model family | Collection includes Breast MRI, Head CT, Abdomen CT, Chest CT, and Sybil-1.5 entries | Check each checkpoint's terms before download/use | <https://huggingface.co/collections/YalaLab/pillar-0> |
+| Pillar-0 collection | Modality-specific radiology foundation model family | Collection includes Breast MRI, Head CT, Abdomen CT, Chest CT, and Sybil-1.5 entries | Verify each checkpoint/code license separately before download, packaging, or distribution | <https://huggingface.co/collections/YalaLab/pillar-0> |
 | Pillar0-Sybil-1.5 | LDCT future lung cancer risk prediction | Fine-tuned from Pillar-0 Chest CT; predicts 1-6 year future lung cancer risk from a single low-dose CT | ECL-2.0; gated model access requiring contact info acceptance | <https://huggingface.co/YalaLab/Pillar0-Sybil-1.5> |
 | RAVE | Imaging preprocessor and ML-ready conversion layer | High-performance engine for converting DICOM and NIfTI files into ML-ready formats with windowing and compression | ECL-2.0 in current repo | <https://github.com/YalaLab/rave> |
-| BiomedParse v2 | Text-guided segmentation fallback and broad modality coverage | v2 supports end-to-end 3D inference for CT, MRI, Ultrasound, PET, and 3D microscopy; v1 is recommended by the repo for 2D modalities including CT, MRI, Ultrasound, X-Ray, Pathology, Endoscopy, Dermoscopy, Fundus, and OCT | Apache-2.0 in current repo; verify model/data terms before distribution | <https://github.com/microsoft/BiomedParse> |
-| Nemotron 3.5 ASR Streaming 0.6B | Local realtime speech-to-text candidate | 600M parameter streaming ASR using cache-aware FastConformer-RNNT; supports configurable chunk sizes from 80ms to 1120ms and many language locales | OpenMDW-1.1; NeMo-based; Linux/GPU oriented | <https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b> |
-| Gemini Live API / Gemini 3.1 Flash Live | API realtime voice/vision/text option | Live API supports low-latency stateful WebSocket sessions, audio/images/text input, audio output, tool use, transcripts, barge-in, and multilingual interactions | API service; production client-to-server should use ephemeral tokens, not raw API keys | <https://ai.google.dev/gemini-api/docs/live-api> |
-| GPT-Realtime-2 | API speech-to-speech reasoning and tool-use option | Realtime 2 adds speech-to-speech reasoning, tool calls, long context, controllable reasoning effort, and voice-agent workflows | API service; pricing and availability must be rechecked before integration | <https://developers.openai.com/api/docs/guides/realtime> |
+| BiomedParse v2 | Text-guided segmentation fallback and broad modality coverage | v2 supports end-to-end 3D inference for CT, MRI, Ultrasound, PET, and 3D microscopy; v1 is recommended by the repo for 2D modalities including CT, MRI, Ultrasound, X-Ray, Pathology, Endoscopy, Dermoscopy, Fundus, and OCT | Not MIT; verify repo code, model card, checkpoint, data, noncommercial, share-alike, and research-only terms separately before use | <https://github.com/microsoft/BiomedParse> |
+| Nemotron 3.5 ASR Streaming 0.6B | Local realtime speech-to-text candidate | 600M parameter streaming ASR using cache-aware FastConformer-RNNT; supports configurable chunk sizes from 80ms to 1120ms and many language locales | OpenMDW-1.1; NeMo/NVIDIA GPU worker likely validates on Linux first, while RadSysX remains cross-platform | <https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b> |
+| Gemini Live API / `gemini-3.1-flash-live-preview` | API realtime voice/vision/text option | Live API supports low-latency stateful WebSocket sessions, raw PCM audio, image/text input, audio output, tool use, transcripts, and barge-in | API service; use backend mediation or ephemeral tokens only where policy allows; synchronous tool behavior must route through RadSysX broker | <https://ai.google.dev/gemini-api/docs/live-api> |
+| OpenAI Realtime / `gpt-realtime-2` | API speech-to-speech reasoning and tool-use option | Realtime 2 is documented as a reasoning voice model for low-latency speech-to-speech, stronger tool calling, long context, and controllable reasoning effort | API service; use backend-created/mediated WebRTC sessions where enabled; pricing and availability must be rechecked before integration | <https://developers.openai.com/api/docs/guides/realtime-models-prompting> |
+| Ambient clinical documentation precedent | Production pattern for governed cloud/API voice in clinics and hospitals | Microsoft Dragon Copilot, Abridge, Nabla, and similar systems show that ambient listening and AI-generated clinical documentation can exist in real clinical environments when wrapped in consent, security, integration, retention, and clinician-review workflows | This supports a governed API lane, not browser-direct unmanaged PHI transfer | <https://www.microsoft.com/en-us/health-solutions/clinical-workflow/dragon-copilot> |
 
 ## Product Vision
 
@@ -65,6 +73,26 @@ The sidebar should become a clinical-grade interaction surface without losing th
 - Any diagnosis-like output is labelled as AI assistance, grounded in cited image context, and separated from final clinician responsibility.
 
 The experience should feel simple. The architecture underneath can be serious.
+
+## Deployment Philosophy
+
+RadSysX should be cross-platform and deployment-plural:
+
+- Local-first means the app must be useful on one computer, with a no-Docker Electron fast path and a strong offline/local option.
+- Local-first does not mean API-hostile. Hospitals already deploy ambient clinical documentation systems that listen to clinical encounters and draft notes in real workflows. The RadSysX equivalent should be possible when the deployment has consent, contractual safeguards, security review, retention policy, audit, and clinician review.
+- Privacy is not guaranteed by "local" and not automatically destroyed by "API". Local machines can leak data; governed APIs can be acceptable. The deciding factor is policy, consent, data minimization, auditability, and the exact data path.
+- No provider realtime session should own the RadSysX clinical record. Provider APIs can supply speech, transcription, reasoning, or draft suggestions; RadSysX still owns session authority, context snapshots, tool policy, approval, persistence, and audit.
+- Heavy local AI should be optional by hardware lane, not a requirement for normal use.
+
+Cross-platform hardware lanes:
+
+| Lane | Purpose | Notes |
+| --- | --- | --- |
+| NVIDIA/Linux | First heavy-model validation lane for the next GPU run, especially Nemotron/NeMo, vLLM/SGLang, BiomedParse, and RAVE experiments | Important but not a product boundary |
+| Apple Silicon/Metal | Primary local inference lane for many clinicians and researchers using M-series Macs | Evaluate MLX, PyTorch MPS, Core ML, llama.cpp/whisper.cpp-style runtimes, and provider realtime in packaged Electron |
+| Windows CUDA/DirectML | Essential desktop lane for hospitals and radiology workstations | Evaluate CUDA where NVIDIA GPUs exist, DirectML/ONNX Runtime where appropriate, microphone permissions, device routing, and enterprise lockdown constraints |
+| CPU/no-GPU | Accessibility and fallback lane | Must support text chat, API realtime, mock/local lightweight models, and no heavy bootstrap |
+| Governed API | Production-quality voice/chat lane where allowed | Requires backend mediation, explicit enablement, BAA/DPA or equivalent, retention controls, PHI policy, and audit |
 
 ## Architecture Sketch
 
@@ -122,15 +150,15 @@ Research mode:
 Pilot mode:
 
 - AI features should be backend-mediated and auditable.
-- External API use must default off.
+- External API use must default off, but may become a first-class governed deployment option when explicitly enabled by site policy, contractual safeguards, consent, and audit.
 - Local model inference can be enabled behind explicit env flags and clear UI state.
 - Derived masks/measurements can be previewed but need explicit user acceptance before persistence.
 
 Clinical mode:
 
 - Only governed backend AI contracts.
-- No browser-direct third-party AI calls.
-- No external API calls without a formal consent, BAA/data-governance, and config story.
+- No browser-direct unmanaged third-party AI calls.
+- No external API calls without a formal consent, BAA/DPA or equivalent data-governance path, retention policy, operational configuration, and audit.
 - Persisted report/SEG/SR/audit flows must go through backend services.
 - Model disclaimers, validation status, and provenance must be visible and durable.
 
@@ -259,7 +287,8 @@ Default model roles:
   - Pair with a text LLM/orchestrator for action planning.
 - Gemini Live API or GPT-Realtime-2:
   - API-backed realtime voice option for lower-latency speech-to-speech, interruptions, tool calls, and richer audio experience.
-  - Must be behind backend token mediation and mode/consent gates.
+  - Must be behind backend token mediation, mode/consent gates, audit, and deployment policy.
+  - Should be treated as a legitimate governed lane, not merely a compromise, when local realtime cannot match production usability.
 
 Fallback order for segmentation:
 
@@ -275,7 +304,7 @@ Fallback order for voice:
 1. Local browser microphone capture to backend audio session.
 2. Nemotron local streaming ASR when GPU and NeMo stack are ready.
 3. Browser Web Speech API only as a temporary local prototype if needed, labelled as non-governed and not relied on clinically.
-4. Gemini Live or GPT-Realtime-2 with ephemeral tokens for API-backed realtime.
+4. Governed Gemini Live or GPT-Realtime-2 for API-backed realtime when policy, consent, and audit allow it.
 5. Text-only composer if audio is unavailable.
 
 ## Computer-Use-Like UI Control
@@ -335,10 +364,22 @@ Tool-call JSON should be strict and boring:
 
 ## Audio Architecture
 
+Source of record:
+
+- See `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` for the current transport and PR plan. The short version is: backend owns the clinical spine; voice is an I/O layer; provider realtime sessions are replaceable leaves.
+
+Transport split:
+
+- Durable writes: HTTP POST for messages, context snapshots, tool approvals, tool denials, execution results, and session close.
+- Ordinary event stream: SSE for chat deltas, transcript events, tool proposals/results, job progress, policy blocks, and errors.
+- Local ASR: browser/Electron microphone capture through Web Audio or AudioWorklet, then binary PCM/control messages over a backend WebSocket.
+- OpenAI Realtime: provider-native WebRTC where explicitly enabled, with the backend creating/mediating the session and brokering all tool calls.
+- Gemini Live: stateful WSS or backend WSS proxy where explicitly enabled; browser-direct ephemeral tokens only for deidentified research paths allowed by policy.
+
 Local ASR path:
 
 - Renderer captures microphone audio with clear user permission.
-- Audio is streamed to backend through WebSocket or WebRTC data path.
+- Audio is streamed to the backend through a local WebSocket path.
 - Backend routes to local Nemotron ASR worker.
 - ASR emits partial transcript and final transcript events.
 - Text transcript is sent into the normal AI turn.
@@ -352,6 +393,7 @@ API realtime path:
 - Renderer streams audio through WebRTC/WebSocket according to provider architecture.
 - Tool calls from the API model must route back through the same RadSysX tool-policy layer.
 - Transcripts are persisted only when allowed and visible to user.
+- Provider realtime sessions must never become the clinical source of truth. They are UX adapters around backend-owned sessions, context, policy, approval, and audit.
 
 Important split:
 
@@ -407,6 +449,10 @@ python3 --version
 node --version
 npm --version
 ```
+
+This runbook is intentionally Linux/NVIDIA-centered because the next heavy-model validation machine is expected to be Linux with a GPU. That is not a RadSysX product limitation: desktop packaging, audio capture, and provider realtime UX must remain Electron cross-platform and be validated later on Windows and macOS.
+
+Do not let this first GPU run bias the product shape too narrowly. After the Linux/NVIDIA pass, add comparable feasibility notes for Apple Silicon/Metal and Windows GPU/no-GPU paths.
 
 Then check the current app still boots:
 
@@ -522,6 +568,13 @@ API realtime smoke:
 - Verify tool-call outputs can be normalized into RadSysX `ToolCallProposal`.
 - Record latency and barge-in behavior.
 
+Cross-platform audio follow-up:
+
+- Repeat the browser/Electron microphone permission, PTT, dictation, device selection, and provider realtime flows on Windows and macOS after the Linux/GPU prototype proves the architecture.
+- Evaluate Apple Silicon local inference options separately from NVIDIA. Candidate families to investigate include MLX, PyTorch MPS, Core ML conversion, whisper.cpp-style ASR, llama.cpp-style local LLM routing, and ONNX Runtime where useful.
+- Evaluate Windows local inference options separately from NVIDIA/Linux. Candidate families include CUDA when available, DirectML/ONNX Runtime where useful, and API-backed realtime for no-GPU workstations.
+- Keep OS-specific ASR workers optional; the sidebar UX and backend contracts should not depend on a Linux-only audio stack.
+
 ## Implementation Phases
 
 ### Phase 0 - Inventory And Design Freeze
@@ -537,10 +590,12 @@ Tasks:
 - [ ] Decide which legacy Gemini research code should be retired, quarantined, or adapted.
 - [ ] Draft TypeScript/Python contract schemas for `AiSession`, `AiMessage`, `ViewerContextSnapshot`, and `ToolCallProposal`.
 - [ ] Decide whether streaming uses SSE first, WebSocket first, or both.
+- [ ] Adopt the transport split from `REALTIME_VOICE_RESEARCH.md`: SSE for ordinary events, local WebSocket for ASR audio, HTTP POST for durable state transitions, provider-native WebRTC/WSS only as optional adapters.
 - [ ] Decide where model runtime code lives. Candidate: `backend/ai/` with optional child DOX.
 - [ ] Decide whether optional AI dependencies live in `backend/requirements-ai.txt`, `ai-runtime/`, or separate Docker/uv environment.
 - [ ] Add env var plan: `RADSYSX_AI_ENABLED`, `RADSYSX_AI_PROVIDER`, `RADSYSX_AI_LOCAL_ONLY`, `RADSYSX_AI_ALLOW_EXTERNAL`, `RADSYSX_AI_AUDIO_PROVIDER`, `RADSYSX_MODEL_CACHE`.
 - [ ] Define audit events before writing code.
+- [ ] Define deployment profiles explicitly: local-only, Apple Silicon local, Windows workstation, NVIDIA GPU workstation, deidentified research API, and governed clinical API.
 
 Exit criteria:
 
@@ -722,6 +777,7 @@ Tasks:
 
 - [ ] Add backend audio session contract.
 - [ ] Add renderer microphone permission and audio capture state.
+- [ ] Implement push-to-talk as the default voice mode and dictation as an editable transcript mode.
 - [ ] Implement local ASR adapter interface.
 - [ ] Test Nemotron ASR partial/final transcript events.
 - [ ] Add transcript streaming to sidebar.
@@ -856,17 +912,26 @@ Exit criteria:
   - API realtime best supports polish and low-friction speech-to-speech.
 - How should API-backed realtime handle PHI?
   - Default off in pilot/clinical until governance exists.
+  - Once governance exists, API realtime can be a first-class clinical deployment path rather than a second-class fallback.
+- How should cross-platform desktop audio be validated?
+  - Linux/NVIDIA should prove local ASR and heavy workers first.
+  - Windows/macOS should validate Electron permissions, mic routing, provider WebRTC/WSS, and no-GPU fallback.
+- What does "local-first" mean for hospitals?
+  - It should mean local usability and user control, not refusal to integrate with approved cloud/API clinical infrastructure.
+  - Define explicit policy profiles instead of hardcoding ideology into the architecture.
 
 ## Risk Register
 
 - License mismatch:
-  - BiomedParse currently appears Apache-2.0, not MIT. Verify all model/code/data terms before distribution.
+  - BiomedParse is not MIT and may have different repo, model, checkpoint, data, noncommercial, share-alike, and research-only terms. Verify every artifact before distribution.
+  - Pillar-0, Sybil, RAVE, and related YalaLab code/checkpoints also need per-artifact checks; do not assume the same license across the ecosystem.
 - Gated model access:
   - MedGemma and Pillar/Sybil may require accepting terms or sharing contact info.
 - Clinical overreach:
   - The app must not present experimental outputs as validated diagnosis.
 - PHI leakage:
   - External API paths must be off by default in governed modes.
+  - Governed API paths still need PHI-minimization, retention, audit, consent, and contractual controls.
 - Coordinate drift:
   - Segmentation masks are dangerous if they do not map exactly back into image space.
 - Desktop bloat:
@@ -893,6 +958,8 @@ Recommended first implementation PR after GPU recon:
 - Add tests for contracts and mode gates.
 - Do not add heavyweight model dependencies yet.
 
+The external realtime research recommends an even narrower first PR: backend AI session/message/SSE/audit spine with a mock/local orchestrator, no voice dependency, no GPU dependency, and external AI disabled by default.
+
 Why:
 
 - It creates the durable contract that all models can plug into.
@@ -908,6 +975,13 @@ Recommended second PR:
 - Add one image attachment path from current OHIF viewport.
 - Add no-PHI local-only enforcement.
 - Add an eval script with a public image fixture.
+
+Alternative second PR if the product priority is voice UX:
+
+- Add governed provider realtime scaffolding without sending PHI by default.
+- Add backend-created/mediated provider sessions.
+- Add policy-visible API enablement state in the sidebar.
+- Add a deidentified-only OpenAI/Gemini realtime research demo path.
 
 ## Third Pull Request Shape
 
@@ -942,6 +1016,7 @@ Likely files to create later:
 - `viewer/assets/radsysx-ai-context.js`
 - `viewer/assets/radsysx-ai-actions.js`
 - `desktop/scripts/ai-doctor.mjs`
+- `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md`
 - `roadmap/ai-backend/GPU_EVAL_LOG.md`
 
 Do not create all of these prematurely. Let the first implementation tranche prove the seams.
@@ -951,6 +1026,7 @@ Do not create all of these prematurely. Let the first implementation tranche pro
 - [ ] Confirm clean git state.
 - [ ] Confirm GPU machine specs with `nvidia-smi`.
 - [ ] Confirm desktop fast path still checks with `npm run desktop -- --check-only`.
+- [ ] Re-read `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` before implementing voice/chat contracts.
 - [ ] Create `.venv-ai` or equivalent isolated model environment.
 - [ ] Verify Hugging Face login and terms for MedGemma/Pillar if needed.
 - [ ] Smoke MedGemma on a non-PHI image.
@@ -959,6 +1035,9 @@ Do not create all of these prematurely. Let the first implementation tranche pro
 - [ ] Clone and inspect BiomedParse v2 outside the repo or in a temp dir.
 - [ ] Attempt one tiny BiomedParse v2 inference.
 - [ ] Attempt one Pillar-0 checkpoint inference if access works.
+- [ ] Validate local ASR on Linux/NVIDIA, then plan Electron audio parity checks for Windows and macOS.
+- [ ] Add explicit Apple Silicon/Metal and Windows workstation feasibility tasks before choosing a "default local" inference story.
+- [ ] Decide which API-backed realtime path deserves a governed prototype, informed by ambient-scribe production patterns rather than assuming API is undesirable.
 - [ ] Write `roadmap/ai-backend/GPU_EVAL_LOG.md` with hard numbers.
 - [ ] Decide first implementation PR based on measured reality.
 
