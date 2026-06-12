@@ -15,7 +15,7 @@ Last updated: 2026-06-12
 
 - Root owns project-wide posture, root manifests, root docs, root Docker Compose, top-level scripts, logo/assets, and cross-domain workflow guidance.
 - Child `AGENTS.md` files own domain-specific instructions for their subtrees. When a path has a child doc, read the full chain from this file to the nearest child before editing.
-- Root-owned files and folders include `README.md`, `CLAUDE.md`, `WARP.md`, `DEPLOY_GPU.md`, `DEPLOY_LOCAL.md`, `PHASE4_CLINICAL_EXECUTION_CHECKLIST.md`, `package.json`, `package-lock.json`, `docker-compose.yml`, `.gitignore`, `dev.sh`, `RadSysX-Logo.png`, `test-biomedparse.py`, `test-files-inventory.txt`, `.claude/`, `.cursor/`, `.handoffs/`, and `.serena/`.
+- Root-owned files and folders include `README.md`, `CLAUDE.md`, `WARP.md`, `DEPLOY_GPU.md`, `DEPLOY_LOCAL.md`, `PHASE4_CLINICAL_EXECUTION_CHECKLIST.md`, `package.json`, `package-lock.json`, `docker-compose.yml`, `.gitignore`, `dev.sh`, `RadSysX-Logo.png`, `test-biomedparse.py`, `test-files-inventory.txt`, `.claude/`, `.cursor/`, `.handoffs/`, `roadmap/`, and `.serena/`.
 
 ## DOX Core Contract
 
@@ -284,6 +284,7 @@ Last updated: 2026-06-12
 - `frontend/AGENTS.md`: Next.js shell, clinical login/worklist pages, research UI, frontend libraries, and styling.
 - `ideas-inspo/AGENTS.md`: source inspiration documents and exploratory materials.
 - `packages/AGENTS.md`: workspace packages shared across app surfaces.
+- `roadmap/AGENTS.md`: durable future planning docs, AI backend roadmaps, GPU evaluation runbooks, and compaction-resistant todo ledgers.
 - `related-papers/AGENTS.md`: research papers and media used as source material.
 - `tests/AGENTS.md`: root-level legacy/test harness scripts outside `backend/tests`.
 - `viewer/AGENTS.md`: dedicated OHIF clinical viewer app, build wrapper, runtime assets, and generated viewer distribution.
