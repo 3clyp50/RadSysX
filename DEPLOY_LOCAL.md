@@ -32,7 +32,7 @@ The desktop launcher builds and stamps the frontend production shell for its sel
 
 `npm run desktop:smoke:picker-many-import` repeats that direct native picker path with a nested folder of 32 additional extensionless DICOM instances and verifies recursive collection, import of 37 files into 2 local studies, DICOM asset summary, and backend technical analysis.
 
-`npm run desktop:smoke:viewer-launch` imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed viewer, verifies opaque launch resolution and launch-token stripping, and checks viewer-origin local DICOMweb/workspace access to the imported study. It proves viewer handoff and local DICOMweb binding without claiming full diagnostic pixel-rendering parity.
+`npm run desktop:smoke:viewer-launch` imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed viewer, verifies opaque launch resolution and launch-token stripping, checks viewer-origin local DICOMweb/workspace access to the imported study, and asserts that OHIF paints a nonblank canvas for the synthetic DICOM. It proves viewer handoff, local DICOMweb binding, and a basic imported-DICOM render path without claiming full diagnostic pixel-rendering parity across real-world archives.
 
 ## Frontend Local, GPU Backend On Cloud VM
 

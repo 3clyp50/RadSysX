@@ -543,6 +543,8 @@ async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
     throw new Error(`Viewer-origin workspace query failed with ${workspaceProbe.status}.`);
   }
 
+  const renderProbe = await waitForViewerRenderProbe(cdp);
+
   return {
     href: viewerState.href,
     studyInstanceUID: viewerState.studyInstanceUID,
@@ -554,6 +556,112 @@ async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
     configWadoRoot: viewerState.configWadoRoot,
     dicomwebStudyCount: dicomwebProbe.body.length,
     workspaceStudyUID: workspaceProbe.body?.worklistRow?.studyInstanceUID ?? null,
+    renderProbe,
+  };
+}
+
+async function waitForViewerRenderProbe(cdp) {
+  const startedAt = Date.now();
+  let lastProbe = null;
+
+  while (Date.now() - startedAt < 90000) {
+    lastProbe = await evaluateInRenderer(cdp, `(${viewerRenderProbeInRenderer.toString()})()`, 30000);
+    if (lastProbe.nonBlankCanvasCount > 0) {
+      return lastProbe;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `OHIF viewer did not paint a nonblank DICOM canvas. Last render probe: ${JSON.stringify(lastProbe)}`,
+  );
+}
+
+function viewerRenderProbeInRenderer() {
+  const canvases = Array.from(document.querySelectorAll("canvas"));
+
+  const sample2dCanvas = (canvas) => {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context || canvas.width <= 0 || canvas.height <= 0) {
+      return null;
+    }
+    const width = Math.min(canvas.width, 48);
+    const height = Math.min(canvas.height, 48);
+    const data = context.getImageData(0, 0, width, height).data;
+    return summarizePixels(data);
+  };
+
+  const sampleWebglCanvas = (canvas) => {
+    const context = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!context || canvas.width <= 0 || canvas.height <= 0) {
+      return null;
+    }
+    const width = Math.min(canvas.width, 48);
+    const height = Math.min(canvas.height, 48);
+    const data = new Uint8Array(width * height * 4);
+    context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, data);
+    return summarizePixels(data);
+  };
+
+  const summarizePixels = (data) => {
+    let nonTransparent = 0;
+    let nonBlack = 0;
+    let maxValue = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      const red = data[index] ?? 0;
+      const green = data[index + 1] ?? 0;
+      const blue = data[index + 2] ?? 0;
+      const alpha = data[index + 3] ?? 0;
+      const value = Math.max(red, green, blue);
+      if (alpha > 0) {
+        nonTransparent += 1;
+      }
+      if (value > 0) {
+        nonBlack += 1;
+      }
+      maxValue = Math.max(maxValue, value);
+    }
+    return { nonTransparent, nonBlack, maxValue };
+  };
+
+  const samples = canvases.map((canvas) => {
+    let sample = null;
+    let sampleKind = null;
+    let error = null;
+
+    try {
+      sample = sample2dCanvas(canvas);
+      sampleKind = sample ? "2d" : null;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+
+    if (!sample) {
+      try {
+        sample = sampleWebglCanvas(canvas);
+        sampleKind = sample ? "webgl" : null;
+      } catch (cause) {
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+    }
+
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      clientWidth: canvas.clientWidth,
+      clientHeight: canvas.clientHeight,
+      sampleKind,
+      nonTransparent: sample?.nonTransparent ?? 0,
+      nonBlack: sample?.nonBlack ?? 0,
+      maxValue: sample?.maxValue ?? 0,
+      error,
+    };
+  });
+
+  return {
+    canvasCount: canvases.length,
+    nonBlankCanvasCount: samples.filter((sample) => sample.nonBlack > 0).length,
+    samples,
   };
 }
 

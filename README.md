@@ -321,7 +321,7 @@ For an imported-DICOM viewer handoff check:
 npm run desktop:smoke:viewer-launch
 ```
 
-That smoke imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed OHIF viewer, verifies the opaque launch resolves under `/viewer/`, confirms the launch token is stripped from the browser URL, and checks that viewer-origin local DICOMweb/workspace requests can find the imported study. It proves viewer handoff and local DICOMweb binding, not full diagnostic pixel-rendering parity.
+That smoke imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed OHIF viewer, verifies the opaque launch resolves under `/viewer/`, confirms the launch token is stripped from the browser URL, checks that viewer-origin local DICOMweb/workspace requests can find the imported study, and asserts that OHIF paints a nonblank canvas for the synthetic DICOM. It proves viewer handoff, local DICOMweb binding, and a basic imported-DICOM render path, not full diagnostic pixel-rendering parity across real-world archives.
 
 ### Install the full backend/runtime dependency set
 
