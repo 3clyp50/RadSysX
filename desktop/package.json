@@ -13,6 +13,7 @@
     "smoke:import": "node ./scripts/import-smoke.mjs",
     "smoke:launch": "node ./scripts/launch.mjs --smoke --no-bootstrap",
     "smoke:local-start": "node ./scripts/ui-import-smoke.mjs --local-start",
+    "smoke:local-start-drop": "node ./scripts/ui-import-smoke.mjs --local-start-drop",
     "smoke:local-start-nondicom": "node ./scripts/ui-import-smoke.mjs --local-start-nondicom",
     "smoke:picker-files-import": "node ./scripts/ui-import-smoke.mjs --picker-files",
     "smoke:picker-large-import": "node ./scripts/ui-import-smoke.mjs --picker-large-folder",

@@ -53,6 +53,18 @@
 
 .radsysx-local-start-card {
   width: min(38rem, calc(100vw - 2rem));
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.radsysx-local-start-card[data-dragging="true"] {
+  border-color: rgba(103, 232, 249, 0.64);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.42),
+    0 0 0 3px rgba(34, 211, 238, 0.18);
+  transform: translateY(-1px);
 }
 
 .radsysx-local-start-actions {

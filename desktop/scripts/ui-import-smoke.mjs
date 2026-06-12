@@ -33,6 +33,9 @@ function resolveSmokeMode() {
   if (process.argv.includes("--local-start-nondicom")) {
     return "local-start-nondicom";
   }
+  if (process.argv.includes("--local-start-drop")) {
+    return "local-start-drop";
+  }
   if (process.argv.includes("--local-start")) {
     return "local-start";
   }
@@ -462,6 +465,15 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
         ...localStartResult,
       };
     }
+    if (smokeMode === "local-start-drop") {
+      const localStartResult = await runLocalStartDropSmoke(cdp, publicBaseUrl);
+      return {
+        ok: true,
+        smokeMode,
+        publicBaseUrl,
+        ...localStartResult,
+      };
+    }
     if (smokeMode === "local-start-nondicom") {
       const localStartResult = await runLocalStartNonDicomSmoke(cdp, publicBaseUrl);
       return {
@@ -529,6 +541,23 @@ async function runLocalStartSmoke(cdp, publicBaseUrl) {
   return {
     importPath: "local-start",
     localStartState,
+    viewerLaunch,
+  };
+}
+
+async function runLocalStartDropSmoke(cdp, publicBaseUrl) {
+  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
+  const dropState = await evaluateInRenderer(
+    cdp,
+    `(${dispatchLocalStartDropInRenderer.toString()})(${JSON.stringify(readFixturePayloads())})`,
+    30000,
+  );
+
+  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
+  return {
+    importPath: "local-start-drop",
+    localStartState,
+    dropState,
     viewerLaunch,
   };
 }
@@ -614,6 +643,49 @@ async function clickLocalStartImportFiles(cdp) {
     })()`,
     30000,
   );
+}
+
+function dispatchLocalStartDropInRenderer(fixtures) {
+  const makeFile = (payload) => {
+    const binary = atob(payload.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const file = new File([bytes], payload.name, { type: payload.type });
+    Object.defineProperty(file, "radsysxRelativePath", {
+      configurable: true,
+      value: payload.relativePath,
+    });
+    return file;
+  };
+
+  const card = document.querySelector('[data-testid="radsysx-local-start-card"]');
+  if (!card) {
+    throw new Error("Desktop OHIF local start drop target was missing.");
+  }
+  const transfer = new DataTransfer();
+  for (const payload of fixtures) {
+    transfer.items.add(makeFile(payload));
+  }
+
+  card.dispatchEvent(new DragEvent("dragenter", {
+    bubbles: true,
+    cancelable: true,
+    dataTransfer: transfer,
+  }));
+  const draggingSeen = card.dataset.dragging === "true";
+  card.dispatchEvent(new DragEvent("drop", {
+    bubbles: true,
+    cancelable: true,
+    dataTransfer: transfer,
+  }));
+
+  return {
+    draggingSeen,
+    fileCount: transfer.files.length,
+    status: document.querySelector('[data-testid="radsysx-local-import-status"]')?.textContent ?? null,
+  };
 }
 
 async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {

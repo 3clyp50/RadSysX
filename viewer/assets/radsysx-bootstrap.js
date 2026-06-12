@@ -8,6 +8,7 @@
   const LAUNCH_STORAGE_KEY = "radsysx.clinical.launchToken";
   const LOCAL_START_INSPECT_KEY = "radsysx.localStart.inspectStudyUid";
   const REQUEST_TIMEOUT_MS = 10000;
+  const DROP_RELATIVE_PATH_KEY = "radsysxRelativePath";
   const loader = await ensureLoader();
   const params = new URLSearchParams(window.location.search);
   const launchFromUrl = params.get("launch");
@@ -142,11 +143,11 @@
     stripLocalStartQuery();
     loader.dataset.state = "local-start";
     loader.innerHTML = `
-      <div class="radsysx-loader-card radsysx-local-start-card">
+      <div class="radsysx-loader-card radsysx-local-start-card" data-testid="radsysx-local-start-card">
         <div class="radsysx-loader-kicker">RadSysX Local Viewer</div>
         <div class="radsysx-loader-title" data-role="title">Open a local study</div>
         <div class="radsysx-loader-body" data-role="body">
-          Select a local DICOM, DICOMDIR, NIFTI, NRRD, image, or ZIP. DICOM opens here in OHIF immediately after import.
+          Open or drop a local DICOM, DICOMDIR, NIFTI, NRRD, image, or ZIP. DICOM opens here in OHIF immediately after import.
         </div>
         <div class="radsysx-local-start-actions">
           <button class="radsysx-local-start-primary" type="button" data-testid="radsysx-local-import-files" data-mode="files">Open local study</button>
@@ -164,21 +165,43 @@
       });
     }
 
+    const card = loader.querySelector("[data-testid='radsysx-local-start-card']");
+    if (card) {
+      card.addEventListener("dragenter", handleLocalStartDragEnter);
+      card.addEventListener("dragover", handleLocalStartDragOver);
+      card.addEventListener("dragleave", handleLocalStartDragLeave);
+      card.addEventListener("drop", (event) => {
+        void handleLocalStartDrop(event);
+      });
+    }
+
     const primaryButton = loader.querySelector("[data-testid='radsysx-local-import-files']");
     if (primaryButton instanceof HTMLButtonElement) {
       primaryButton.focus({ preventScroll: true });
     }
   }
 
-  async function importLocalImagingFromDesktop(mode) {
+  function setLocalStartImporting(importing, statusText) {
     const buttons = Array.from(loader.querySelectorAll("[data-mode]"));
+    const card = loader.querySelector("[data-testid='radsysx-local-start-card']");
     const status = loader.querySelector("[data-testid='radsysx-local-import-status']");
     for (const button of buttons) {
-      button.disabled = true;
+      button.disabled = importing;
+    }
+    if (card) {
+      card.dataset.importing = importing ? "true" : "false";
     }
     if (status) {
-      status.textContent = mode === "folder" ? "Importing local folder..." : "Importing local files...";
+      status.textContent = statusText ?? "";
     }
+    return { buttons, card, status };
+  }
+
+  async function importLocalImagingFromDesktop(mode) {
+    setLocalStartImporting(
+      true,
+      mode === "folder" ? "Importing local folder..." : "Importing local files...",
+    );
 
     try {
       const result = await window.radsysxDesktop.importLocalImaging({ mode });
@@ -193,14 +216,202 @@
       }
       await openImportedStudy(result.response);
     } catch (error) {
-      if (status) {
-        status.textContent = error instanceof Error ? error.message : "Unable to import local imaging files.";
-      }
+      setLocalStartStatus(error instanceof Error ? error.message : "Unable to import local imaging files.");
     } finally {
-      for (const button of buttons) {
-        button.disabled = false;
+      setLocalStartImporting(false, readLocalStartStatus());
+    }
+  }
+
+  function handleLocalStartDragEnter(event) {
+    if (!event.dataTransfer || !hasFileDataTransfer(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    const card = loader.querySelector("[data-testid='radsysx-local-start-card']");
+    if (card) {
+      card.dataset.dragging = "true";
+    }
+    setLocalStartStatus("Release to import local study.");
+  }
+
+  function handleLocalStartDragOver(event) {
+    if (!event.dataTransfer || !hasFileDataTransfer(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleLocalStartDragLeave(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = loader.querySelector("[data-testid='radsysx-local-start-card']");
+    const nextTarget = event.relatedTarget;
+    if (card && (!(nextTarget instanceof Node) || !card.contains(nextTarget))) {
+      delete card.dataset.dragging;
+      if (readLocalStartStatus() === "Release to import local study.") {
+        setLocalStartStatus("");
       }
     }
+  }
+
+  async function handleLocalStartDrop(event) {
+    if (!event.dataTransfer || !hasFileDataTransfer(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const card = loader.querySelector("[data-testid='radsysx-local-start-card']");
+    if (card) {
+      delete card.dataset.dragging;
+    }
+    setLocalStartImporting(true, "Importing dropped local study...");
+
+    try {
+      const files = await filesFromDataTransfer(event.dataTransfer);
+      if (!files.length) {
+        throw new Error("No local imaging files were dropped.");
+      }
+      const response = await importLocalFilesThroughBackend(files);
+      await openImportedStudy(response);
+    } catch (error) {
+      setLocalStartStatus(error instanceof Error ? error.message : "Unable to import dropped local imaging files.");
+    } finally {
+      setLocalStartImporting(false, readLocalStartStatus());
+    }
+  }
+
+  function hasFileDataTransfer(dataTransfer) {
+    return Array.from(dataTransfer.types ?? []).includes("Files") ||
+      Array.from(dataTransfer.items ?? []).some((item) => item.kind === "file") ||
+      dataTransfer.files?.length > 0;
+  }
+
+  async function importLocalFilesThroughBackend(files) {
+    const form = new FormData();
+    const relativePaths = [];
+    for (const file of files) {
+      const relativePath = readBrowserRelativePath(file);
+      relativePaths.push(relativePath);
+      form.append("files", file, relativePath);
+    }
+    form.set("relativePaths", JSON.stringify(relativePaths));
+    return requestJson("/api/local-imaging/import", {
+      method: "POST",
+      body: form,
+    });
+  }
+
+  async function filesFromDataTransfer(dataTransfer) {
+    const itemEntries = Array.from(dataTransfer.items ?? [])
+      .filter((item) => item.kind === "file")
+      .map(getBrowserFileSystemEntry)
+      .filter(isBrowserFileSystemEntry);
+
+    if (!itemEntries.length) {
+      return Array.from(dataTransfer.files ?? []);
+    }
+
+    const files = await Promise.all(itemEntries.map((entry) => filesFromEntry(entry)));
+    return files.flat();
+  }
+
+  async function filesFromEntry(entry, parentRelativePath = "") {
+    const relativePath = joinRelativePath(parentRelativePath, entry.name);
+
+    if (entry.isFile) {
+      return [await fileFromFileEntry(entry, relativePath)];
+    }
+
+    if (!entry.isDirectory) {
+      return [];
+    }
+
+    const childEntries = await readDirectoryEntries(entry);
+    const nestedFiles = await Promise.all(
+      childEntries.map((childEntry) => filesFromEntry(childEntry, relativePath)),
+    );
+    return nestedFiles.flat();
+  }
+
+  function fileFromFileEntry(entry, relativePath) {
+    return new Promise((resolve, reject) => {
+      entry.file(
+        (file) => resolve(fileWithRelativePath(file, relativePath || file.name)),
+        reject,
+      );
+    });
+  }
+
+  function readDirectoryEntries(entry) {
+    const reader = entry.createReader();
+    const entries = [];
+
+    return new Promise((resolve, reject) => {
+      const readBatch = () => {
+        reader.readEntries((batch) => {
+          if (!batch.length) {
+            resolve(entries);
+            return;
+          }
+          entries.push(...batch);
+          readBatch();
+        }, reject);
+      };
+
+      readBatch();
+    });
+  }
+
+  function getBrowserFileSystemEntry(item) {
+    const entry = item.webkitGetAsEntry?.() ?? null;
+    return isBrowserFileSystemEntry(entry) ? entry : null;
+  }
+
+  function isBrowserFileSystemEntry(entry) {
+    return Boolean(
+      entry &&
+        typeof entry === "object" &&
+        "name" in entry &&
+        "isFile" in entry &&
+        "isDirectory" in entry &&
+        typeof entry.name === "string" &&
+        typeof entry.isFile === "boolean" &&
+        typeof entry.isDirectory === "boolean",
+    );
+  }
+
+  function fileWithRelativePath(file, relativePath) {
+    Object.defineProperty(file, DROP_RELATIVE_PATH_KEY, {
+      configurable: true,
+      value: relativePath || file.name,
+    });
+    return file;
+  }
+
+  function readBrowserRelativePath(file) {
+    const relativePath = file[DROP_RELATIVE_PATH_KEY] ?? file.webkitRelativePath;
+    return relativePath && relativePath.trim() ? relativePath : file.name;
+  }
+
+  function joinRelativePath(parentPath, name) {
+    const cleanParent = parentPath.replace(/^\/+|\/+$/g, "");
+    const cleanName = name.replace(/^\/+|\/+$/g, "");
+    return cleanParent ? `${cleanParent}/${cleanName}` : cleanName;
+  }
+
+  function setLocalStartStatus(message) {
+    const status = loader.querySelector("[data-testid='radsysx-local-import-status']");
+    if (status) {
+      status.textContent = message;
+    }
+  }
+
+  function readLocalStartStatus() {
+    return loader.querySelector("[data-testid='radsysx-local-import-status']")?.textContent ?? "";
   }
 
   async function openImportedStudy(response) {

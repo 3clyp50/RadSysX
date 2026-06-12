@@ -8,7 +8,7 @@ For the shortest no-Docker local run of RadSysX, use the Electron desktop path f
 npm run desktop
 ```
 
-This starts the local clinical FastAPI backend, a production Next.js standalone shell, and OHIF viewer bridge under one localhost origin. Electron opens directly to the OHIF local-start screen with `Open local study` as the focused primary action; DICOM imports auto-open in OHIF through the governed launch contract and non-DICOM-only imports fall back to worklist inspection. It is the preferred quick path for local login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/NRRD `.nrrd`/ZIP archive import including extensionless and multi-study DICOMDIR companion files, imported-study asset summaries, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including PNG/JPEG byte previews and TIFF SVG header previews, NRRD header/voxel metrics, deterministic technical analysis, NIFTI header inspection, worklist registration, local DICOM metadata/frame serving, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval, full NIFTI/NRRD volume rendering, full TIFF pixel decoding, and durable STOW validation still require deeper validation or a configured local imaging backend.
+This starts the local clinical FastAPI backend, a production Next.js standalone shell, and OHIF viewer bridge under one localhost origin. Electron opens directly to the OHIF local-start screen with `Open local study` as the focused primary action plus first-screen drag/drop; DICOM imports auto-open in OHIF through the governed launch contract and non-DICOM-only imports fall back to worklist inspection. It is the preferred quick path for local login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/NRRD `.nrrd`/ZIP archive import including extensionless and multi-study DICOMDIR companion files, imported-study asset summaries, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including PNG/JPEG byte previews and TIFF SVG header previews, NRRD header/voxel metrics, deterministic technical analysis, NIFTI header inspection, worklist registration, local DICOM metadata/frame serving, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval, full NIFTI/NRRD volume rendering, full TIFF pixel decoding, and durable STOW validation still require deeper validation or a configured local imaging backend.
 
 `RADSYSX_DESKTOP_START_PATH` can override the first route for focused validation, but normal local use should keep the default `/viewer/?local=1` so OHIF is the first screen.
 
@@ -26,6 +26,7 @@ npm run desktop:doctor
 npm run desktop:smoke:launch
 npm run desktop:smoke
 npm run desktop:smoke:local-start
+npm run desktop:smoke:local-start-drop
 npm run desktop:smoke:local-start-nondicom
 npm run desktop:smoke:import
 npm run desktop:smoke:ui-import
@@ -39,6 +40,8 @@ npm run desktop:smoke:viewer-launch
 `npm run desktop:smoke:launch` runs the same user-facing launcher path as `npm run desktop`: bootstrap check first, then service-ready Electron startup with the OHIF-first default retained, using a short cross-platform auto-shutdown timer. `npm run desktop:smoke:local-start` is the UI assertion that samples `/viewer/`, the local import card, and imported-DICOM OHIF rendering.
 
 `npm run desktop:smoke:local-start` starts Electron at the OHIF local-start screen, verifies the visible URL is cleaned to `/viewer/`, verifies `Open local study` as the primary action, imports synthetic local files through that action, opens the imported DICOM study in OHIF via a governed launch, checks same-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
+
+`npm run desktop:smoke:local-start-drop` starts Electron at the same OHIF local-start screen, drops synthetic local files directly onto the first-screen panel, opens the imported DICOM study in OHIF via a governed launch, checks same-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
 `npm run desktop:smoke:local-start-nondicom` starts from the same OHIF local-start screen, imports only NIFTI/NRRD/image/ZIP fixtures, verifies the fallback to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and confirms no OHIF viewer action is exposed for the non-DICOM row.
 

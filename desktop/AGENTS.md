@@ -15,7 +15,7 @@
 
 - The desktop path is a local convenience runtime, not a shortcut around governed clinical contracts.
 - Electron must keep the app shell, `/api`, and `/viewer` under one local origin so clinical cookies and opaque launch sessions work without nginx.
-- The default Electron first route is `/viewer/?local=1`, which the viewer bootstrap strips to `/viewer/` after presenting the OHIF local-start import screen with `Open local study` as the focused primary action. Use `RADSYSX_DESKTOP_START_PATH` only for intentional alternate-start validation.
+- The default Electron first route is `/viewer/?local=1`, which the viewer bootstrap strips to `/viewer/` after presenting the OHIF local-start import screen with `Open local study` as the focused primary action and first-screen drag/drop as a no-click alternative. Use `RADSYSX_DESKTOP_START_PATH` only for intentional alternate-start validation.
 - `npm run desktop` is the user-facing fast-path command from the repo root. It runs a non-mutating desktop bootstrap check, repairs setup through `npm run desktop:bootstrap` when allowed, then opens the OHIF-first Electron app. Use `npm run desktop:run` or the workspace `npm run dev --workspace @radsysx/desktop` only for intentional direct-run developer bypasses.
 - The default desktop frontend path is a production Next.js standalone shell built with same-origin public API/viewer defaults and reused via `frontend/.next/radsysx-desktop-build.json`; use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1` to force a rebuild. Do not stamp the default build to an absolute localhost port unless an explicit `NEXT_PUBLIC_*` override needs that behavior.
 - `RADSYSX_DESKTOP_FRONTEND_MODE=development` is the explicit live-UI-development mode and may use the Next.js dev server; normal fast-path validation should prefer the production standalone frontend.
@@ -39,6 +39,7 @@
 - `npm run desktop:smoke:launch` should keep proving the same user-facing launcher contract as `npm run desktop`: bootstrap check first, then service-ready Electron startup with the OHIF-first default retained, with `--smoke` setting a cross-platform startup shutdown timer. `npm run desktop:smoke:local-start` remains the smoke that samples the first-screen OHIF local-start UI.
 - `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, NRRD `.nrrd`, ZIP archives containing supported files, plus PNG/JPEG/TIFF import, asset summaries, local previews including NIFTI slice navigation, JPEG byte preview retrieval, TIFF SVG header preview, NRRD technical analysis, DICOMweb discovery, and opaque launch without Docker.
 - `npm run desktop:smoke:local-start` should keep proving Electron opens first into the OHIF local-start screen, shows `Open local study` as the primary path, auto-establishes the seeded local session through backend auth, imports fixture files through the desktop native import bridge, creates a governed imaging launch for the imported DICOM study, strips launch/local query state from the visible viewer URL, binds same-origin local DICOMweb/workspace roots, and paints a nonblank OHIF canvas.
+- `npm run desktop:smoke:local-start-drop` should keep proving the same first OHIF screen accepts dropped files directly, submits them through the backend local imaging import contract with preserved relative paths, creates a governed imaging launch for imported DICOM, binds same-origin local DICOMweb/workspace roots, and paints a nonblank OHIF canvas.
 - `npm run desktop:smoke:local-start-nondicom` should keep proving the same OHIF-first import path works when the selection contains only NIFTI/NRRD/image/ZIP fixtures: it must fall back to `/worklist`, auto-open the backend-owned local assets panel, load previews, switch NIFTI axes, and run technical analysis without exposing an OHIF viewer action.
 - `npm run desktop:smoke:ui-import` should keep proving the hydrated worklist UI can import dropped local imaging files, inspect imported assets including PNG/JPEG/TIFF fallback images, change NIFTI preview slices, and run backend technical analysis without Docker.
 - `npm run desktop:smoke:picker-files-import` should keep proving the hydrated worklist UI can invoke the `Import files` action through the Electron native picker bridge, pass smoke-injected individual file paths through `preload.cjs`, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker.
@@ -64,6 +65,7 @@
 - `npm run desktop:smoke:launch`
 - `npm run desktop:smoke:import`
 - `npm run desktop:smoke:local-start`
+- `npm run desktop:smoke:local-start-drop`
 - `npm run desktop:smoke:local-start-nondicom`
 - `npm run desktop:smoke:picker-files-import`
 - `npm run desktop:smoke:picker-large-import`

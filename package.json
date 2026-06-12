@@ -18,6 +18,7 @@
     "desktop:smoke:import": "npm run smoke:import --workspace @radsysx/desktop",
     "desktop:smoke:launch": "npm run smoke:launch --workspace @radsysx/desktop",
     "desktop:smoke:local-start": "npm run smoke:local-start --workspace @radsysx/desktop",
+    "desktop:smoke:local-start-drop": "npm run smoke:local-start-drop --workspace @radsysx/desktop",
     "desktop:smoke:local-start-nondicom": "npm run smoke:local-start-nondicom --workspace @radsysx/desktop",
     "desktop:smoke:picker-files-import": "npm run smoke:picker-files-import --workspace @radsysx/desktop",
     "desktop:smoke:picker-large-import": "npm run smoke:picker-large-import --workspace @radsysx/desktop",
