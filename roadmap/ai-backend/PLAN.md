@@ -11,6 +11,7 @@ This file is the durable brain-extension plan for turning the current frontend-o
 Related research:
 
 - `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` distills an external GPT 5.5 Pro research pass on the realtime voice/chat architecture. Treat it as the source of record for the current transport split: HTTP POST for durable writes, SSE for ordinary chat/job/tool events, WebSocket for local ASR audio, provider-native WebRTC for OpenAI Realtime, and provider/stateful WSS for Gemini Live.
+- `roadmap/ai-backend/GPU_EVAL_LOG.md` records the first GPU VM bring-up, CUDA/PyTorch validation, RadSysX desktop build checks, Hugging Face access probe, and Nemotron 3.5 ASR smoke test on an NVIDIA L40S.
 
 Current baseline:
 
@@ -29,7 +30,7 @@ North star:
 
 Do not forget:
 
-- GPU evaluation has not happened yet. The next run should pull and test candidate models on the GPU machine.
+- First GPU evaluation happened on 2026-06-12 and is recorded in `roadmap/ai-backend/GPU_EVAL_LOG.md`. Treat it as the baseline evidence for the NVIDIA/Linux worker lane, not as a completed backend implementation.
 - Source facts below are snapshots checked on 2026-06-12. Revalidate before implementation.
 - BiomedParse is not MIT. Treat the GitHub code license, Hugging Face model license, checkpoint terms, and research/clinical-use restrictions as separate checks before packaging or distribution.
 - Pillar-0, Sybil, RAVE, and related YalaLab repositories/checkpoints also need artifact-by-artifact license checks. Do not assume one license covers the whole ecosystem.
@@ -37,6 +38,7 @@ Do not forget:
 - Sybil-1.5 is a risk model for future lung cancer risk, not a generic lesion detector.
 - RAVE is attractive because it is purpose-built to turn DICOM and NIfTI into ML-ready representations.
 - Cross-platform hardware matters: NVIDIA/Linux is only one validation lane. Apple Silicon/Metal, Windows CUDA/DirectML, CPU/no-GPU fallback, and governed API deployment should all stay visible in the architecture.
+- Nemotron 3.5 ASR loaded and transcribed on the L40S, but the current NeMo convenience `transcribe()` path needed `RNNTPromptTranscribeConfig(use_lhotse=False, target_lang="en-US")` to avoid a prompt-language dataloader failure. The real sidebar path should test NeMo's cache-aware streaming example next.
 
 ## Source Snapshot
 
@@ -493,20 +495,20 @@ Create a tiny script during the GPU run to:
 - Run one public chest X-ray or local non-PHI fixture.
 - Measure load time, VRAM, first token latency, tokens/sec, and output quality.
 - Repeat with a small selected DICOM-derived PNG from RadSysX local fixtures if safe.
-- Save notes to a future `roadmap/ai-backend/GPU_EVAL_LOG.md`.
+- Append hard numbers to `roadmap/ai-backend/GPU_EVAL_LOG.md`.
 
 Nemotron ASR smoke:
 
 ```bash
 . .venv-ai/bin/activate
 python3 -m pip install Cython packaging
-python3 -m pip install "git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[asr]"
+python3 -m pip install "nemo_toolkit[asr] @ git+https://github.com/NVIDIA/NeMo.git@main"
 ```
 
 Then:
 
-- Load `nvidia/nemotron-3.5-asr-streaming-0.6b`.
-- Test with a short non-PHI WAV.
+- Load `nvidia/nemotron-3.5-asr-streaming-0.6b`. First successful L40S load is recorded in `roadmap/ai-backend/GPU_EVAL_LOG.md`.
+- Test with a short non-PHI WAV. For the current NeMo package, the batch smoke needed `RNNTPromptTranscribeConfig(use_lhotse=False, target_lang="en-US")`.
 - Test 80ms, 160ms, 320ms, and 1120ms chunk settings.
 - Record latency, WER by ear, GPU memory, and installation pain.
 
@@ -1021,24 +1023,24 @@ Likely files to create later:
 
 Do not create all of these prematurely. Let the first implementation tranche prove the seams.
 
-## Next-Run Checklist
+## GPU Pass Checklist
 
-- [ ] Confirm clean git state.
-- [ ] Confirm GPU machine specs with `nvidia-smi`.
-- [ ] Confirm desktop fast path still checks with `npm run desktop -- --check-only`.
+- [x] Confirm clean git state before the first GPU pass.
+- [x] Confirm GPU machine specs with `nvidia-smi`.
+- [x] Confirm desktop fast path checks with `npm run desktop -- --check-only`.
+- [x] Create `.venv-ai` or equivalent isolated model environment.
+- [x] Smoke Nemotron ASR on a non-PHI WAV.
+- [x] Write `roadmap/ai-backend/GPU_EVAL_LOG.md` with hard numbers.
 - [ ] Re-read `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` before implementing voice/chat contracts.
-- [ ] Create `.venv-ai` or equivalent isolated model environment.
-- [ ] Verify Hugging Face login and terms for MedGemma/Pillar if needed.
+- [ ] Verify Hugging Face login and terms for MedGemma/Pillar/BiomedParse if needed.
 - [ ] Smoke MedGemma on a non-PHI image.
-- [ ] Smoke Nemotron ASR on a non-PHI WAV.
 - [ ] Clone and inspect RAVE outside the repo or in a temp dir.
 - [ ] Clone and inspect BiomedParse v2 outside the repo or in a temp dir.
 - [ ] Attempt one tiny BiomedParse v2 inference.
 - [ ] Attempt one Pillar-0 checkpoint inference if access works.
-- [ ] Validate local ASR on Linux/NVIDIA, then plan Electron audio parity checks for Windows and macOS.
+- [ ] Validate local ASR streaming on Linux/NVIDIA, then plan Electron audio parity checks for Windows and macOS.
 - [ ] Add explicit Apple Silicon/Metal and Windows workstation feasibility tasks before choosing a "default local" inference story.
 - [ ] Decide which API-backed realtime path deserves a governed prototype, informed by ambient-scribe production patterns rather than assuming API is undesirable.
-- [ ] Write `roadmap/ai-backend/GPU_EVAL_LOG.md` with hard numbers.
 - [ ] Decide first implementation PR based on measured reality.
 
 ## Good First User Demos
