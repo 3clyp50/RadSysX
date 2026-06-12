@@ -11,7 +11,7 @@ This file is the durable brain-extension plan for turning the current frontend-o
 Related research:
 
 - `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` distills an external GPT 5.5 Pro research pass on the realtime voice/chat architecture. Treat it as the source of record for the current transport split: HTTP POST for durable writes, SSE for ordinary chat/job/tool events, WebSocket for local ASR audio, provider-native WebRTC for OpenAI Realtime, and provider/stateful WSS for Gemini Live.
-- `roadmap/ai-backend/GPU_EVAL_LOG.md` records the GPU VM bring-up, CUDA/PyTorch validation, RadSysX desktop build checks, Hugging Face access probes, Nemotron ASR smokes, MedGemma 1.5 4B BF16 smokes, and Sybil-1.5/Pillar0-ChestCT example inference on an NVIDIA L40S.
+- `roadmap/ai-backend/GPU_EVAL_LOG.md` records the GPU VM bring-up, CUDA/PyTorch validation, RadSysX desktop build checks, Hugging Face access probes, Nemotron ASR smokes, MedGemma 1.5 4B BF16 smokes, Sybil-1.5/Pillar0-ChestCT example inference, and BiomedParse v2 CT segmentation inference on an NVIDIA L40S.
 
 Current baseline:
 
@@ -41,10 +41,11 @@ Do not forget:
 - Nemotron 3.5 ASR loaded and transcribed on the L40S. The current NeMo convenience `transcribe()` path needed `RNNTPromptTranscribeConfig(use_lhotse=False, target_lang="en-US")` to avoid a prompt-language dataloader failure; NeMo's cache-aware streaming example also ran successfully through a manifest with `target_lang=en-US`.
 - MedGemma 1.5 4B is the preferred first local image/text model lane after authenticated access. It loaded in BF16 and completed text plus synthetic-image smokes at about 8.1 GiB peak VRAM on the L40S.
 - Sybil-1.5 and its Pillar0-ChestCT base model loaded through the official `pillar-finetune` example after gated access was fixed. The included one-row RVE example ran with `test_loss: 0.6579`; this remains a lung cancer risk-model experiment only.
+- BiomedParse v2 ran the bundled 3D abdominal CT segmentation example on the L40S in a CUDA 13 aligned compatibility environment. It produced a `(63, 512, 512)` mask with labels `0..15` at about 8.279 GiB peak VRAM. The official CUDA 12.4 dependency lane failed at Detectron2 build time on this CUDA 13 VM, so BioMedParse belongs in an optional worker/container with explicit CUDA/PyTorch alignment.
 
 ## Source Snapshot
 
-Checked on 2026-06-12:
+Checked on 2026-06-12 and 2026-06-13:
 
 | Candidate | Role in RadSysX | Source facts to retain | License/access notes | Link |
 | --- | --- | --- | --- | --- |
@@ -52,7 +53,7 @@ Checked on 2026-06-12:
 | Pillar-0 collection | Modality-specific radiology foundation model family | Collection includes Breast MRI, Head CT, Abdomen CT, Chest CT, and Sybil-1.5 entries | Verify each checkpoint/code license separately before download, packaging, or distribution | <https://huggingface.co/collections/YalaLab/pillar-0> |
 | Pillar0-Sybil-1.5 | LDCT future lung cancer risk prediction | Fine-tuned from Pillar-0 Chest CT; predicts 1-6 year future lung cancer risk from a single low-dose CT | ECL-2.0; gated model access requiring contact info acceptance | <https://huggingface.co/YalaLab/Pillar0-Sybil-1.5> |
 | RAVE | Imaging preprocessor and ML-ready conversion layer | High-performance engine for converting DICOM and NIfTI files into ML-ready formats with windowing and compression | ECL-2.0 in current repo | <https://github.com/YalaLab/rave> |
-| BiomedParse v2 | Text-guided segmentation fallback and broad modality coverage | v2 supports end-to-end 3D inference for CT, MRI, Ultrasound, PET, and 3D microscopy; v1 is recommended by the repo for 2D modalities including CT, MRI, Ultrasound, X-Ray, Pathology, Endoscopy, Dermoscopy, Fundus, and OCT | Not MIT; verify repo code, model card, checkpoint, data, noncommercial, share-alike, and research-only terms separately before use | <https://github.com/microsoft/BiomedParse> |
+| BiomedParse v2 | Text-guided segmentation fallback and broad modality coverage | v2 supports end-to-end 3D inference for CT, MRI, Ultrasound, PET, and 3D microscopy; v1 is recommended by the repo for 2D modalities including CT, MRI, Ultrasound, X-Ray, Pathology, Endoscopy, Dermoscopy, Fundus, and OCT; L40S smoke succeeded on the included 3D CT example | Not MIT; Hugging Face model metadata reports `cc-by-nc-sa-4.0`; verify repo code, model card, checkpoint, data, noncommercial, share-alike, and research-only terms separately before use | <https://github.com/microsoft/BiomedParse> |
 | Nemotron 3.5 ASR Streaming 0.6B | Local realtime speech-to-text candidate | 600M parameter streaming ASR using cache-aware FastConformer-RNNT; supports configurable chunk sizes from 80ms to 1120ms and many language locales | OpenMDW-1.1; NeMo/NVIDIA GPU worker likely validates on Linux first, while RadSysX remains cross-platform | <https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b> |
 | Gemini Live API / `gemini-3.1-flash-live-preview` | API realtime voice/vision/text option | Live API supports low-latency stateful WebSocket sessions, raw PCM audio, image/text input, audio output, tool use, transcripts, and barge-in | API service; use backend mediation or ephemeral tokens only where policy allows; synchronous tool behavior must route through RadSysX broker | <https://ai.google.dev/gemini-api/docs/live-api> |
 | OpenAI Realtime / `gpt-realtime-2` | API speech-to-speech reasoning and tool-use option | Realtime 2 is documented as a reasoning voice model for low-latency speech-to-speech, stronger tool calling, long context, and controllable reasoning effort | API service; use backend-created/mediated WebRTC sessions where enabled; pricing and availability must be rechecked before integration | <https://developers.openai.com/api/docs/guides/realtime-models-prompting> |
@@ -553,7 +554,6 @@ BiomedParse v2 smoke:
 tmpdir="$(mktemp -d)"
 git clone https://github.com/microsoft/BiomedParse.git "$tmpdir/BiomedParse"
 cd "$tmpdir/BiomedParse"
-git checkout v2
 ```
 
 Then:
@@ -563,6 +563,14 @@ Then:
 - Run the smallest 3D inference example.
 - Test one text prompt like "skull", "brain", "lung", or "liver" against a matching fixture.
 - Record preprocessing, output mask shape, runtime, VRAM, and coordinate mapping.
+
+Observed on 2026-06-13:
+
+- The repo's current `main` branch was already the v2 code path at commit `e02096c`.
+- The official CUDA 12.4 PyTorch lane installed, but Detectron2 failed to build on the CUDA 13 VM because the local toolkit was CUDA 13.0 while `torch==2.6.0+cu124` reports CUDA 12.4.
+- A separate `.venv-cu130` compatibility lane with `torch==2.12.0+cu130` and Detectron2 built from source succeeded.
+- The bundled `examples/imgs/CT_AMOS_amos_0018.npz` inference produced a `(63, 512, 512)` mask with labels `0..15`, `781455` nonzero voxels, `5.062s` measured model forward time, and about `8.279 GiB` peak VRAM.
+- Treat this as a worker-packaging finding, not permission to add BioMedParse dependencies to the clinical venv.
 
 API realtime smoke:
 
@@ -756,8 +764,9 @@ Goal:
 
 Tasks:
 
-- [ ] Reproduce BiomedParse v2 example.
-- [ ] Test simple 3D segmentation prompt on safe fixture.
+- [x] Reproduce BiomedParse v2 example on the L40S with the bundled CT AMOS sample.
+- [x] Record the official CUDA 12.4 dependency-lane blocker and the CUDA 13 compatibility lane that succeeded.
+- [ ] Test simple 3D segmentation prompt on a RadSysX/public safe fixture.
 - [ ] Normalize mask output into RadSysX `SegmentationResult`.
 - [ ] Map mask back to image/volume coordinates.
 - [ ] Preview segmentation in OHIF without persistence.
@@ -765,6 +774,7 @@ Tasks:
 - [ ] Add DICOM SEG writeback path through existing backend derived-result service.
 - [ ] Add fallback messages when task/modality unsupported.
 - [ ] Decide whether v1 is needed for 2D modalities.
+- [ ] Decide whether the maintained runtime is a CUDA-aligned optional worker venv, a container, or an external service.
 
 Exit criteria:
 
@@ -942,6 +952,7 @@ Exit criteria:
   - Multi-GB models must not become part of default bootstrap.
 - Dependency conflict:
   - NeMo, BiomedParse, RAVE, vLLM, SGLang, and clinical FastAPI dependencies may not coexist in one venv.
+  - BioMedParse's official CUDA 12.4 PyTorch lane does not directly build Detectron2 on the CUDA 13 VM; custom CUDA extension stacks need explicitly aligned worker environments.
 - Latency:
   - 3D models may be too slow for interactive chat unless queued with clear progress.
 - Hallucination:
@@ -1040,8 +1051,9 @@ Do not create all of these prematurely. Let the first implementation tranche pro
 - [ ] Re-read `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` before implementing voice/chat contracts.
 - [x] Remove the temporary Hugging Face token from the VM cache after the experiment; external token rotation remains user-owned.
 - [ ] Clone and inspect RAVE outside the repo or in a temp dir.
-- [ ] Clone and inspect BiomedParse v2 outside the repo or in a temp dir.
-- [ ] Attempt one tiny BiomedParse v2 inference.
+- [x] Clone and inspect BiomedParse v2 outside the repo or in a temp dir.
+- [x] Attempt one tiny BiomedParse v2 inference.
+- [ ] Convert the successful BiomedParse example into a RadSysX segmentation-worker plan with coordinate mapping and preview-only OHIF integration.
 - [ ] Validate resident local ASR streaming on Linux/NVIDIA, then plan Electron audio parity checks for Windows and macOS.
 - [ ] Add explicit Apple Silicon/Metal and Windows workstation feasibility tasks before choosing a "default local" inference story.
 - [ ] Decide which API-backed realtime path deserves a governed prototype, informed by ambient-scribe production patterns rather than assuming API is undesirable.

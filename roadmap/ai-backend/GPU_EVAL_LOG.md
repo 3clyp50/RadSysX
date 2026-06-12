@@ -1,7 +1,7 @@
 # RadSysX GPU Evaluation Log
 
 Last updated: 2026-06-13
-Status: first GPU bring-up plus first gated-model smokes complete; model integration not implemented.
+Status: first GPU bring-up plus Nemotron, MedGemma, Sybil, and BiomedParse smokes complete; model integration not implemented.
 Machine: remote Ubuntu 24.04 GPU VM accessed with `ssh eclypso@89.169.110.187`.
 
 ## Purpose
@@ -15,7 +15,7 @@ The immediate goal was to prove that a fresh Ubuntu 24.04 NVIDIA host can:
 - Create an isolated AI Python environment without polluting the clinical `.venv`.
 - Install CUDA-enabled PyTorch.
 - Pull and run a candidate local realtime ASR model, starting with NVIDIA Nemotron 3.5 ASR Streaming 0.6B.
-- Identify gated model access blockers before spending time on MedGemma, Pillar-0/Sybil, or BiomedParse downloads.
+- Identify gated model access blockers and run the first MedGemma, Pillar-0/Sybil, and BiomedParse smokes without polluting the clinical runtime.
 
 ## VM Snapshot
 
@@ -192,7 +192,7 @@ Implication:
 
 On 2026-06-13, the user provided a temporary Hugging Face token and confirmed terms had been accepted on the Hugging Face website. The token was installed only into the VM user's Hugging Face cache with git credential storage disabled. Do not commit or log the token.
 
-After the gated-model tests, the cached token was removed from the VM Hugging Face cache and `huggingface_hub.get_token()` returned `False`. The user still planned to rotate the token externally.
+After the gated-model and BiomedParse tests, the cached token was removed from the VM Hugging Face cache and `huggingface_hub.get_token()` returned `False`. The user still planned to rotate the token externally.
 
 Authenticated access results:
 
@@ -205,7 +205,7 @@ Authenticated access results:
 | `YalaLab/Pillar0-HeadCT` | Success | gated/auto; config accessible |
 | `YalaLab/Pillar0-AbdomenCT` | Success | gated/auto; config accessible |
 | `YalaLab/Pillar0-BreastMRI` | Success | gated/auto; config accessible |
-| `microsoft/BiomedParse` | Success | gated/auto; `license:cc-by-nc-sa-4.0`; README/config files accessible, inference not yet attempted |
+| `microsoft/BiomedParse` | Success | gated/auto; `license:cc-by-nc-sa-4.0`; v2 checkpoint and included 3D CT example accessible |
 
 ## Nemotron 3.5 ASR Streaming 0.6B
 
@@ -608,14 +608,14 @@ YalaLab/Pillar0-BreastMRI sha be5050ba482607f90e607e044f03a2ebc38f98c3 gated aut
 
 The official `pillar-finetune` setup expects Python `>=3.10,<3.11`. The Ubuntu VM only has system Python 3.12, so `uv` was used to create an isolated Python 3.10.20 environment in `/tmp/pillar-finetune/.venv`.
 
-The normal `uv sync` path failed on `flash-attn==2.8.3` because the VM does not have `nvcc` and `flash-attn`'s build metadata imports `torch` during build:
+The normal `uv sync` path failed on `flash-attn==2.8.3` because `flash-attn`'s build metadata imports `torch` before declaring it as a build dependency:
 
 ```text
 ModuleNotFoundError: No module named 'torch'
 hint: flash-attn depends on torch, but does not declare it as a build dependency
 ```
 
-No `pillar-finetune` or Pillar-0 source file imported `flash_attn` in the official example path, so a no-FlashAttention test environment was created:
+The VM does have CUDA 13.0 `nvcc`, but CUDA extension builds still need explicit PyTorch/toolkit alignment. No `pillar-finetune` or Pillar-0 source file imported `flash_attn` in the official example path, so a no-FlashAttention test environment was created:
 
 ```bash
 cd /tmp/pillar-finetune
@@ -689,6 +689,129 @@ Interpretation:
 - The output is a risk-model smoke only. It is not a generic lesion detector, not a segmentation model, and not a clinical validation.
 - The no-FlashAttention environment is acceptable for this one-row evaluation smoke, but a maintained worker should decide whether to install CUDA toolkit/`nvcc`, use an upstream wheel, or keep the no-FlashAttention path if performance remains acceptable.
 
+## BiomedParse v2
+
+Source snapshot checked 2026-06-13:
+
+- Code: <https://github.com/microsoft/BiomedParse>
+- Clone path on VM: `/tmp/BiomedParse`
+- Code commit: `e02096c`
+- Hugging Face model repo: `microsoft/BiomedParse`
+- Hugging Face repo SHA: `e473e5b2b1a3f44649734afd3dc7cf1770aaa9e2`
+- Hugging Face license metadata: `cc-by-nc-sa-4.0`
+- Checkpoint: `biomedparse_v2.ckpt`, stored under `HF_HOME="$HOME/.cache/radsysx/models/huggingface"`, backing blob about `4.2G`
+- Included test case: `examples/imgs/CT_AMOS_amos_0018.npz`
+
+Included CT example inspection:
+
+```text
+keys ['boxes', 'imgs', 'spacing', 'text_prompts']
+imgs_shape (63, 512, 512) uint8 0.0 255.0
+prompt_count 15
+```
+
+Official README dependency path:
+
+```bash
+cd /tmp/BiomedParse
+export UV_CACHE_DIR="$HOME/.cache/radsysx/uv"
+uv venv --python 3.10
+. .venv/bin/activate
+uv pip install --index-strategy unsafe-best-match -r assets/requirements/requirements.txt
+```
+
+The `uv` index strategy flag was needed because the requirements file mixes the PyTorch CUDA wheel index with PyPI. The base requirements installed successfully with:
+
+```text
+python 3.10.20
+torch 2.6.0+cu124
+torchvision 0.21.0+cu124
+torchaudio 2.6.0+cu124
+```
+
+The README's extra `opencv-python azureml-automl-core` install temporarily pulled `numpy` to `2.2.6`; it was pinned back to the repo requirement `numpy==1.26.4`.
+
+Detectron2 failed in the official CUDA 12.4 PyTorch lane because the VM toolkit is CUDA 13.0:
+
+```text
+RuntimeError:
+The detected CUDA version (13.0) mismatches the version that was used to compile
+PyTorch (12.4). Please make sure to use the same CUDA versions.
+```
+
+This is a packaging/toolchain issue, not a BioMedParse model failure.
+
+CUDA 13 compatibility lane:
+
+```bash
+cd /tmp/BiomedParse
+uv venv --python 3.12 .venv-cu130
+. .venv-cu130/bin/activate
+uv pip install --index-strategy unsafe-best-match --extra-index-url https://download.pytorch.org/whl/cu130 \
+  torch==2.12.0+cu130 torchvision==0.27.0+cu130 torchaudio==2.11.0+cu130
+uv pip install --index-strategy unsafe-best-match \
+  numpy==1.26.4 packaging==23.0 setuptools==70.3.0 wheel ninja \
+  pandas==2.2.2 scikit-learn==1.4.2 hydra-core==1.3.2 lightning==2.3.0 \
+  marshmallow==3.23.2 timm==0.9.16 transformers==4.40.0 \
+  open-clip-torch==2.26.1 sentencepiece==0.2.0 kornia==0.7.3 \
+  python-dotenv==1.0.1 scikit-image opencv-python-headless \
+  huggingface_hub safetensors matplotlib pycocotools termcolor yacs \
+  tabulate tensorboard fvcore iopath black
+export CUDA_HOME=/usr/local/cuda-13.0
+export TORCH_CUDA_ARCH_LIST="8.9"
+uv pip install --index-strategy unsafe-best-match --no-build-isolation \
+  "git+https://github.com/facebookresearch/detectron2.git"
+```
+
+Observed compatibility environment:
+
+```text
+python 3.12.3
+torch 2.12.0+cu130
+torch_cuda 13.0
+cuda_available True
+gpu NVIDIA L40S
+detectron2 0.6 from commit 02b5c4e295e990042a714712c21dc79b731e8833
+```
+
+BioMedParse model construction passed:
+
+```text
+model BiomedParseModel
+parameters 371798778
+```
+
+Official-style v2 inference smoke on the included CT example passed:
+
+```text
+device cuda
+torch 2.12.0+cu130 cuda 13.0
+gpu NVIDIA L40S
+model_instantiated_seconds 4.074
+Checkpoint loaded successfully!
+model_loaded_seconds 2.824
+vram_after_load_gib 1.391
+input_shape (63, 512, 512) prompt_count 15
+inference_seconds 5.062
+mask_shape (63, 512, 512)
+unique_count 16
+unique_values [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+mask_voxels_nonzero 781455
+output /tmp/BiomedParse/radsysx_biomedparse_v2_smoke_output.npz size_bytes 67715
+vram_peak_gib 8.279
+```
+
+After the process exited, `nvidia-smi` reported `0 MiB` used.
+
+Interpretation:
+
+- BiomedParse v2 can run on the L40S and produce a 3D mask for the bundled non-PHI CT example.
+- Peak VRAM for this example was about `8.279 GiB`, which is in the same practical range as the MedGemma 1.5 4B smoke.
+- The official dependency lane is not directly reproducible on this CUDA 13 VM because Detectron2's extension build sees CUDA 13.0 while official PyTorch is pinned to CUDA 12.4. A maintained RadSysX worker should use a separate optional environment, pinned container, or CUDA-aligned PyTorch stack.
+- Do not put BiomedParse into the clinical `.venv`.
+- The license metadata is `cc-by-nc-sa-4.0`; this is not a packaging-ready clinical distribution answer. Legal/terms review is required before any bundled or production use.
+- Next technical work is mask normalization: map the NPZ output back into RadSysX `SegmentationResult`, preserve image/volume coordinates, preview in OHIF, and route any DICOM SEG persistence through backend-mediated derived-result services.
+
 ## Current Conclusions
 
 - The NVIDIA/Linux worker lane is viable for the first local realtime ASR experiments.
@@ -698,16 +821,19 @@ Interpretation:
 - MedGemma 1.5 4B is the preferred first local image/text LLM candidate; BF16 load and text/image smokes succeeded around 8.1 GiB peak VRAM.
 - MedGemma 27B can run in 4-bit for text on this L40S, but it is superseded for the near-term RadSysX local path by MedGemma 1.5 4B.
 - Sybil-1.5 can run through the official `pillar-finetune` one-row RVE example after authenticated access to Sybil and Pillar0-ChestCT is available.
+- BiomedParse v2 can run the bundled 3D CT segmentation example in a CUDA 13 aligned environment, with about 8.279 GiB peak VRAM.
+- CUDA/PyTorch/toolkit alignment is now a first-class packaging concern for any worker that builds Detectron2, flash-attn, or custom CUDA ops.
 - A local ASR worker should be isolated from the clinical app process and communicate through a narrow backend contract.
 - API realtime remains a legitimate lane for machines without GPUs, Apple Silicon/Metal users, Windows workstations, and governed hospital deployments.
 - The Electron app itself should stay cross-platform. Only the heavy local model runner should be hardware-specific.
 
 ## Open Issues
 
-- User still planned external rotation of the temporary Hugging Face token; VM cache removal is complete.
-- Need evaluate BiomedParse after its license/model terms are fully separated and recorded.
+- User still planned external rotation of the temporary Hugging Face token; VM cache removal is complete after the BiomedParse pass.
+- Need turn the BiomedParse smoke into a segmentation adapter prototype with coordinate mapping, OHIF preview, and backend-mediated DICOM SEG/SR persistence.
 - Need to verify each model/checkpoint license and clinical/research restrictions separately before distribution.
-- Need choose whether RadSysX should keep a no-FlashAttention Sybil worker setup or install the CUDA toolkit/`nvcc` path required by the upstream `flash-attn` dependency.
+- Need choose whether RadSysX should keep a no-FlashAttention Sybil worker setup, use upstream wheels/containers, or build a CUDA-aligned environment for `flash-attn`.
+- Need decide whether BioMedParse should run in a CUDA-aligned optional worker/container rather than a repo-local venv.
 - Need to turn the NeMo streaming smoke into a resident worker and test low-latency chunked microphone streaming with `target_lang=en-US` and `target_lang=auto`.
 - Need to decide whether to patch around the upstream single-`audio_file` example-script post-processing bug or simply keep using manifests for CLI smoke tests.
 - Need to replace deprecated `HF_HUB_ENABLE_HF_TRANSFER` with `HF_XET_HIGH_PERFORMANCE` in future remote setup docs.
@@ -747,7 +873,7 @@ Interpretation:
 10. Keep the first worker research-only or pilot-gated until consent, audit, and retention rules are explicit.
 11. Turn MedGemma 1.5 4B into a resident local model worker and test non-PHI radiology image fixtures.
 12. Evaluate RAVE on local DICOM/NIfTI samples as the imaging preparation layer.
-13. Evaluate BiomedParse only after its license/model terms are fully separated and recorded.
+13. Turn the successful BiomedParse v2 CT example into a RadSysX segmentation-worker prototype only after license/model terms are separated and recorded.
 14. Evaluate Pillar0-Sybil-1.5 only as a lung cancer risk experiment, not as a general lesion detector.
 
 ## Source Links
@@ -759,5 +885,7 @@ Checked on 2026-06-12 and 2026-06-13:
 - [Google MedGemma 27B IT](https://huggingface.co/google/medgemma-27b-it)
 - [YalaLab Pillar0-Sybil-1.5](https://huggingface.co/YalaLab/Pillar0-Sybil-1.5)
 - [YalaLab Pillar Finetune](https://github.com/YalaLab/pillar-finetune)
+- [Microsoft BiomedParse repository](https://github.com/microsoft/BiomedParse)
+- [Microsoft BiomedParse Hugging Face model](https://huggingface.co/microsoft/BiomedParse)
 - [NVIDIA Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b)
 - [NVIDIA NeMo repository](https://github.com/NVIDIA/NeMo)
