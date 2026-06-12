@@ -8,6 +8,7 @@ import shutil
 import struct
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
@@ -18,8 +19,10 @@ from pydicom.tag import Tag
 
 from .config import ClinicalPlatformSettings
 from .contracts import (
+    LocalImagingAssetAnalysis,
     LocalImagingImportResponse,
     LocalImagingImportedStudy,
+    LocalImagingStudyAnalysisResponse,
     LocalImagingStudyAsset,
     LocalImagingStudyAssetsResponse,
     LocalImagingStudyFinding,
@@ -46,6 +49,7 @@ NIFTI_NUMERIC_DATATYPES: dict[int, tuple[str, int]] = {
     512: ("H", 2),
     768: ("I", 4),
 }
+LOCAL_ANALYSIS_MAX_VALUES = 250_000
 
 
 @dataclass(frozen=True)
@@ -463,6 +467,45 @@ class LocalImagingImporter:
         except OSError as exc:
             raise HTTPException(status_code=404, detail="Local imaging asset is missing from storage.") from exc
 
+    def study_analysis(self, study_instance_uid: str) -> LocalImagingStudyAnalysisResponse:
+        for manifest in self._iter_manifests():
+            study = self._find_manifest_study(manifest, study_instance_uid)
+            if study is None:
+                continue
+
+            file_entries = [
+                (file_index, file_entry)
+                for file_index, file_entry in enumerate(manifest.get("files", []))
+                if self._manifest_file_belongs_to_study(file_entry, study, manifest)
+            ]
+            analyses = [
+                self._analysis_from_manifest_entry(
+                    manifest=manifest,
+                    file_entry_index=file_index,
+                    file_entry=file_entry,
+                )
+                for file_index, file_entry in file_entries
+            ]
+            study_warnings = [str(warning) for warning in study.get("warnings", []) if warning]
+            warning_count = sum(len(analysis.warnings) for analysis in analyses) + len(study_warnings)
+            analyzed_count = sum(1 for analysis in analyses if analysis.metrics)
+            summary = (
+                f"Analyzed {analyzed_count} of {len(analyses)} local asset"
+                f"{'' if len(analyses) == 1 else 's'} with backend technical checks."
+            )
+            if warning_count:
+                summary = f"{summary} {warning_count} warning{'' if warning_count == 1 else 's'} returned."
+
+            return LocalImagingStudyAnalysisResponse(
+                study_instance_uid=study_instance_uid,
+                analyzed_at=datetime.now(timezone.utc).isoformat(),
+                summary=summary,
+                analyses=analyses,
+                warnings=study_warnings,
+            )
+
+        raise HTTPException(status_code=404, detail="Local imaging study was not found.")
+
     def _dicomdir_warnings(self, detected_files: list[_DetectedFile]) -> list[str]:
         warnings: list[str] = []
         dicomdir_files = [file for file in detected_files if file.format == "dicomdir"]
@@ -592,6 +635,412 @@ class LocalImagingImporter:
             return manifest, file_index, file_entry
 
         raise HTTPException(status_code=404, detail="Local imaging asset was not found.")
+
+    def _analysis_from_manifest_entry(
+        self,
+        *,
+        manifest: dict,
+        file_entry_index: int,
+        file_entry: dict,
+    ) -> LocalImagingAssetAnalysis:
+        file_format = str(file_entry.get("format") or "unknown")
+        asset_id = self._asset_id(manifest, file_entry_index)
+        relative_path = str(file_entry.get("relativePath") or "local-file")
+        path = self._stored_file_path(file_entry)
+        metrics: list[LocalImagingStudyFinding] = []
+        warnings: list[str] = []
+        summary = "Stored for backend analysis."
+
+        if path is None:
+            return LocalImagingAssetAnalysis(
+                asset_id=asset_id,
+                relative_path=relative_path,
+                format=file_format,
+                summary="Local asset is missing from private storage.",
+                warnings=["Local asset is missing from private storage."],
+            )
+
+        if file_format == "dicom":
+            summary, metrics, warnings = self._analyze_dicom_asset(path)
+        elif file_format == "nifti":
+            summary, metrics, warnings = self._analyze_nifti_asset(file_entry)
+        elif file_format in COMMON_IMAGE_EXTENSIONS:
+            summary, metrics, warnings = self._analyze_common_image_asset(file_format, path)
+        elif file_format == "dicomdir":
+            summary = "DICOMDIR index accepted; referenced DICOM instances are analyzed separately."
+            metrics = [LocalImagingStudyFinding(label="Directory index", value="DICOMDIR")]
+        else:
+            summary = "No local technical analysis is available for this asset format."
+            warnings = ["Asset format is not supported by the local technical analyzer."]
+
+        return LocalImagingAssetAnalysis(
+            asset_id=asset_id,
+            relative_path=relative_path,
+            format=file_format,
+            summary=summary,
+            metrics=metrics,
+            warnings=warnings,
+        )
+
+    def _analyze_dicom_asset(
+        self,
+        path: Path,
+    ) -> tuple[str, list[LocalImagingStudyFinding], list[str]]:
+        warnings: list[str] = []
+        try:
+            dataset = pydicom.dcmread(path, force=False)
+        except Exception:
+            return "DICOM metadata could not be read.", [], ["DICOM metadata could not be read."]
+
+        metrics = self._dicom_metadata_metrics(dataset)
+        pixel_data = getattr(dataset, "PixelData", None)
+        if pixel_data is None:
+            warnings.append("DICOM pixel data is not present.")
+            return "DICOM metadata analyzed; pixel data was not present.", metrics, warnings
+
+        transfer_syntax = getattr(getattr(dataset, "file_meta", None), "TransferSyntaxUID", None)
+        if bool(getattr(transfer_syntax, "is_compressed", False)):
+            warnings.append("Compressed DICOM pixel data is not analyzed in the local fast path.")
+            return "DICOM metadata analyzed; compressed pixels were skipped.", metrics, warnings
+
+        pixel_metrics, pixel_warnings = self._dicom_pixel_metrics(dataset, bytes(pixel_data))
+        metrics.extend(pixel_metrics)
+        warnings.extend(pixel_warnings)
+        if pixel_metrics:
+            return "DICOM metadata and uncompressed pixel sample analyzed locally.", metrics, warnings
+        return "DICOM metadata analyzed locally.", metrics, warnings
+
+    def _analyze_nifti_asset(
+        self,
+        file_entry: dict,
+    ) -> tuple[str, list[LocalImagingStudyFinding], list[str]]:
+        payload = self._read_nifti_file_bytes(file_entry)
+        if payload is None:
+            return "NIFTI asset could not be read.", [], ["NIFTI asset could not be read."]
+
+        header = self._parse_nifti_header(payload[:352])
+        if header is None:
+            return "NIFTI header could not be read.", [], ["NIFTI header could not be read."]
+
+        dimensions = [int(value) for value in header.get("dimensions", [])]
+        datatype = int(header.get("datatypeCode") or 0)
+        bitpix = int(header.get("bitsPerVoxel") or 0)
+        metrics = [
+            LocalImagingStudyFinding(
+                label="Volume dimensions",
+                value=" x ".join(str(value) for value in dimensions) if dimensions else "Unavailable",
+            ),
+            LocalImagingStudyFinding(label="Datatype code", value=str(datatype)),
+            LocalImagingStudyFinding(label="Bits per voxel", value=str(bitpix)),
+        ]
+
+        voxel_count = self._dimension_product(dimensions)
+        if voxel_count > 0:
+            metrics.append(LocalImagingStudyFinding(label="Voxel count", value=str(voxel_count)))
+
+        decoder = NIFTI_NUMERIC_DATATYPES.get(datatype)
+        if decoder is None:
+            return (
+                "NIFTI header analyzed; voxel statistics are unavailable for this datatype.",
+                metrics,
+                ["NIFTI datatype is not supported by the local technical analyzer."],
+            )
+
+        voxel_offset = float(header.get("voxOffset") or 352.0)
+        if not math.isfinite(voxel_offset) or voxel_offset < 0:
+            voxel_offset = 352.0
+        data_offset = max(int(voxel_offset), 352)
+        if data_offset >= len(payload) or voxel_count <= 0:
+            return (
+                "NIFTI header analyzed; voxel data was not available.",
+                metrics,
+                ["NIFTI voxel data is missing."],
+            )
+
+        format_code, bytes_per_voxel = decoder
+        values = self._sample_numeric_values(
+            payload,
+            data_offset=data_offset,
+            total_values=voxel_count,
+            endian=str(header.get("endian") or "<"),
+            format_code=format_code,
+            bytes_per_value=bytes_per_voxel,
+        )
+        if not values:
+            return (
+                "NIFTI header analyzed; voxel statistics could not be computed.",
+                metrics,
+                ["NIFTI voxel data is incomplete."],
+            )
+
+        metrics.extend(self._numeric_metrics(values, voxel_count))
+        return "NIFTI header and voxel intensity sample analyzed locally.", metrics, []
+
+    def _analyze_common_image_asset(
+        self,
+        file_format: str,
+        path: Path,
+    ) -> tuple[str, list[LocalImagingStudyFinding], list[str]]:
+        try:
+            payload = path.read_bytes()
+        except OSError:
+            return "Image asset could not be read.", [], ["Image asset could not be read."]
+
+        metrics, warnings = self._common_image_metrics(file_format, payload)
+        if metrics:
+            return "Image header analyzed locally.", metrics, warnings
+        return "Image header could not be analyzed.", metrics, warnings
+
+    def _dicom_metadata_metrics(self, dataset) -> list[LocalImagingStudyFinding]:
+        metrics: list[LocalImagingStudyFinding] = []
+        try:
+            rows = int(dataset.Rows)
+            columns = int(dataset.Columns)
+            metrics.append(LocalImagingStudyFinding(label="Frame dimensions", value=f"{columns} x {rows}"))
+        except Exception:
+            pass
+
+        for label, attribute in (
+            ("Frames", "NumberOfFrames"),
+            ("Samples per pixel", "SamplesPerPixel"),
+            ("Bits allocated", "BitsAllocated"),
+        ):
+            value = getattr(dataset, attribute, None)
+            if value is not None:
+                metrics.append(LocalImagingStudyFinding(label=label, value=str(value)))
+
+        return metrics
+
+    def _dicom_pixel_metrics(
+        self,
+        dataset,
+        pixel_data: bytes,
+    ) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        warnings: list[str] = []
+        try:
+            bits_allocated = int(dataset.BitsAllocated)
+            pixel_representation = int(getattr(dataset, "PixelRepresentation", 0) or 0)
+        except Exception:
+            return [], ["DICOM pixel layout is incomplete."]
+
+        decoder = self._dicom_pixel_decoder(bits_allocated, pixel_representation)
+        if decoder is None:
+            return [], ["DICOM pixel bit depth is not supported by the local technical analyzer."]
+
+        format_code, bytes_per_value = decoder
+        frame_size = self._uncompressed_frame_size(dataset)
+        total_values = len(pixel_data) // bytes_per_value
+        if frame_size:
+            total_values = min(total_values, frame_size * int(getattr(dataset, "NumberOfFrames", 1) or 1) // bytes_per_value)
+        if total_values <= 0:
+            return [], ["DICOM pixel data is empty."]
+
+        endian = "<" if bool(getattr(dataset, "is_little_endian", True)) else ">"
+        values = self._sample_numeric_values(
+            pixel_data,
+            data_offset=0,
+            total_values=total_values,
+            endian=endian,
+            format_code=format_code,
+            bytes_per_value=bytes_per_value,
+        )
+        if not values:
+            return [], ["DICOM pixel data could not be sampled."]
+        return self._numeric_metrics(values, total_values), warnings
+
+    @staticmethod
+    def _dicom_pixel_decoder(bits_allocated: int, pixel_representation: int) -> tuple[str, int] | None:
+        if bits_allocated == 8:
+            return ("b" if pixel_representation else "B", 1)
+        if bits_allocated == 16:
+            return ("h" if pixel_representation else "H", 2)
+        if bits_allocated == 32:
+            return ("i" if pixel_representation else "I", 4)
+        return None
+
+    @staticmethod
+    def _sample_numeric_values(
+        payload: bytes,
+        *,
+        data_offset: int,
+        total_values: int,
+        endian: str,
+        format_code: str,
+        bytes_per_value: int,
+    ) -> list[float]:
+        if total_values <= 0 or bytes_per_value <= 0:
+            return []
+
+        step = max(1, math.ceil(total_values / LOCAL_ANALYSIS_MAX_VALUES))
+        unpack_format = f"{endian}{format_code}"
+        values: list[float] = []
+        for value_index in range(0, total_values, step):
+            byte_index = data_offset + (value_index * bytes_per_value)
+            if byte_index + bytes_per_value > len(payload):
+                break
+            try:
+                value = float(struct.unpack_from(unpack_format, payload, byte_index)[0])
+            except struct.error:
+                break
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    def _numeric_metrics(
+        self,
+        values: list[float],
+        total_values: int,
+    ) -> list[LocalImagingStudyFinding]:
+        minimum = min(values)
+        maximum = max(values)
+        mean = sum(values) / len(values)
+        metrics = [
+            LocalImagingStudyFinding(
+                label="Intensity range",
+                value=f"{self._format_number(minimum)} to {self._format_number(maximum)}",
+            ),
+            LocalImagingStudyFinding(label="Mean intensity", value=self._format_number(mean)),
+            LocalImagingStudyFinding(label="Analyzed values", value=str(total_values)),
+        ]
+        if len(values) < total_values:
+            metrics.append(LocalImagingStudyFinding(label="Sampled values", value=str(len(values))))
+        return metrics
+
+    def _common_image_metrics(
+        self,
+        file_format: str,
+        payload: bytes,
+    ) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if file_format == "png":
+            return self._png_metrics(payload)
+        if file_format in {"jpg", "jpeg"}:
+            return self._jpeg_metrics(payload)
+        if file_format == "gif":
+            return self._gif_metrics(payload)
+        if file_format == "bmp":
+            return self._bmp_metrics(payload)
+        if file_format in {"tif", "tiff"}:
+            return self._tiff_metrics(payload)
+        return [], ["Image format is not supported by the local technical analyzer."]
+
+    @staticmethod
+    def _png_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if len(payload) < 29 or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+            return [], ["PNG header could not be read."]
+        width = int.from_bytes(payload[16:20], "big")
+        height = int.from_bytes(payload[20:24], "big")
+        bit_depth = payload[24]
+        color_type = payload[25]
+        return [
+            LocalImagingStudyFinding(label="Image dimensions", value=f"{width} x {height}"),
+            LocalImagingStudyFinding(label="Bit depth", value=str(bit_depth)),
+            LocalImagingStudyFinding(label="Color type", value=str(color_type)),
+        ], []
+
+    @staticmethod
+    def _gif_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if len(payload) < 10 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
+            return [], ["GIF header could not be read."]
+        width = int.from_bytes(payload[6:8], "little")
+        height = int.from_bytes(payload[8:10], "little")
+        return [LocalImagingStudyFinding(label="Image dimensions", value=f"{width} x {height}")], []
+
+    @staticmethod
+    def _bmp_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if len(payload) < 30 or not payload.startswith(b"BM"):
+            return [], ["BMP header could not be read."]
+        width = int.from_bytes(payload[18:22], "little", signed=True)
+        height = int.from_bytes(payload[22:26], "little", signed=True)
+        bits_per_pixel = int.from_bytes(payload[28:30], "little")
+        return [
+            LocalImagingStudyFinding(label="Image dimensions", value=f"{abs(width)} x {abs(height)}"),
+            LocalImagingStudyFinding(label="Bits per pixel", value=str(bits_per_pixel)),
+        ], []
+
+    @staticmethod
+    def _jpeg_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if len(payload) < 4 or not payload.startswith(b"\xff\xd8"):
+            return [], ["JPEG header could not be read."]
+        index = 2
+        while index + 9 < len(payload):
+            if payload[index] != 0xFF:
+                index += 1
+                continue
+            marker = payload[index + 1]
+            index += 2
+            if marker in {0xD8, 0xD9}:
+                continue
+            if index + 2 > len(payload):
+                break
+            segment_length = int.from_bytes(payload[index:index + 2], "big")
+            if segment_length < 2 or index + segment_length > len(payload):
+                break
+            if marker in {
+                0xC0,
+                0xC1,
+                0xC2,
+                0xC3,
+                0xC5,
+                0xC6,
+                0xC7,
+                0xC9,
+                0xCA,
+                0xCB,
+                0xCD,
+                0xCE,
+                0xCF,
+            }:
+                precision = payload[index + 2]
+                height = int.from_bytes(payload[index + 3:index + 5], "big")
+                width = int.from_bytes(payload[index + 5:index + 7], "big")
+                components = payload[index + 7]
+                return [
+                    LocalImagingStudyFinding(label="Image dimensions", value=f"{width} x {height}"),
+                    LocalImagingStudyFinding(label="Precision", value=str(precision)),
+                    LocalImagingStudyFinding(label="Color components", value=str(components)),
+                ], []
+            index += segment_length
+        return [], ["JPEG dimensions could not be read."]
+
+    @staticmethod
+    def _tiff_metrics(payload: bytes) -> tuple[list[LocalImagingStudyFinding], list[str]]:
+        if len(payload) < 8:
+            return [], ["TIFF header could not be read."]
+        if payload[:2] == b"II":
+            endian = "little"
+        elif payload[:2] == b"MM":
+            endian = "big"
+        else:
+            return [], ["TIFF byte order could not be read."]
+        if int.from_bytes(payload[2:4], endian) != 42:
+            return [], ["TIFF magic value could not be read."]
+        ifd_offset = int.from_bytes(payload[4:8], endian)
+        if ifd_offset + 2 > len(payload):
+            return [], ["TIFF image directory could not be read."]
+        entry_count = int.from_bytes(payload[ifd_offset:ifd_offset + 2], endian)
+        tags: dict[int, int] = {}
+        for index in range(entry_count):
+            entry_offset = ifd_offset + 2 + (index * 12)
+            if entry_offset + 12 > len(payload):
+                break
+            tag = int.from_bytes(payload[entry_offset:entry_offset + 2], endian)
+            field_type = int.from_bytes(payload[entry_offset + 2:entry_offset + 4], endian)
+            count = int.from_bytes(payload[entry_offset + 4:entry_offset + 8], endian)
+            raw_value = payload[entry_offset + 8:entry_offset + 12]
+            if field_type == 3 and count == 1:
+                tags[tag] = int.from_bytes(raw_value[:2], endian)
+            elif field_type == 4 and count == 1:
+                tags[tag] = int.from_bytes(raw_value, endian)
+        width = tags.get(256)
+        height = tags.get(257)
+        metrics: list[LocalImagingStudyFinding] = []
+        if width and height:
+            metrics.append(LocalImagingStudyFinding(label="Image dimensions", value=f"{width} x {height}"))
+        if 258 in tags:
+            metrics.append(LocalImagingStudyFinding(label="Bits per sample", value=str(tags[258])))
+        if metrics:
+            return metrics, []
+        return [], ["TIFF dimensions could not be read."]
 
     def _study_findings(
         self,
@@ -1028,6 +1477,21 @@ class LocalImagingImporter:
                 return "Local image assets are previewable and registered for backend-side analysis summary."
             return "Local image assets are registered for backend-side analysis summary."
         return "Local imaging assets are registered in private storage."
+
+    @staticmethod
+    def _dimension_product(dimensions: list[int]) -> int:
+        total = 1
+        for dimension in dimensions:
+            if dimension <= 0:
+                return 0
+            total *= dimension
+        return total if dimensions else 0
+
+    @staticmethod
+    def _format_number(value: float) -> str:
+        if abs(value - round(value)) < 1e-6:
+            return str(int(round(value)))
+        return f"{value:.3f}".rstrip("0").rstrip(".")
 
     @staticmethod
     def _human_size(size_bytes: int) -> str:

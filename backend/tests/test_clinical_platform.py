@@ -397,6 +397,25 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert png_preview.headers["content-type"].startswith("image/png")
     assert png_preview.content.startswith(b"\x89PNG\r\n\x1a\n")
 
+    analysis_response = client.get(
+        f"/api/local-imaging/studies/{imported['studyInstanceUID']}/analysis",
+    )
+    assert analysis_response.status_code == 200
+    analysis_payload = analysis_response.json()
+    assert analysis_payload["studyInstanceUID"] == imported["studyInstanceUID"]
+    assert "backend technical checks" in analysis_payload["summary"]
+    nifti_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "nifti")
+    nifti_metrics = {metric["label"]: metric["value"] for metric in nifti_analysis["metrics"]}
+    assert nifti_metrics["Volume dimensions"] == "2 x 3 x 4"
+    assert nifti_metrics["Voxel count"] == "24"
+    assert nifti_metrics["Intensity range"] == "0 to 23"
+    assert nifti_metrics["Mean intensity"] == "11.5"
+
+    png_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "png")
+    png_metrics = {metric["label"]: metric["value"] for metric in png_analysis["metrics"]}
+    assert png_metrics["Image dimensions"] == "1 x 1"
+    assert png_metrics["Bit depth"] == "8"
+
 
 def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
     monkeypatch,
@@ -504,6 +523,15 @@ def test_local_dicomweb_serves_imported_dicom_metadata_and_frame(
     assert instance_response.status_code == 200
     assert instance_response.headers["content-type"].startswith("multipart/related")
     assert b"DICM" in instance_response.content
+
+    analysis_response = client.get(f"/api/local-imaging/studies/{study_uid}/analysis")
+    assert analysis_response.status_code == 200
+    analysis_payload = analysis_response.json()
+    dicom_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "dicom")
+    dicom_metrics = {metric["label"]: metric["value"] for metric in dicom_analysis["metrics"]}
+    assert dicom_metrics["Frame dimensions"] == "2 x 2"
+    assert dicom_metrics["Intensity range"] == "0 to 3"
+    assert dicom_metrics["Mean intensity"] == "1.5"
 
 
 def test_imaging_launch_returns_opaque_token_and_viewer_url_without_phi_in_url() -> None:

@@ -84,6 +84,7 @@ try:
         DerivedResultRequest,
         ImagingLaunchRequest,
         LocalImagingImportResponse,
+        LocalImagingStudyAnalysisResponse,
         LocalImagingStudyAssetsResponse,
         LocalLoginRequest,
         ReportDraftRequest,
@@ -111,6 +112,7 @@ except ModuleNotFoundError:
         DerivedResultRequest,
         ImagingLaunchRequest,
         LocalImagingImportResponse,
+        LocalImagingStudyAnalysisResponse,
         LocalImagingStudyAssetsResponse,
         LocalLoginRequest,
         ReportDraftRequest,
@@ -594,6 +596,18 @@ async def get_local_imaging_study_assets(
         raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
     _require_session(http_request)
     return local_imaging_importer.study_assets(study_uid)
+
+
+@app.get("/api/local-imaging/studies/{study_uid}/analysis")
+async def get_local_imaging_study_analysis(
+    study_uid: str,
+    http_request: Request,
+) -> LocalImagingStudyAnalysisResponse:
+    """Return deterministic backend-side technical analysis for an imported local study."""
+    if not settings.local_imaging_enabled:
+        raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
+    _require_session(http_request)
+    return local_imaging_importer.study_analysis(study_uid)
 
 
 @app.get("/api/local-imaging/studies/{study_uid}/assets/{asset_id}/preview")

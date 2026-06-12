@@ -300,6 +300,23 @@ class LocalImagingStudyAssetsResponse(ClinicalModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class LocalImagingAssetAnalysis(ClinicalModel):
+    asset_id: str = Field(alias="assetId")
+    relative_path: str = Field(alias="relativePath")
+    format: str
+    summary: str
+    metrics: list[LocalImagingStudyFinding] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LocalImagingStudyAnalysisResponse(ClinicalModel):
+    study_instance_uid: str = Field(alias="studyInstanceUID")
+    analyzed_at: str = Field(alias="analyzedAt")
+    summary: str
+    analyses: list[LocalImagingAssetAnalysis] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ReportDraftRequest(ClinicalModel):
     report_id: str | None = None
     study_instance_uid: str = Field(alias="studyInstanceUID")

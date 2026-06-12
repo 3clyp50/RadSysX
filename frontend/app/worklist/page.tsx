@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload, X } from "lucide-react";
+import { Activity, FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Upload, X } from "lucide-react";
 
 import { clinicalApi, resolveClinicalApiUrl } from "@/lib/clinical/client";
 import type {
   ClinicalPlatformConfig,
+  LocalImagingStudyAnalysisResponse,
   LocalImagingStudyAssetsResponse,
   SessionClaims,
   WorklistRow,
@@ -53,7 +54,9 @@ export default function WorklistPage() {
   const [importing, setImporting] = useState(false);
   const [launchingStudyUid, setLaunchingStudyUid] = useState<string | null>(null);
   const [inspectingStudyUid, setInspectingStudyUid] = useState<string | null>(null);
+  const [analyzingStudyUid, setAnalyzingStudyUid] = useState<string | null>(null);
   const [localStudyAssets, setLocalStudyAssets] = useState<LocalImagingStudyAssetsResponse | null>(null);
+  const [localStudyAnalysis, setLocalStudyAnalysis] = useState<LocalImagingStudyAnalysisResponse | null>(null);
 
   const directoryInputProps = {
     directory: "",
@@ -120,6 +123,7 @@ export default function WorklistPage() {
   const handleInspectLocalStudy = async (row: WorklistRow) => {
     setInspectingStudyUid(row.studyInstanceUID);
     setError(null);
+    setLocalStudyAnalysis(null);
     try {
       const assets = await clinicalApi.getLocalImagingStudyAssets(row.studyInstanceUID);
       setLocalStudyAssets(assets);
@@ -127,6 +131,19 @@ export default function WorklistPage() {
       setError(cause instanceof Error ? cause.message : "Unable to inspect local imaging files.");
     } finally {
       setInspectingStudyUid(null);
+    }
+  };
+
+  const handleAnalyzeLocalStudy = async (studyInstanceUID: string) => {
+    setAnalyzingStudyUid(studyInstanceUID);
+    setError(null);
+    try {
+      const analysis = await clinicalApi.getLocalImagingStudyAnalysis(studyInstanceUID);
+      setLocalStudyAnalysis(analysis);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to analyze local imaging files.");
+    } finally {
+      setAnalyzingStudyUid(null);
     }
   };
 
@@ -140,6 +157,7 @@ export default function WorklistPage() {
     setImportMessage(null);
     setImportWarnings([]);
     setLocalStudyAssets(null);
+    setLocalStudyAnalysis(null);
 
     try {
       const response = await clinicalApi.importLocalImaging(files);
@@ -315,14 +333,32 @@ export default function WorklistPage() {
                   </div>
                   <div className="mt-1 text-sm text-slate-300">{localStudyAssets.summary}</div>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Close local study assets"
-                  onClick={() => setLocalStudyAssets(null)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 text-slate-300 transition hover:border-cyan-400/50 hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleAnalyzeLocalStudy(localStudyAssets.studyInstanceUID)}
+                    className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
+                    disabled={analyzingStudyUid === localStudyAssets.studyInstanceUID}
+                  >
+                    {analyzingStudyUid === localStudyAssets.studyInstanceUID ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Activity className="h-4 w-4" />
+                    )}
+                    Analyze
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Close local study assets"
+                    onClick={() => {
+                      setLocalStudyAssets(null);
+                      setLocalStudyAnalysis(null);
+                    }}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 text-slate-300 transition hover:border-cyan-400/50 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               {localStudyAssets.warnings.length > 0 && (
@@ -378,6 +414,62 @@ export default function WorklistPage() {
                   </div>
                 ))}
               </div>
+
+              {localStudyAnalysis && (
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-cyan-300/70">
+                      <Activity className="h-4 w-4" />
+                      Local analysis
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {new Date(localStudyAnalysis.analyzedAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-sm text-slate-300">{localStudyAnalysis.summary}</div>
+                  {localStudyAnalysis.warnings.length > 0 && (
+                    <div className="mt-2 text-xs text-amber-200">
+                      {localStudyAnalysis.warnings.join(" ")}
+                    </div>
+                  )}
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {localStudyAnalysis.analyses.map((analysis) => (
+                      <div
+                        key={analysis.assetId}
+                        className="rounded-lg border border-slate-800 bg-slate-900/60 p-3"
+                      >
+                        <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                          {analysis.format}
+                        </div>
+                        <div className="mt-1 break-all text-sm font-medium text-white">
+                          {analysis.relativePath}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-300">{analysis.summary}</div>
+                        {analysis.warnings.length > 0 && (
+                          <div className="mt-2 text-xs text-amber-200">
+                            {analysis.warnings.join(" ")}
+                          </div>
+                        )}
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {analysis.metrics.map((metric) => (
+                            <div
+                              key={`${analysis.assetId}-${metric.label}-${metric.value}`}
+                              className="rounded-md border border-slate-800 bg-slate-950/70 px-3 py-2"
+                            >
+                              <div className="text-xs uppercase tracking-[0.12em] text-slate-500">
+                                {metric.label}
+                              </div>
+                              <div className="mt-1 break-words text-sm text-slate-100">
+                                {metric.value}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

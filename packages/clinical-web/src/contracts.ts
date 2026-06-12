@@ -126,6 +126,23 @@ export type LocalImagingStudyAssetsResponse = {
   warnings: string[];
 };
 
+export type LocalImagingAssetAnalysis = {
+  assetId: string;
+  relativePath: string;
+  format: string;
+  summary: string;
+  metrics: LocalImagingStudyFinding[];
+  warnings: string[];
+};
+
+export type LocalImagingStudyAnalysisResponse = {
+  studyInstanceUID: string;
+  analyzedAt: string;
+  summary: string;
+  analyses: LocalImagingAssetAnalysis[];
+  warnings: string[];
+};
+
 export type ViewerRuntime = {
   viewerKind: string;
   viewerBasePath: string;

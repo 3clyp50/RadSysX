@@ -23,7 +23,7 @@
 - When `RADSYSX_DESKTOP_DICOMWEB_TARGET` is unset, the desktop bridge routes `/dicom-web` to the backend's local DICOMweb endpoints for imported DICOM studies.
 - `preload.cjs` exposes only narrow desktop helpers, including the native local imaging file/folder picker; do not expose raw filesystem or shell primitives to the renderer.
 - `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` enables the local `/_radsysx/desktop/shutdown` endpoint for smoke tests only; do not enable it for normal desktop runs.
-- `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/image import, asset summaries, local previews, DICOMweb discovery, and opaque launch without Docker.
+- `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/image import, asset summaries, local previews, backend technical analysis, DICOMweb discovery, and opaque launch without Docker.
 
 ## Work Guidance
 

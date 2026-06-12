@@ -299,6 +299,38 @@ async function runImportSmoke(publicBaseUrl) {
   );
   assert(imagePreview.buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "PNG preview did not return PNG bytes.");
 
+  const dicomAnalysis = await getJson(
+    `${publicBaseUrl}/api/local-imaging/studies/${encodeURIComponent(dicomSummary.studyInstanceUID)}/analysis`,
+    cookie,
+  );
+  const dicomAssetAnalysis = dicomAnalysis.analyses.find((analysis) => analysis.format === "dicom");
+  assert(dicomAssetAnalysis, "DICOM technical analysis was not returned.");
+  assert(
+    dicomAssetAnalysis.metrics.some((metric) => metric.label === "Intensity range" && metric.value === "0 to 3"),
+    "DICOM intensity range was not analyzed.",
+  );
+
+  const niftiAnalysis = await getJson(
+    `${publicBaseUrl}/api/local-imaging/studies/${encodeURIComponent(niftiSummary.studyInstanceUID)}/analysis`,
+    cookie,
+  );
+  const niftiAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "nifti");
+  assert(niftiAssetAnalysis, "NIFTI technical analysis was not returned.");
+  assert(
+    niftiAssetAnalysis.metrics.some((metric) => metric.label === "Voxel count" && metric.value === "24"),
+    "NIFTI voxel count was not analyzed.",
+  );
+  assert(
+    niftiAssetAnalysis.metrics.some((metric) => metric.label === "Mean intensity" && metric.value === "11.5"),
+    "NIFTI mean intensity was not analyzed.",
+  );
+  const imageAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "png");
+  assert(imageAssetAnalysis, "PNG technical analysis was not returned.");
+  assert(
+    imageAssetAnalysis.metrics.some((metric) => metric.label === "Image dimensions" && metric.value === "1 x 1"),
+    "PNG dimensions were not analyzed.",
+  );
+
   const launch = await postJson(
     `${publicBaseUrl}/api/imaging/launch`,
     cookie,
@@ -322,6 +354,11 @@ async function runImportSmoke(publicBaseUrl) {
       formats: summary.formats,
       assetCount: summary.assets.length,
       findings: summary.findings,
+    })),
+    analyses: [dicomAnalysis, niftiAnalysis].map((analysis) => ({
+      studyInstanceUID: analysis.studyInstanceUID,
+      assetCount: analysis.analyses.length,
+      summary: analysis.summary,
     })),
   };
 }

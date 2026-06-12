@@ -11,6 +11,7 @@ import type {
   ImagingLaunchResolveResponse,
   ImagingLaunchResponse,
   LocalImagingImportResponse,
+  LocalImagingStudyAnalysisResponse,
   LocalImagingStudyAssetsResponse,
   LocalLoginRequest,
   LocalLoginResponse,
@@ -113,6 +114,14 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
     getLocalImagingStudyAssets(studyInstanceUID: string): Promise<LocalImagingStudyAssetsResponse> {
       return requestJson(
         `/api/local-imaging/studies/${encodeURIComponent(studyInstanceUID)}/assets`,
+        undefined,
+        options,
+      );
+    },
+
+    getLocalImagingStudyAnalysis(studyInstanceUID: string): Promise<LocalImagingStudyAnalysisResponse> {
+      return requestJson(
+        `/api/local-imaging/studies/${encodeURIComponent(studyInstanceUID)}/analysis`,
         undefined,
         options,
       );
