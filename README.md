@@ -14,7 +14,7 @@ RadSysX is a medical imaging and analysis platform with two distinct product sur
 - `research`: the experimentation surface for prototype workflows, a LangGraph/deepagents-based multi-agent stack, MCP/FHIR integrations, and imaging/AI exploration that is explicitly not the clinical source of truth.
 
 The two surfaces are not interchangeable.
-The repo also includes an Electron desktop fast path that opens directly into an OHIF local-start screen and runs the local clinical shell without the Docker/nginx/Orthanc composition required for full governed archive validation.
+The repo also includes an Electron desktop fast path that opens directly into OHIF local DICOM mode and runs the local clinical shell without the Docker/nginx/Orthanc composition required for full governed archive validation.
 
 ## Platform Overview
 
@@ -260,13 +260,13 @@ On a fresh clone, the shortest local path is:
 npm run desktop
 ```
 
-`desktop` is the user-facing local launcher. It checks the desktop bootstrap, runs the cross-platform bootstrap helper if setup is incomplete, then opens Electron directly to the OHIF local-start screen. The lower-level `desktop:bootstrap` helper creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop -- --check-only` or `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. Use `npm run desktop:run` only when you intentionally want the direct Electron run after setup is already known good.
+`desktop` is the user-facing local launcher. It checks the desktop bootstrap, runs the cross-platform bootstrap helper if setup is incomplete, then opens Electron directly to OHIF's local DICOM loader at `/viewer/local`. The lower-level `desktop:bootstrap` helper creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop -- --check-only` or `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. Use `npm run desktop:run` only when you intentionally want the direct Electron run after setup is already known good.
 
 The desktop runtime, bootstrap, doctor, and smoke helpers resolve the repo-local Python venv using the host OS path convention: `.venv/bin/python` on Unix-like systems and `.venv/Scripts/python.exe` on Windows. Set `RADSYSX_DESKTOP_PYTHON=/path/to/python` when you need to force a specific interpreter.
 
 This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/NRRD `.nrrd`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, NRRD header/voxel metrics, deterministic technical analysis, opaque launch/session resolution, OHIF rendering of imported DICOM from the first screen, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
-By default Electron starts at `/viewer/?local=1`, strips that helper query from the visible URL, and shows a compact OHIF local import screen with `Open local study` as the focused primary action plus first-screen drag/drop. DICOM imports auto-open in OHIF through the governed launch contract. Non-DICOM-only imports fall back to the worklist's local asset inspection panel.
+By default Electron starts at `/viewer/local`, so the first visible screen is OHIF's native local DICOM loader. DICOM files load directly through OHIF's `dicomlocal` data source at `/viewer/dicomlocal` without a governed launch token or clinical workspace panel. NIFTI/NRRD/image/ZIP assets remain available through the local worklist inspection and analysis path.
 
 The desktop launcher builds the frontend production shell on first launch, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the same-origin public API/viewer settings match. This keeps the local app from rebuilding just because it chooses a fallback localhost port. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
 
@@ -280,7 +280,7 @@ For a quick launcher contract check:
 npm run desktop:smoke:launch
 ```
 
-That smoke runs the same user-facing launcher path as `npm run desktop`: bootstrap check first, then service-ready Electron startup with the OHIF-first default retained, using a short cross-platform auto-shutdown timer. The `desktop:smoke:local-start` check is the UI assertion that samples `/viewer/`, the local import card, and imported-DICOM OHIF rendering.
+That smoke runs the same user-facing launcher path as `npm run desktop`: bootstrap check first, then service-ready Electron startup with the OHIF-first default retained, using a short cross-platform auto-shutdown timer. The `desktop:smoke:local-start` check is the UI assertion that samples `/viewer/local`, confirms there is no RadSysX intermediate card or governed launch, and verifies local-DICOM OHIF rendering.
 
 For a quick startup and cleanup check:
 
@@ -294,7 +294,7 @@ For the first-screen OHIF local import/render check:
 npm run desktop:smoke:local-start
 ```
 
-That smoke starts Electron on the OHIF local-start screen, verifies the `Open local study` primary action, imports synthetic local files through it, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
+That smoke starts Electron on `/viewer/local`, verifies OHIF's local file/folder controls are visible without a RadSysX bootstrap card, loads a synthetic DICOM through OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, and asserts that OHIF paints a nonblank canvas without a governed launch.
 
 For the first-screen OHIF drag/drop import/render check:
 
@@ -302,7 +302,7 @@ For the first-screen OHIF drag/drop import/render check:
 npm run desktop:smoke:local-start-drop
 ```
 
-That smoke starts Electron on the same OHIF local-start screen, drops synthetic local files directly onto the local-start panel, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
+That smoke starts Electron on the same OHIF local screen, drops a synthetic DICOM directly onto it, forwards the drop into OHIF's local file input, routes to `/viewer/dicomlocal?datasources=dicomlocal`, and asserts that OHIF paints a nonblank canvas without a governed launch.
 
 For the first-screen NIFTI/NRRD/image-only fallback check:
 
@@ -310,7 +310,7 @@ For the first-screen NIFTI/NRRD/image-only fallback check:
 npm run desktop:smoke:local-start-nondicom
 ```
 
-That smoke starts from the same OHIF local-start screen, imports only NIFTI/NRRD/image/ZIP fixtures, verifies the app falls back to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI slice axis, and runs backend technical analysis without exposing an OHIF viewer action for non-DICOM assets.
+That smoke starts from the same OHIF local screen, then verifies NIFTI/NRRD/image/ZIP fixtures remain usable through `/worklist` local asset inspection, preview loading, NIFTI slice-axis switching, and backend technical analysis without exposing an OHIF viewer action for non-DICOM assets.
 
 For a stronger no-Docker import/use check:
 
@@ -466,7 +466,7 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 
 On the new Linux host, the first useful runtime checkpoint is:
 
-1. run `npm run desktop` and confirm the app opens straight into OHIF local-start
+1. run `npm run desktop` and confirm the app opens straight into OHIF local mode at `/viewer/local`
 2. run `npm run desktop -- --check-only`, `npm run desktop:doctor`, `npm run desktop:smoke:launch`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:local-start-drop`, `npm run desktop:smoke:local-start-nondicom`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, `npm run desktop:smoke:picker-many-import`, and `npm run desktop:smoke:viewer-launch`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux

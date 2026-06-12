@@ -18,7 +18,6 @@ const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP
 const manyDicomCount = 32;
 const smokeMode = resolveSmokeMode();
 const pickerSmokeModes = new Set([
-  "local-start",
   "local-start-nondicom",
   "picker-files",
   "picker-folder",
@@ -534,38 +533,76 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
 }
 
 async function runLocalStartSmoke(cdp, publicBaseUrl) {
-  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
-  await clickLocalStartImportFiles(cdp);
+  const localViewerState = await waitForStandaloneLocalViewer(cdp, publicBaseUrl);
+  const importState = await evaluateInRenderer(
+    cdp,
+    `(${loadOhifLocalDicomInputInRenderer.toString()})(${JSON.stringify(readDicomFixturePayloads())})`,
+    30000,
+  );
 
-  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
+  const viewerState = await verifyStandaloneLocalDicomViewer(cdp);
   return {
-    importPath: "local-start",
-    localStartState,
-    viewerLaunch,
+    importPath: "ohif-local-input",
+    localViewerState,
+    importState,
+    viewerState,
   };
 }
 
 async function runLocalStartDropSmoke(cdp, publicBaseUrl) {
-  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
+  const localViewerState = await waitForStandaloneLocalViewer(cdp, publicBaseUrl);
   const dropState = await evaluateInRenderer(
     cdp,
-    `(${dispatchLocalStartDropInRenderer.toString()})(${JSON.stringify(readFixturePayloads())})`,
+    `(${dispatchOhifLocalDicomDropInRenderer.toString()})(${JSON.stringify(readDicomFixturePayloads())})`,
     30000,
   );
 
-  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
+  const viewerState = await verifyStandaloneLocalDicomViewer(cdp);
   return {
-    importPath: "local-start-drop",
-    localStartState,
+    importPath: "ohif-local-drop",
+    localViewerState,
     dropState,
-    viewerLaunch,
+    viewerState,
   };
 }
 
 async function runLocalStartNonDicomSmoke(cdp, publicBaseUrl) {
-  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
-  await clickLocalStartImportFiles(cdp);
+  const localViewerState = await waitForStandaloneLocalViewer(cdp, publicBaseUrl);
+  await evaluateInRenderer(
+    cdp,
+    `fetch("/api/auth/local-login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username: "demo-radiologist" })
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      window.location.assign("/worklist");
+      return response.status;
+    })`,
+    30000,
+  );
 
+  await waitForRendererCondition(
+    cdp,
+    `window.location.pathname === "/worklist" &&
+      Boolean(document.querySelector('[data-testid="local-import-panel"]'))`,
+    "local-start non-DICOM worklist import panel",
+    90000,
+  );
+  await evaluateInRenderer(cdp, `(${clickWorklistImportFilesInRenderer.toString()})()`, 30000);
+  await waitForRendererCondition(
+    cdp,
+    `window.location.pathname === "/worklist" &&
+      Array.from(document.querySelectorAll('[data-testid="worklist-row"]'))
+        .some((row) => row.innerText.includes("Local NIFTI import") &&
+          Boolean(row.querySelector('[data-testid="inspect-local-study"]')))`,
+    "local-start non-DICOM worklist row",
+    90000,
+  );
+  await evaluateInRenderer(cdp, `(${clickLocalNiftiInspectInRenderer.toString()})()`, 30000);
   await waitForRendererCondition(
     cdp,
     `window.location.pathname === "/worklist" &&
@@ -581,71 +618,65 @@ async function runLocalStartNonDicomSmoke(cdp, publicBaseUrl) {
   );
 
   return {
-    importPath: "local-start-nondicom",
-    localStartState,
+    importPath: "ohif-local-to-worklist-nondicom",
+    localViewerState,
     inspection,
   };
 }
 
-async function waitForLocalStartScreen(cdp, publicBaseUrl) {
+async function waitForStandaloneLocalViewer(cdp, publicBaseUrl) {
   await waitForRendererCondition(
     cdp,
     `window.location.origin === ${JSON.stringify(publicBaseUrl)} &&
-      window.location.pathname.startsWith("/viewer") &&
-      window.__RADSYSX_LOCAL_START_READY__ === true &&
-      Boolean(document.querySelector('[data-testid="radsysx-local-import-files"]'))`,
-    "desktop OHIF local start screen",
+      window.location.pathname === "/viewer/local" &&
+      window.__RADSYSX_LOCAL_VIEWER_READY__ === true &&
+      !document.getElementById("radsysx-loader") &&
+      document.body.innerText.includes("Drag and drop your DICOM files")`,
+    "desktop standalone OHIF local viewer",
     90000,
   );
 
-  const localStartState = await evaluateInRenderer(
+  const localViewerState = await evaluateInRenderer(
     cdp,
     `(() => ({
       href: window.location.href,
       pathname: window.location.pathname,
       localQueryPresent: new URL(window.location.href).searchParams.has("local"),
-      loaderState: document.getElementById("radsysx-loader")?.dataset?.state ?? null,
-      title: document.querySelector("[data-role='title']")?.textContent ?? null,
-      body: document.querySelector("[data-role='body']")?.textContent ?? null,
-      filesButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-files"]')),
-      folderButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-folder"]')),
-      primaryLabel: document.querySelector('[data-testid="radsysx-local-import-files"]')?.textContent?.trim() ?? null,
-      secondaryLabel: document.querySelector('[data-testid="radsysx-local-import-folder"]')?.textContent?.trim() ?? null,
-      primaryFocused: document.activeElement === document.querySelector('[data-testid="radsysx-local-import-files"]')
+      loaderPresent: Boolean(document.getElementById("radsysx-loader")),
+      localViewerReady: window.__RADSYSX_LOCAL_VIEWER_READY__ === true,
+      localViewer: window.__RADSYSX_LOCAL_VIEWER__ === true,
+      launchPresent: Boolean(window.__RADSYSX_LAUNCH__),
+      localStartCardPresent: Boolean(document.querySelector('[data-testid="radsysx-local-start-card"]')),
+      loadFilesPresent: Array.from(document.querySelectorAll("button"))
+        .some((button) => button.innerText.trim() === "Load files"),
+      loadFoldersPresent: Array.from(document.querySelectorAll("button"))
+        .some((button) => button.innerText.trim() === "Load folders"),
+      bodyText: document.body.innerText.slice(0, 800)
     }))()`,
     30000,
   );
 
-  if (localStartState.localQueryPresent) {
-    throw new Error(`Local start query was not stripped from the visible viewer URL: ${localStartState.href}`);
+  if (localViewerState.localQueryPresent) {
+    throw new Error(`Local query was not stripped from the visible viewer URL: ${localViewerState.href}`);
   }
-  if (localStartState.loaderState !== "local-start") {
-    throw new Error(`Desktop local start did not settle into the import-ready state: ${localStartState.loaderState}`);
+  if (localViewerState.loaderPresent || localViewerState.localStartCardPresent) {
+    throw new Error(`Desktop local viewer is still blocked by an intermediate overlay: ${JSON.stringify(localViewerState)}`);
   }
-  if (localStartState.title !== "Open a local study" || localStartState.primaryLabel !== "Open local study") {
+  if (!localViewerState.localViewerReady || !localViewerState.localViewer) {
     throw new Error(
-      `Desktop local start did not present the single primary local path: ${JSON.stringify(localStartState)}`,
+      `Desktop local viewer did not expose standalone OHIF local state: ${JSON.stringify(localViewerState)}`,
     );
   }
-  return localStartState;
+  if (localViewerState.launchPresent) {
+    throw new Error(`Desktop local viewer unexpectedly created a governed launch: ${JSON.stringify(localViewerState)}`);
+  }
+  if (!localViewerState.loadFilesPresent || !localViewerState.loadFoldersPresent) {
+    throw new Error(`Desktop local viewer did not show OHIF local loading controls: ${JSON.stringify(localViewerState)}`);
+  }
+  return localViewerState;
 }
 
-async function clickLocalStartImportFiles(cdp) {
-  await evaluateInRenderer(
-    cdp,
-    `(() => {
-      const button = document.querySelector('[data-testid="radsysx-local-import-files"]');
-      if (!button) {
-        throw new Error("Desktop OHIF local start primary local-study button was missing.");
-      }
-      button.click();
-      return true;
-    })()`,
-    30000,
-  );
-}
-
-function dispatchLocalStartDropInRenderer(fixtures) {
+function loadOhifLocalDicomInputInRenderer(fixtures) {
   const makeFile = (payload) => {
     const binary = atob(payload.base64);
     const bytes = new Uint8Array(binary.length);
@@ -660,31 +691,156 @@ function dispatchLocalStartDropInRenderer(fixtures) {
     return file;
   };
 
-  const card = document.querySelector('[data-testid="radsysx-local-start-card"]');
-  if (!card) {
-    throw new Error("Desktop OHIF local start drop target was missing.");
+  const input = Array.from(document.querySelectorAll('input[type="file"]'))
+    .find((candidate) => !candidate.webkitdirectory);
+  if (!input) {
+    throw new Error("OHIF local file input was missing.");
   }
+
   const transfer = new DataTransfer();
   for (const payload of fixtures) {
     transfer.items.add(makeFile(payload));
   }
 
-  card.dispatchEvent(new DragEvent("dragenter", {
-    bubbles: true,
-    cancelable: true,
-    dataTransfer: transfer,
-  }));
-  const draggingSeen = card.dataset.dragging === "true";
-  card.dispatchEvent(new DragEvent("drop", {
-    bubbles: true,
-    cancelable: true,
-    dataTransfer: transfer,
-  }));
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: transfer.files,
+  });
+  input.dispatchEvent(new Event("change", { bubbles: true }));
 
   return {
-    draggingSeen,
     fileCount: transfer.files.length,
-    status: document.querySelector('[data-testid="radsysx-local-import-status"]')?.textContent ?? null,
+    inputCount: document.querySelectorAll('input[type="file"]').length,
+    bodyText: document.body.innerText.slice(0, 500),
+  };
+}
+
+function dispatchOhifLocalDicomDropInRenderer(fixtures) {
+  const makeFile = (payload) => {
+    const binary = atob(payload.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const file = new File([bytes], payload.name, { type: payload.type });
+    Object.defineProperty(file, "radsysxRelativePath", {
+      configurable: true,
+      value: payload.relativePath,
+    });
+    return file;
+  };
+
+  const dropTarget = Array.from(document.querySelectorAll("div"))
+    .find((candidate) => candidate.innerText?.includes("Drag and drop your DICOM files"));
+  if (!dropTarget) {
+    throw new Error("OHIF local DICOM drop target was missing.");
+  }
+  const targets = [];
+  for (let node = dropTarget; node; node = node.parentElement) {
+    targets.push(node);
+    if (node === document.body) {
+      break;
+    }
+  }
+
+  const transfer = new DataTransfer();
+  for (const payload of fixtures) {
+    transfer.items.add(makeFile(payload));
+  }
+  transfer.dropEffect = "copy";
+  transfer.effectAllowed = "copy";
+
+  for (const target of targets) {
+    target.dispatchEvent(new DragEvent("dragenter", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    }));
+    target.dispatchEvent(new DragEvent("dragover", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    }));
+    target.dispatchEvent(new DragEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    }));
+  }
+
+  return {
+    fileCount: transfer.files.length,
+    targetCount: targets.length,
+    targetText: dropTarget.innerText.slice(0, 500),
+  };
+}
+
+function clickWorklistImportFilesInRenderer() {
+  const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
+  const importPanel = document.querySelector('[data-testid="local-import-panel"]');
+  if (!importPanel) {
+    throw new Error("Worklist local import panel was missing.");
+  }
+  const button = Array.from(importPanel.querySelectorAll("button"))
+    .find((candidate) => textMatches(candidate.innerText, "Import files"));
+  if (!button) {
+    throw new Error("Worklist Import files button was missing.");
+  }
+  button.click();
+  return true;
+}
+
+function clickLocalNiftiInspectInRenderer() {
+  const row = Array.from(document.querySelectorAll('[data-testid="worklist-row"]'))
+    .find((candidate) => candidate.innerText.includes("Local NIFTI import"));
+  const button = row?.querySelector('[data-testid="inspect-local-study"]');
+  if (!button) {
+    throw new Error("Local NIFTI inspect action was missing.");
+  }
+  button.click();
+  return true;
+}
+
+async function verifyStandaloneLocalDicomViewer(cdp) {
+  await waitForRendererCondition(
+    cdp,
+    `window.location.pathname === "/viewer/dicomlocal" &&
+      new URL(window.location.href).searchParams.has("StudyInstanceUIDs") &&
+      window.__RADSYSX_LOCAL_VIEWER__ === true &&
+      !window.__RADSYSX_LAUNCH__ &&
+      !document.getElementById("radsysx-loader")`,
+    "standalone OHIF local DICOM viewer",
+    90000,
+  );
+
+  const viewerState = await evaluateInRenderer(
+    cdp,
+    `(() => ({
+      href: window.location.href,
+      pathname: window.location.pathname,
+      studyInstanceUIDs: new URL(window.location.href).searchParams.getAll("StudyInstanceUIDs"),
+      datasources: new URL(window.location.href).searchParams.get("datasources"),
+      localViewer: window.__RADSYSX_LOCAL_VIEWER__ === true,
+      localViewerReady: window.__RADSYSX_LOCAL_VIEWER_READY__ === true,
+      launchPresent: Boolean(window.__RADSYSX_LAUNCH__),
+      loaderPresent: Boolean(document.getElementById("radsysx-loader")),
+      workspacePanelPresent: Boolean(document.querySelector("radsysx-workspace-panel")),
+      workspaceUnavailableTextSeen: document.body.innerText.includes("Viewer launch context is unavailable")
+    }))()`,
+    30000,
+  );
+
+  if (viewerState.launchPresent || viewerState.loaderPresent || viewerState.workspacePanelPresent) {
+    throw new Error(`Standalone local viewer retained governed UI state: ${JSON.stringify(viewerState)}`);
+  }
+  if (viewerState.workspaceUnavailableTextSeen) {
+    throw new Error("Standalone local viewer showed governed workspace-unavailable copy.");
+  }
+
+  const renderProbe = await waitForViewerRenderProbe(cdp);
+  return {
+    ...viewerState,
+    renderProbe,
   };
 }
 
@@ -1066,7 +1222,7 @@ function pickerTestPathsForSmokeMode() {
     ].map((name) => path.join(fixtureRoot, name));
   }
 
-  if (smokeMode !== "picker-files" && smokeMode !== "local-start") {
+  if (smokeMode !== "picker-files") {
     return [fixtureRoot];
   }
 
@@ -1104,6 +1260,10 @@ function readFixturePayloads() {
     relativePath,
     type,
   }));
+}
+
+function readDicomFixturePayloads() {
+  return readFixturePayloads().filter((payload) => payload.name === "SCAN1DCM");
 }
 
 async function waitForDebugTarget(debugPort) {

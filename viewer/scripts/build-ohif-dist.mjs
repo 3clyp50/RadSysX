@@ -135,6 +135,13 @@ function writeAppConfig() {
           singlepart: "bulkdata,video",
         },
       },
+      {
+        namespace: "@ohif/extension-default.dataSourcesModule.dicomlocal",
+        sourceName: "dicomlocal",
+        configuration: {
+          friendlyName: "Local DICOM files",
+        },
+      },
     ],
   };
 })();
@@ -150,6 +157,10 @@ function patchIndexHtml() {
     "window.__RADSYSX_VIEWER_BASE_PATH__ = (function resolveViewerBasePath() {",
     "  const pathname = String((window.location && window.location.pathname) || '/');",
     "  const safePath = ('/' + pathname.replace(/^\\/+/, '')).replace(/\\/+$/, '');",
+    "  const parts = safePath.split('/').filter(Boolean);",
+    "  if (parts[0] === 'viewer') {",
+    "    return '/viewer';",
+    "  }",
     "  const basePath = /\\/[^/]+\\.[^/]+$/.test(safePath) ? safePath.replace(/\\/[^/]+$/, '') : safePath;",
     "  const normalized = basePath || '/';",
     "  return normalized || '/';",

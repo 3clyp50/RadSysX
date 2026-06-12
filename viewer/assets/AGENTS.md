@@ -10,8 +10,9 @@
 
 ## Local Contracts
 
-- Bootstrap must require a governed launch session, resolve it through `/api/imaging/launch/resolve`, and strip sensitive launch query parameters.
-- The only no-launch exception is Electron local start: `/viewer/?local=1` may show the OHIF local-start import screen when `window.radsysxDesktop.importLocalImaging` exists. That path must present `Open local study` as the primary action, also accept first-screen drag/drop imports through the backend local imaging contract with relative paths preserved, auto-establish only the seeded local session, launch imported DICOM through `POST /api/imaging/launch`, and route non-DICOM local imports, including NIFTI/NRRD/image assets, to `/worklist` inspection.
+- Bootstrap must require a governed launch session for governed viewer URLs, resolve it through `/api/imaging/launch/resolve`, and strip sensitive launch query parameters.
+- The no-launch exception is standalone local OHIF mode: `/viewer/local` and `/viewer/dicomlocal` must render without a governed launch, suppress the clinical workspace panel, register OHIF's `dicomlocal` data source, keep `/viewer` as the router base on subroutes, and let local DICOM files load directly into OHIF. Legacy `/viewer/?local=1` should be treated as a compatibility entry and redirected into `/viewer/local`, not shown as an intermediate RadSysX card.
+- Standalone local drop handling may forward file drops to OHIF's local file input, but it must not create a governed launch or expose PHI-bearing study context in the URL. Non-DICOM local assets remain a backend/worklist inspection path until OHIF-native rendering for those formats is implemented.
 - Runtime DICOMweb roots must come from backend `viewerRuntime`.
 - Workspace panels must use backend clinical endpoints for reports, AI jobs, derived results, workspace refresh, and audit.
 - Direct browser STOW to Orthanc must remain disabled unless the governed backend contract explicitly changes.

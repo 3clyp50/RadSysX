@@ -13,7 +13,7 @@
   const params = new URLSearchParams(window.location.search);
   const launchFromUrl = params.get("launch");
   const localStartRequested = params.get("local") === "1";
-  const initialViewerBasePath = normalizeViewerBasePath(window.location.pathname) ?? "/";
+  const initialViewerBasePath = resolveViewerBasePath(window.location.pathname) ?? "/";
 
   window.__RADSYSX_VIEWER_BASE_PATH__ = initialViewerBasePath;
   window.__RADSYSX_NORMALIZE_SAME_ORIGIN_URL__ = normalizeSameOriginUrl;
@@ -35,9 +35,8 @@
 
     const launchToken = window.__RADSYSX_LAUNCH__ ? null : getStoredLaunchToken() ?? launchFromUrl;
     if (!launchToken && !window.__RADSYSX_LAUNCH__) {
-      if (localStartRequested && hasDesktopLocalImport()) {
-        await ensureDesktopLocalSession();
-        showLocalStart();
+      if (shouldUseStandaloneLocalViewer()) {
+        await enterStandaloneLocalViewer();
         return;
       }
       throw new Error("The OHIF viewer requires a governed launch session.");
@@ -89,6 +88,169 @@
     loader.querySelector("[data-role='title']").textContent = "Governed launch resolved";
     loader.querySelector("[data-role='body']").textContent =
       "Preparing the OHIF runtime and workspace panels.";
+  }
+
+  async function enterStandaloneLocalViewer() {
+    window.__RADSYSX_LOCAL_VIEWER__ = true;
+    window.__RADSYSX_VIEWER_RUNTIME__ = {
+      viewerKind: "ohif-local",
+      viewerBasePath: window.__RADSYSX_VIEWER_BASE_PATH__ ?? "/viewer",
+      qidoRoot: "/dicom-web",
+      wadoRoot: "/dicom-web",
+      wadoUriRoot: "/dicom-web",
+      featureFlags: {
+        reportPanel: false,
+        aiPanel: false,
+        derivedPanel: false,
+        auditPanel: false,
+      },
+    };
+    window.__RADSYSX_CLEAN_VIEWER_URL__ = function cleanLocalViewerUrl() {
+      stripLocalStartQuery();
+    };
+    patchStandaloneLocalNavigation();
+    installStandaloneLocalDropForwarder();
+
+    if (hasDesktopLocalImport()) {
+      try {
+        await ensureDesktopLocalSession();
+      } catch (error) {
+        console.warn("Unable to pre-establish the optional desktop local session.", error);
+      }
+    }
+
+    const relativeViewerPath = viewerRelativePath(window.location.pathname);
+    if (localStartRequested || !isStandaloneLocalRoute(relativeViewerPath)) {
+      window.__RADSYSX_LOCAL_VIEWER_READY__ = true;
+      removeBootstrapLoader();
+      window.location.replace(standaloneLocalStartUrl());
+      return;
+    }
+
+    stripLocalStartQuery();
+    loader.dataset.state = "local-viewer";
+    window.__RADSYSX_LOCAL_VIEWER_READY__ = true;
+    removeBootstrapLoader();
+  }
+
+  function installStandaloneLocalDropForwarder() {
+    if (window.__RADSYSX_LOCAL_DROP_FORWARDER_INSTALLED__) {
+      return;
+    }
+    window.__RADSYSX_LOCAL_DROP_FORWARDER_INSTALLED__ = true;
+
+    document.addEventListener("dragover", (event) => {
+      if (!shouldForwardStandaloneLocalDrop(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }, true);
+
+    document.addEventListener("drop", (event) => {
+      if (!shouldForwardStandaloneLocalDrop(event)) {
+        return;
+      }
+
+      const input = standaloneLocalFileInput();
+      if (!input) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: event.dataTransfer.files,
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, true);
+  }
+
+  function shouldForwardStandaloneLocalDrop(event) {
+    return window.__RADSYSX_LOCAL_VIEWER__ === true &&
+      viewerRelativePath(window.location.pathname) === "local" &&
+      Boolean(event.dataTransfer) &&
+      hasFileDataTransfer(event.dataTransfer);
+  }
+
+  function standaloneLocalFileInput() {
+    return Array.from(document.querySelectorAll('input[type="file"]'))
+      .find((candidate) => !candidate.webkitdirectory) ?? null;
+  }
+
+  function shouldUseStandaloneLocalViewer() {
+    return localStartRequested ||
+      hasDesktopLocalImport() ||
+      isStandaloneLocalRoute(viewerRelativePath(window.location.pathname)) ||
+      params.get("datasources") === "dicomlocal";
+  }
+
+  function isStandaloneLocalRoute(relativePath) {
+    return ["local", "localbasic", "dicomlocal"].includes(relativePath.split("/")[0] ?? "");
+  }
+
+  function standaloneLocalStartUrl() {
+    const basePath = normalizeViewerBasePath(window.__RADSYSX_VIEWER_BASE_PATH__) ?? "/viewer";
+    return `${basePath === "/" ? "" : basePath}/local`;
+  }
+
+  function patchStandaloneLocalNavigation() {
+    if (window.__RADSYSX_LOCAL_NAVIGATION_PATCHED__) {
+      return;
+    }
+    window.__RADSYSX_LOCAL_NAVIGATION_PATCHED__ = true;
+
+    const originalPushState = history.pushState.bind(history);
+    const originalReplaceState = history.replaceState.bind(history);
+
+    history.pushState = function pushState(state, title, url) {
+      return originalPushState(state, title, rewriteStandaloneLocalUrl(url));
+    };
+    history.replaceState = function replaceState(state, title, url) {
+      return originalReplaceState(state, title, rewriteStandaloneLocalUrl(url));
+    };
+  }
+
+  function rewriteStandaloneLocalUrl(url) {
+    if (url == null) {
+      return url;
+    }
+
+    const parsed = new URL(String(url), window.location.href);
+    if (parsed.origin !== window.location.origin) {
+      return url;
+    }
+
+    const basePath = normalizeViewerBasePath(window.__RADSYSX_VIEWER_BASE_PATH__) ?? "/viewer";
+    const relativePath = viewerRelativePath(parsed.pathname, basePath);
+    const hasLocalStudy =
+      parsed.searchParams.get("datasources") === "dicomlocal" &&
+      parsed.searchParams.has("StudyInstanceUIDs");
+
+    if ((relativePath === "" && hasLocalStudy) || relativePath === "viewer/dicomlocal") {
+      parsed.pathname = `${basePath === "/" ? "" : basePath}/dicomlocal`;
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+
+  function viewerRelativePath(pathname, basePath = window.__RADSYSX_VIEWER_BASE_PATH__ ?? "/viewer") {
+    const normalizedBase = normalizeViewerBasePath(basePath) ?? "/viewer";
+    const normalizedPath = `/${String(pathname ?? "").replace(/^\/+/, "")}`.replace(/\/+$/, "");
+    if (normalizedPath === normalizedBase) {
+      return "";
+    }
+    if (normalizedPath.startsWith(`${normalizedBase}/`)) {
+      return normalizedPath.slice(normalizedBase.length + 1);
+    }
+    return normalizedPath.replace(/^\/+/, "");
+  }
+
+  function removeBootstrapLoader() {
+    if (loader.isConnected) {
+      loader.remove();
+    }
   }
 
   async function requestJson(path, init = {}) {
@@ -517,6 +679,19 @@
     } catch (error) {
       console.warn("Unable to clear stored launch token.", error);
     }
+  }
+
+  function resolveViewerBasePath(value) {
+    const normalized = normalizeViewerBasePath(value);
+    if (!normalized) {
+      return null;
+    }
+
+    const parts = normalized.split("/").filter(Boolean);
+    if (parts[0] === "viewer") {
+      return "/viewer";
+    }
+    return normalized;
   }
 
   function normalizeViewerBasePath(value) {

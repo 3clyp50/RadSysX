@@ -14,7 +14,7 @@
 - The clinical public `/viewer` route is served from this app, usually through nginx at `http://localhost:3000/viewer/`.
 - Do not add or rely on a Next.js clinical `/viewer` fallback.
 - `dist/` is generated output from `npm run build --workspace viewer`; do not hand-edit generated bundles for durable behavior.
-- Viewer runtime must resolve opaque launch sessions through the backend and bind OHIF to returned same-origin DICOMweb roots.
+- Governed viewer runtime must resolve opaque launch sessions through the backend and bind OHIF to returned same-origin DICOMweb roots. Standalone desktop/local OHIF routes may use OHIF's `dicomlocal` data source without a governed launch.
 - RadSysX report, AI, derived-result, and audit UI belongs in the OHIF extension/mode assets or backend contracts, not an ad hoc sidecar.
 
 ## Work Guidance

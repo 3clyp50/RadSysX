@@ -16,7 +16,9 @@
         routeName: "",
         displayName: "RadSysX Clinical Viewer",
         onModeEnter: (context) => {
-          context?.servicesManager?.services?.panelService?.activatePanel?.(workspacePanel, true);
+          if (!isStandaloneLocalViewer()) {
+            context?.servicesManager?.services?.panelService?.activatePanel?.(workspacePanel, true);
+          }
           return originalOnModeEnter?.(context);
         },
         routes: baseRoute
@@ -25,6 +27,9 @@
                 ...baseRoute,
                 layoutTemplate: () => {
                   const layout = baseRoute.layoutTemplate();
+                  if (isStandaloneLocalViewer()) {
+                    return layout;
+                  }
                   const props = layout?.props ?? {};
                   const rightPanels = Array.isArray(props.rightPanels)
                     ? [...props.rightPanels]
@@ -49,4 +54,8 @@
       };
     },
   };
+
+  function isStandaloneLocalViewer() {
+    return Boolean(window.__RADSYSX_LOCAL_VIEWER__);
+  }
 })();

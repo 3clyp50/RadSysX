@@ -14,6 +14,13 @@ const workspaceRoot = path.resolve(desktopRoot, "..");
 const preloadPath = path.join(desktopRoot, "src", "preload.cjs");
 const logoPath = path.join(workspaceRoot, "RadSysX-Logo.png");
 const viewerDist = path.join(workspaceRoot, "viewer", "dist");
+const viewerRoot = path.join(workspaceRoot, "viewer");
+const viewerAssetNames = [
+  "radsysx-bootstrap.js",
+  "radsysx-ohif-extension.js",
+  "radsysx-ohif-mode.js",
+  "radsysx-viewer.css",
+];
 const frontendBuildId = path.join(workspaceRoot, "frontend", ".next", "BUILD_ID");
 const frontendDesktopBuildStamp = path.join(workspaceRoot, "frontend", ".next", "radsysx-desktop-build.json");
 const frontendStandaloneServer = path.join(
@@ -33,7 +40,7 @@ const frontendPublicTarget = path.join(frontendStandaloneRoot, "public");
 const DEFAULT_APP_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_PORT ?? "3000", 10);
 const DEFAULT_FRONTEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "3010", 10);
 const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "8000", 10);
-const DEFAULT_DESKTOP_START_PATH = "/viewer/?local=1";
+const DEFAULT_DESKTOP_START_PATH = "/viewer/local";
 const DESKTOP_FRONTEND_MODE = normalizeFrontendMode(process.env.RADSYSX_DESKTOP_FRONTEND_MODE);
 const DESKTOP_PICKER_MAX_FILES = Number.parseInt(process.env.RADSYSX_DESKTOP_PICKER_MAX_FILES ?? "500", 10);
 const DESKTOP_PICKER_MAX_BYTES = Number.parseInt(
@@ -480,16 +487,50 @@ async function waitForHttp(url, label, timeoutMs = 120000) {
 
 async function ensureViewerDist(env) {
   const indexPath = path.join(viewerDist, "index.html");
-  if (fs.existsSync(indexPath)) {
+  if (viewerDistIsFresh(indexPath)) {
     appendLog("viewer", "using existing viewer/dist");
     return;
   }
 
-  appendLog("viewer", "viewer/dist is missing; building OHIF distribution");
+  appendLog("viewer", "viewer/dist is missing or stale; building OHIF distribution");
   await runTask("viewer", npmCommand(), ["run", "build", "--workspace", "viewer"], {
     cwd: workspaceRoot,
     env,
   });
+}
+
+function viewerDistIsFresh(indexPath) {
+  if (!fs.existsSync(indexPath)) {
+    return false;
+  }
+
+  const appConfigPath = path.join(viewerDist, "app-config.js");
+  if (!fs.existsSync(appConfigPath)) {
+    return false;
+  }
+
+  const buildScriptPath = path.join(viewerRoot, "scripts", "build-ohif-dist.mjs");
+  if (isNewerThan(buildScriptPath, appConfigPath)) {
+    return false;
+  }
+
+  for (const assetName of viewerAssetNames) {
+    const sourcePath = path.join(viewerRoot, "assets", assetName);
+    const outputPath = path.join(viewerDist, assetName);
+    if (!fs.existsSync(outputPath) || isNewerThan(sourcePath, outputPath)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isNewerThan(sourcePath, targetPath) {
+  try {
+    return fs.statSync(sourcePath).mtimeMs > fs.statSync(targetPath).mtimeMs;
+  } catch {
+    return true;
+  }
 }
 
 function frontendBuildSettings(env) {
