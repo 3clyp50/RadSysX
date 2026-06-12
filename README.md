@@ -99,6 +99,8 @@ Those capabilities remain part of RadSysX, but they are not the clinical source 
 
 - `desktop/src/main.mjs`
 - `desktop/src/preload.cjs`
+- `desktop/scripts/launch.mjs`
+- `desktop/scripts/bootstrap.mjs`
 - `desktop/scripts/doctor.mjs`
 
 ### Local one-origin stack
@@ -210,6 +212,7 @@ Desktop-only knobs:
 - `RADSYSX_DESKTOP_BACKEND_PORT`
 - `RADSYSX_DESKTOP_FRONTEND_PORT`
 - `RADSYSX_DESKTOP_DICOMWEB_TARGET`
+- `RADSYSX_DESKTOP_SKIP_BOOTSTRAP`
 
 Research-only integrations such as MCP/FHIR tools and BiomedParse still exist, but they do not define the clinical architecture.
 
@@ -254,12 +257,10 @@ Node dependencies should be installed from the repo root so the workspace-manage
 On a fresh clone, the shortest local path is:
 
 ```bash
-npm run desktop:bootstrap
-npm run desktop:doctor
 npm run desktop
 ```
 
-`desktop:bootstrap` is a Node-based cross-platform bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. `desktop` opens Electron directly to the OHIF local-start screen and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
+`desktop` is the user-facing local launcher. It checks the desktop bootstrap, runs the cross-platform bootstrap helper if setup is incomplete, then opens Electron directly to the OHIF local-start screen. The lower-level `desktop:bootstrap` helper creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop -- --check-only` or `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. Use `npm run desktop:run` only when you intentionally want the direct Electron run after setup is already known good.
 
 The desktop runtime, bootstrap, doctor, and smoke helpers resolve the repo-local Python venv using the host OS path convention: `.venv/bin/python` on Unix-like systems and `.venv/Scripts/python.exe` on Windows. Set `RADSYSX_DESKTOP_PYTHON=/path/to/python` when you need to force a specific interpreter.
 
@@ -272,6 +273,14 @@ The desktop launcher builds the frontend production shell on first launch for th
 ```bash
 npm run desktop:dev-frontend
 ```
+
+For a quick launcher contract check:
+
+```bash
+npm run desktop:smoke:launch
+```
+
+That smoke runs the same user-facing launcher path as `npm run desktop`: bootstrap check first, then service-ready Electron startup with the OHIF-first default retained, using a short cross-platform auto-shutdown timer. The `desktop:smoke:local-start` check is the UI assertion that samples `/viewer/`, the local import card, and imported-DICOM OHIF rendering.
 
 For a quick startup and cleanup check:
 
@@ -422,31 +431,34 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 3. `python3 -m pip install --upgrade pip`
 4. `python3 -m pip install -r backend/requirements.txt`
 5. `npm install --legacy-peer-deps`
-6. `npm run desktop:doctor`
-7. `npm run desktop:smoke`
-8. `npm run desktop:smoke:local-start`
-9. `npm run desktop:smoke:local-start-nondicom`
-10. `npm run desktop:smoke:import`
-11. `npm run desktop:smoke:ui-import`
-12. `npm run desktop:smoke:picker-files-import`
-13. `npm run desktop:smoke:picker-import`
-14. `npm run desktop:smoke:picker-large-import`
-15. `npm run desktop:smoke:picker-many-import`
-16. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-17. `python3 -m pytest backend/tests/test_clinical_platform.py`
-18. `npm run type-check --workspace frontend`
-19. `npm run build --workspace frontend`
-20. `npm run type-check --workspace viewer`
-21. `npm run build --workspace viewer`
-22. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-23. Separately validate the governed clinical surface with `docker compose up --build`
+6. `npm run desktop -- --check-only`
+7. `npm run desktop:doctor`
+8. `npm run desktop:smoke:launch`
+9. `npm run desktop:smoke`
+10. `npm run desktop:smoke:local-start`
+11. `npm run desktop:smoke:local-start-nondicom`
+12. `npm run desktop:smoke:import`
+13. `npm run desktop:smoke:ui-import`
+14. `npm run desktop:smoke:picker-files-import`
+15. `npm run desktop:smoke:picker-import`
+16. `npm run desktop:smoke:picker-large-import`
+17. `npm run desktop:smoke:picker-many-import`
+18. `npm run desktop:smoke:viewer-launch`
+19. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+20. `python3 -m pytest backend/tests/test_clinical_platform.py`
+21. `npm run type-check --workspace frontend`
+22. `npm run build --workspace frontend`
+23. `npm run type-check --workspace viewer`
+24. `npm run build --workspace viewer`
+25. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+26. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
-1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:local-start-nondicom`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
+1. run `npm run desktop` and confirm the app opens straight into OHIF local-start
+2. run `npm run desktop -- --check-only`, `npm run desktop:doctor`, `npm run desktop:smoke:launch`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:local-start-nondicom`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, `npm run desktop:smoke:picker-many-import`, and `npm run desktop:smoke:viewer-launch`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

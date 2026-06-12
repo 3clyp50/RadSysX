@@ -36,7 +36,9 @@ python3 -m pytest backend/tests/test_clinical_platform.py
 npm run type-check --workspace frontend
 npm run type-check --workspace viewer
 npm run build --workspace viewer
+npm run desktop -- --check-only
 npm run desktop:doctor
+npm run desktop:smoke:launch
 npm run desktop:smoke
 ```
 
@@ -45,12 +47,10 @@ Install Node dependencies from the repo root so the workspace-managed root `pack
 Fast local Electron path:
 
 ```bash
-npm run desktop:bootstrap
-npm run desktop:doctor
 npm run desktop
 ```
 
-The desktop app defaults to local `pilot` mode, enables backend-owned local imaging import, and supervises FastAPI, Next.js, and the OHIF viewer bridge behind one localhost origin. Use compose when you need Orthanc-backed DICOMweb validation.
+The desktop launcher checks bootstrap, repairs setup when allowed, and then opens OHIF local-start first. The app defaults to local `pilot` mode, enables backend-owned local imaging import, and supervises FastAPI, Next.js, and the OHIF viewer bridge behind one localhost origin. Use compose when you need Orthanc-backed DICOMweb validation.
 
 After initial recon on the Linux host, wait for the user's first app test report before widening the code-change scope.
 

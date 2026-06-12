@@ -47,9 +47,9 @@ Last updated: 2026-06-12
   - `python3 -m pip install -r backend/requirements-clinical.txt`
   - `npm install --legacy-peer-deps`
 - Desktop fast-path bootstrap:
-  - `npm run desktop:bootstrap`
-  - `npm run desktop:doctor`
   - `npm run desktop`
+  - This checks the desktop bootstrap, runs the cross-platform bootstrap helper if setup is incomplete, then opens Electron directly to the OHIF local-start screen at `/viewer/?local=1`.
+  - Use `npm run desktop:bootstrap -- --check` for a non-mutating setup preflight, and `npm run desktop:run` only when intentionally bypassing the launcher after setup.
 - `backend/requirements.txt` is the broader research/agent dependency set. Use it only when intentionally working on the research surface and its extra dependencies.
 - Use Python `3.12` if one interpreter must install both clinical and broader research dependency sets.
 - If the host is missing a required system dependency, surface that explicitly instead of patching around it with host-local hacks.
@@ -170,6 +170,7 @@ Last updated: 2026-06-12
   - `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
   - `npm run desktop:doctor`
   - `npm run desktop:smoke`
+  - `npm run desktop:smoke:launch`
   - `npm run desktop:smoke:import`
   - `npm run desktop:smoke:local-start`
   - `npm run desktop:smoke:local-start-nondicom`
@@ -192,10 +193,13 @@ Last updated: 2026-06-12
 - Backend dev server: `. .venv/bin/activate && python3 backend/server.py`
 - Desktop bootstrap: `npm run desktop:bootstrap`
 - Desktop bootstrap check: `npm run desktop:bootstrap -- --check`
+- Desktop launcher check: `npm run desktop -- --check-only`
 - Desktop preflight: `npm run desktop:doctor`
 - Desktop app: `npm run desktop`
+- Desktop direct run after setup: `npm run desktop:run`
 - Desktop app with live Next.js dev frontend: `npm run desktop:dev-frontend`
 - Desktop startup smoke test: `npm run desktop:smoke`
+- Desktop user-facing launcher smoke test: `npm run desktop:smoke:launch`
 - Desktop local import smoke test: `npm run desktop:smoke:import`
 - Desktop OHIF local-start import/render smoke test: `npm run desktop:smoke:local-start`
 - Desktop OHIF local-start non-DICOM inspection smoke test: `npm run desktop:smoke:local-start-nondicom`
@@ -218,14 +222,16 @@ Last updated: 2026-06-12
 ## Local Clinical Stack
 
 - Fast local desktop path:
-  - Run `npm run desktop:bootstrap` once on a fresh clone.
-  - `npm run desktop:bootstrap` is a cross-platform Node helper that creates/uses `.venv`, installs clinical Python requirements, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
-  - Run `npm run desktop` for the Electron app.
+  - Run `npm run desktop` from the repo root.
+  - The user-facing desktop launcher first runs the non-mutating bootstrap check, runs `npm run desktop:bootstrap` if setup is incomplete, then opens the Electron app.
+  - `npm run desktop:bootstrap` remains the explicit cross-platform Node helper that creates/uses `.venv`, installs clinical Python requirements, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; use `npm run desktop:bootstrap -- --check` or `npm run desktop -- --check-only` to verify an existing bootstrap without reinstalling dependencies.
+  - Use `npm run desktop:run` only for a lower-level direct Electron run after setup is known good.
   - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, a stamped production Next.js standalone shell, and the generated OHIF viewer bridge.
   - Desktop runtime, doctor, bootstrap, and smoke helpers resolve the repo-local venv Python using platform-specific paths (`.venv/bin/python` on Unix-like hosts, `.venv/Scripts/python.exe` on Windows) and may be overridden with `RADSYSX_DESKTOP_PYTHON` or `PYTHON`.
   - Electron opens `/viewer/?local=1` by default, strips the visible `local` query after bootstrap, and presents the OHIF local-start import screen first; use `RADSYSX_DESKTOP_START_PATH` only when intentionally validating a different first route.
   - The desktop launcher builds or refreshes the frontend production shell when the expected desktop build stamp is missing or mismatched; use `npm run desktop:dev-frontend` or `RADSYSX_DESKTOP_FRONTEND_MODE=development npm run desktop` only when intentionally doing live Next.js UI development.
   - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries/previews/technical analysis, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
+  - Run `npm run desktop:smoke:launch` to prove the same user-facing launcher checks setup and reaches service-ready Electron startup through a cross-platform smoke shutdown; `npm run desktop:smoke:local-start` remains the first-screen OHIF UI assertion.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP archives containing supported files, plus PNG/JPEG/TIFF files, verify worklist/asset-summary/preview/analysis/DICOMweb/launch behavior, and cleanly shut down.
   - Run `npm run desktop:smoke:local-start` to start Electron at the OHIF local-start screen, import synthetic local files through the primary desktop import action, auto-launch the imported DICOM study through the governed imaging launch contract, and verify same-origin local DICOMweb/workspace access plus a nonblank OHIF canvas.
   - Run `npm run desktop:smoke:local-start-nondicom` to start Electron at the same OHIF local-start screen, import only NIFTI/image/ZIP fixtures, verify the non-DICOM fallback lands in `/worklist`, auto-opens the local assets panel, loads previews, switches a NIFTI slice axis, and runs backend technical analysis.

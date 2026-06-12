@@ -18,14 +18,14 @@ There is also a desktop fast path in `desktop/`: Electron starts the local FastA
 - Preferred host: native Linux
 - Do not assume WSL, Windows paths, Docker Desktop behavior, or machine-local temp dependency hacks
 - Prefer `.venv` for Python deps and workspace-managed Node deps rooted at the repo `package-lock.json`
-- Fastest local app path: `npm run desktop:bootstrap`, `npm run desktop:doctor`, then `npm run desktop`
+- Fastest local app path: `npm run desktop`; it checks bootstrap, repairs setup when allowed, and opens OHIF local-start first
 - After initial recon on the Linux host, wait for the user's first Linux runtime test report before widening the change scope
 
 ## Current Clinical Runtime
 
 - Backend authority: `backend/server.py` and `backend/clinical/*`
 - Local imaging import: `backend/clinical/local_imaging.py` plus `POST /api/local-imaging/import`
-- Desktop fast path: `desktop/src/main.mjs`, `desktop/scripts/doctor.mjs`
+- Desktop fast path: `desktop/src/main.mjs`, `desktop/scripts/launch.mjs`, `desktop/scripts/bootstrap.mjs`, `desktop/scripts/doctor.mjs`
 - Shared frontend/viewer package: `packages/clinical-web/*`
 - Clinical shell: `frontend/app/login/page.tsx`, `frontend/app/worklist/page.tsx`
 - Authoritative viewer: `viewer/` with:
@@ -57,7 +57,9 @@ python3 -m pytest backend/tests/test_clinical_platform.py
 npm run type-check --workspace frontend
 npm run type-check --workspace viewer
 npm run build --workspace viewer
+npm run desktop -- --check-only
 npm run desktop:doctor
+npm run desktop:smoke:launch
 npm run desktop:smoke
 ```
 
