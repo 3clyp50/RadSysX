@@ -30,6 +30,7 @@
 ## Verification
 
 - `npm run type-check --workspace frontend`
+- `npm run desktop:smoke:local-start-nondicom` when changing the worklist auto-inspection fallback from the OHIF local-start screen.
 
 ## Child DOX Index
 

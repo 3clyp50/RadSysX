@@ -8,6 +8,7 @@ For the shortest no-Docker local run of RadSysX, use the Electron desktop path f
 npm run desktop:bootstrap
 npm run desktop:doctor
 npm run desktop:smoke:local-start
+npm run desktop:smoke:local-start-nondicom
 npm run desktop:smoke:import
 npm run desktop:smoke:ui-import
 npm run desktop:smoke:picker-files-import
@@ -27,6 +28,8 @@ The desktop launcher builds and stamps the frontend production shell for its sel
 `npm run desktop:bootstrap` is a cross-platform Node bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. Use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
 
 `npm run desktop:smoke:local-start` starts Electron at the OHIF local-start screen, verifies the visible URL is cleaned to `/viewer/`, imports synthetic local files through the primary desktop import action, opens the imported DICOM study in OHIF via a governed launch, checks same-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
+
+`npm run desktop:smoke:local-start-nondicom` starts from the same OHIF local-start screen, imports only NIFTI/image/ZIP fixtures, verifies the fallback to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and confirms no OHIF viewer action is exposed for the non-DICOM row.
 
 `npm run desktop:smoke:import` starts the desktop runtime on high local ports, creates PHI-free synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP with supported NIFTI/PNG members, plus PNG/JPEG/TIFF files, imports them through the local bridge, verifies worklist, local DICOMweb, asset-summary, preview, analysis, and launch behavior, and shuts the runtime down.
 

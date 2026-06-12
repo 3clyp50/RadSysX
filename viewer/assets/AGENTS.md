@@ -27,5 +27,6 @@
 - `npm run type-check --workspace viewer`
 - `npm run build --workspace viewer`
 - `npm run desktop:smoke:local-start`
+- `npm run desktop:smoke:local-start-nondicom`
 
 ## Child DOX Index

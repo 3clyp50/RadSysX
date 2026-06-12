@@ -11,6 +11,7 @@
     "doctor": "node ./scripts/doctor.mjs",
     "smoke:import": "node ./scripts/import-smoke.mjs",
     "smoke:local-start": "node ./scripts/ui-import-smoke.mjs --local-start",
+    "smoke:local-start-nondicom": "node ./scripts/ui-import-smoke.mjs --local-start-nondicom",
     "smoke:picker-files-import": "node ./scripts/ui-import-smoke.mjs --picker-files",
     "smoke:picker-large-import": "node ./scripts/ui-import-smoke.mjs --picker-large-folder",
     "smoke:picker-many-import": "node ./scripts/ui-import-smoke.mjs --picker-many-folder",

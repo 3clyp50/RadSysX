@@ -19,6 +19,7 @@ const manyDicomCount = 32;
 const smokeMode = resolveSmokeMode();
 const pickerSmokeModes = new Set([
   "local-start",
+  "local-start-nondicom",
   "picker-files",
   "picker-folder",
   "picker-large-folder",
@@ -29,6 +30,9 @@ let desktopProcess = null;
 let desktopPublicBaseUrl = null;
 
 function resolveSmokeMode() {
+  if (process.argv.includes("--local-start-nondicom")) {
+    return "local-start-nondicom";
+  }
   if (process.argv.includes("--local-start")) {
     return "local-start";
   }
@@ -434,6 +438,15 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
         ...localStartResult,
       };
     }
+    if (smokeMode === "local-start-nondicom") {
+      const localStartResult = await runLocalStartNonDicomSmoke(cdp, publicBaseUrl);
+      return {
+        ok: true,
+        smokeMode,
+        publicBaseUrl,
+        ...localStartResult,
+      };
+    }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await evaluateInRenderer(
@@ -485,6 +498,43 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
 }
 
 async function runLocalStartSmoke(cdp, publicBaseUrl) {
+  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
+  await clickLocalStartImportFiles(cdp);
+
+  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
+  return {
+    importPath: "local-start",
+    localStartState,
+    viewerLaunch,
+  };
+}
+
+async function runLocalStartNonDicomSmoke(cdp, publicBaseUrl) {
+  const localStartState = await waitForLocalStartScreen(cdp, publicBaseUrl);
+  await clickLocalStartImportFiles(cdp);
+
+  await waitForRendererCondition(
+    cdp,
+    `window.location.pathname === "/worklist" &&
+      Boolean(document.querySelector('[data-testid="local-assets-panel"]'))`,
+    "local-start non-DICOM worklist inspection panel",
+    90000,
+  );
+
+  const inspection = await evaluateInRenderer(
+    cdp,
+    `(${localStartNonDicomInspectionInRenderer.toString()})()`,
+    120000,
+  );
+
+  return {
+    importPath: "local-start-nondicom",
+    localStartState,
+    inspection,
+  };
+}
+
+async function waitForLocalStartScreen(cdp, publicBaseUrl) {
   await waitForRendererCondition(
     cdp,
     `window.location.origin === ${JSON.stringify(publicBaseUrl)} &&
@@ -516,7 +566,10 @@ async function runLocalStartSmoke(cdp, publicBaseUrl) {
   if (localStartState.loaderState !== "local-start") {
     throw new Error(`Desktop local start did not settle into the import-ready state: ${localStartState.loaderState}`);
   }
+  return localStartState;
+}
 
+async function clickLocalStartImportFiles(cdp) {
   await evaluateInRenderer(
     cdp,
     `(() => {
@@ -529,13 +582,6 @@ async function runLocalStartSmoke(cdp, publicBaseUrl) {
     })()`,
     30000,
   );
-
-  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
-  return {
-    importPath: "local-start",
-    localStartState,
-    viewerLaunch,
-  };
 }
 
 async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
@@ -774,7 +820,143 @@ function viewerRenderProbeInRenderer() {
   };
 }
 
+function localStartNonDicomInspectionInRenderer() {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
+
+  const waitFor = async (predicate, label, timeoutMs = 60000) => {
+    const startedAt = Date.now();
+    let lastError = null;
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const value = predicate();
+        if (value) {
+          return value;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      await sleep(150);
+    }
+    throw new Error(`${label} did not become ready.${lastError ? ` Last error: ${lastError.message}` : ""}`);
+  };
+
+  const findButton = (root, label) => Array.from(root.querySelectorAll("button"))
+    .find((button) => textMatches(button.innerText, label));
+
+  const triggerPreviewImageLoading = () => {
+    for (const image of document.querySelectorAll('[data-testid="local-asset-preview"]')) {
+      image.loading = "eager";
+      image.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  };
+
+  return (async () => {
+    const panel = await waitFor(
+      () => {
+        const candidate = document.querySelector('[data-testid="local-assets-panel"]');
+        return candidate && textMatches(candidate.innerText, "Local NIFTI import") ? candidate : null;
+      },
+      "local-start non-DICOM local assets panel",
+    );
+
+    await waitFor(
+      () => textMatches(panel.innerText, "NIFTI volume") &&
+        textMatches(panel.innerText, "2 x 3 x 4") &&
+        textMatches(panel.innerText, "Paired NIFTI data files") &&
+        textMatches(panel.innerText, "Image files"),
+      "local-start non-DICOM asset summary",
+    );
+
+    triggerPreviewImageLoading();
+    await waitFor(
+      () => Array.from(document.querySelectorAll('[data-testid="local-asset-preview"]'))
+        .some((image) => image.complete && image.naturalWidth > 0),
+      "local-start non-DICOM preview image load",
+    );
+
+    const coronalButton = await waitFor(
+      () => findButton(panel, "coronal"),
+      "local-start non-DICOM NIFTI coronal preview control",
+    );
+    coronalButton.click();
+    await waitFor(
+      () => Array.from(document.querySelectorAll('[data-testid="local-asset-preview"]'))
+        .some((image) => image.src.includes("axis=coronal")),
+      "local-start non-DICOM coronal preview image URL",
+    );
+
+    const analyzeButton = panel.querySelector('[data-testid="analyze-local-study"]');
+    if (!analyzeButton) {
+      throw new Error("Analyze action was missing for local-start non-DICOM assets.");
+    }
+    analyzeButton.click();
+    const analysisPanel = await waitFor(
+      () => {
+        const candidate = document.querySelector('[data-testid="local-analysis-panel"]');
+        if (!candidate) {
+          return null;
+        }
+        const text = candidate.innerText;
+        return [
+          "Voxel count",
+          "24",
+          "Mean intensity",
+          "11.5",
+          "paired.hdr",
+          "matching .hdr",
+          "zipped-volume.nii",
+          "Image dimensions",
+          "1 x 1",
+          "Precision",
+          "8",
+          "2 x 3",
+        ].every((needle) => textMatches(text, needle))
+          ? candidate
+          : null;
+      },
+      "local-start non-DICOM analysis panel",
+    );
+
+    const localRows = Array.from(document.querySelectorAll('[data-testid="worklist-row"]'))
+      .filter((row) => textMatches(row.innerText, "Local "))
+      .map((row) => row.innerText);
+    if (!localRows.some((row) => textMatches(row, "Local NIFTI import"))) {
+      throw new Error("Local NIFTI worklist row was missing after non-DICOM local start import.");
+    }
+    if (localRows.some((row) => textMatches(row, "Local DICOMDIR import"))) {
+      throw new Error("Non-DICOM local start import unexpectedly created a DICOM worklist row.");
+    }
+    if (localRows.some((row) => textMatches(row, "Open viewer"))) {
+      throw new Error("Non-DICOM local start import unexpectedly exposed an OHIF viewer action.");
+    }
+
+    return {
+      currentUrl: window.location.href,
+      localRows: localRows.map((row) => row.split("\\n").slice(0, 3).join(" | ")),
+      panelSummary: panel.innerText.slice(0, 1000),
+      analysisSummary: analysisPanel.innerText.slice(0, 1000),
+      previewCount: document.querySelectorAll('[data-testid="local-asset-preview"]').length,
+      coronalPreviewUrlSeen: Array.from(document.querySelectorAll('[data-testid="local-asset-preview"]'))
+        .some((image) => image.src.includes("axis=coronal")),
+    };
+  })();
+}
+
 function pickerTestPathsForSmokeMode() {
+  if (smokeMode === "local-start-nondicom") {
+    return [
+      "volume.nii",
+      "volume.nii.gz",
+      "paired.hdr",
+      "paired.img",
+      "slice.png",
+      "slice.jpeg",
+      "slice.tiff",
+      "archive.zip",
+    ].map((name) => path.join(fixtureRoot, name));
+  }
+
   if (smokeMode !== "picker-files" && smokeMode !== "local-start") {
     return [fixtureRoot];
   }

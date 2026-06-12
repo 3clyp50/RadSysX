@@ -285,6 +285,14 @@ npm run desktop:smoke:local-start
 
 That smoke starts Electron on the OHIF local-start screen, imports synthetic local files through the primary desktop import action, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
+For the first-screen NIFTI/image-only fallback check:
+
+```bash
+npm run desktop:smoke:local-start-nondicom
+```
+
+That smoke starts from the same OHIF local-start screen, imports only NIFTI/image/ZIP fixtures, verifies the app falls back to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI slice axis, and runs backend technical analysis without exposing an OHIF viewer action for non-DICOM assets.
+
 For a stronger no-Docker import/use check:
 
 ```bash
@@ -415,27 +423,28 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 6. `npm run desktop:doctor`
 7. `npm run desktop:smoke`
 8. `npm run desktop:smoke:local-start`
-9. `npm run desktop:smoke:import`
-10. `npm run desktop:smoke:ui-import`
-11. `npm run desktop:smoke:picker-files-import`
-12. `npm run desktop:smoke:picker-import`
-13. `npm run desktop:smoke:picker-large-import`
-14. `npm run desktop:smoke:picker-many-import`
-15. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-16. `python3 -m pytest backend/tests/test_clinical_platform.py`
-17. `npm run type-check --workspace frontend`
-18. `npm run build --workspace frontend`
-19. `npm run type-check --workspace viewer`
-20. `npm run build --workspace viewer`
-21. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-22. Separately validate the governed clinical surface with `docker compose up --build`
+9. `npm run desktop:smoke:local-start-nondicom`
+10. `npm run desktop:smoke:import`
+11. `npm run desktop:smoke:ui-import`
+12. `npm run desktop:smoke:picker-files-import`
+13. `npm run desktop:smoke:picker-import`
+14. `npm run desktop:smoke:picker-large-import`
+15. `npm run desktop:smoke:picker-many-import`
+16. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+17. `python3 -m pytest backend/tests/test_clinical_platform.py`
+18. `npm run type-check --workspace frontend`
+19. `npm run build --workspace frontend`
+20. `npm run type-check --workspace viewer`
+21. `npm run build --workspace viewer`
+22. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+23. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:local-start-nondicom`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope
