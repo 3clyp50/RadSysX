@@ -1,6 +1,6 @@
 # RadSysX Agent Guidance
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## Purpose
 
@@ -137,6 +137,8 @@ Last updated: 2026-06-12
   - `frontend/components/toolbars/RightPanel.tsx`
   - `backend/radsysx.py`
   - `backend/chat_interface.py`
+  - `backend/biomedparse_demo.py`
+  - `backend/biomedparse_demo_worker.py`
   - `backend/mcp/*`
   - `backend/biomedparse_api.py`
 - Research-only routes must stay gated outside `pilot` and `clinical` modes.

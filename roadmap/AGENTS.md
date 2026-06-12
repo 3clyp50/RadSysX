@@ -1,6 +1,6 @@
 # Roadmap DOX
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## Purpose
 
@@ -11,7 +11,7 @@ Last updated: 2026-06-12
 ## Ownership
 
 - Owns roadmap files under `roadmap/`, including AI backend plans, model evaluation notes, future architecture sketches, and implementation runbooks.
-- The AI backend plan for the OHIF sidebar lives at `roadmap/ai-backend/PLAN.md`; the realtime voice/chat research synthesis lives at `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md`; first GPU bring-up evidence lives at `roadmap/ai-backend/GPU_EVAL_LOG.md`.
+- The AI backend plan for the OHIF sidebar lives at `roadmap/ai-backend/PLAN.md`; the realtime voice/chat research synthesis lives at `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md`; first GPU bring-up evidence lives at `roadmap/ai-backend/GPU_EVAL_LOG.md`; the opt-in BioMedParse integration demo runbook lives at `roadmap/ai-backend/BIOMEDPARSE_DEMO.md`.
 - Runtime code remains owned by the nearest applicable subtree such as `backend/`, `viewer/`, `frontend/`, `desktop/`, or `packages/`.
 
 ## Local Contracts

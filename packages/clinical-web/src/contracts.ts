@@ -146,6 +146,76 @@ export type LocalImagingStudyAnalysisResponse = {
   warnings: string[];
 };
 
+export type BiomedParseDemoCapabilities = {
+  enabled: boolean;
+  ready: boolean;
+  reason?: string | null;
+  modelId: string;
+  license: string;
+  source: "included_ct_amos";
+  supportedPromptIds: number[];
+  defaultPromptIds: number[];
+  researchOnly: boolean;
+  outputNote: string;
+};
+
+export type BiomedParseDemoRunRequest = {
+  source?: "included_ct_amos";
+  promptIds?: number[];
+  sliceBatchSize?: number;
+  studyInstanceUID?: string;
+  traceId?: string;
+};
+
+export type BiomedParseDemoLabelSummary = {
+  label: number;
+  prompt: string;
+  voxelCount: number;
+  boundingBox?: number[] | null;
+  color: string;
+};
+
+export type BiomedParseDemoTiming = {
+  modelInstantiatedSeconds?: number | null;
+  modelLoadedSeconds?: number | null;
+  inferenceSeconds?: number | null;
+};
+
+export type BiomedParseDemoRuntime = {
+  python?: string | null;
+  torchVersion?: string | null;
+  torchCuda?: string | null;
+  device?: string | null;
+  gpuName?: string | null;
+  peakVramGib?: number | null;
+};
+
+export type BiomedParseDemoArtifacts = {
+  maskNpzUrl: string;
+  previewPngUrl: string;
+};
+
+export type BiomedParseDemoRunResponse = {
+  status: "completed";
+  runId: string;
+  source: "included_ct_amos";
+  modelId: string;
+  modelVersion: string;
+  license: string;
+  promptIds: number[];
+  inputShape: number[];
+  maskShape: number[];
+  nonzeroVoxels: number;
+  previewSlice: number;
+  labels: BiomedParseDemoLabelSummary[];
+  timings: BiomedParseDemoTiming;
+  runtime: BiomedParseDemoRuntime;
+  artifacts: BiomedParseDemoArtifacts;
+  warnings: string[];
+  studyInstanceUID?: string | null;
+  traceId?: string | null;
+};
+
 export type ViewerRuntime = {
   viewerKind: string;
   viewerBasePath: string;

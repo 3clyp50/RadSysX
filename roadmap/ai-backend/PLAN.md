@@ -19,6 +19,7 @@ Current baseline:
 - The visible app name is `RadSysX`.
 - The OHIF right sidebar has a RadSysX AI panel with local chat state, text composer, voice affordance, and `@` chips for ROI, segmentation, and measurement context.
 - The AI panel is intentionally frontend-only today. It does not call backend AI endpoints, does not persist clinical chat state, and does not execute model inference.
+- A first BioMedParse integration demo now exists behind `RADSYSX_BIOMEDPARSE_DEMO_ENABLED=1`: the backend exposes session-protected capability/run/artifact routes, the worklist shows an optional demo panel, and a subprocess worker runs the bundled CT AMOS sample without importing CUDA/Detectron2 into the FastAPI process. The runbook lives at `roadmap/ai-backend/BIOMEDPARSE_DEMO.md`.
 - Existing clinical rules still apply: governed workflows must use backend-issued actor context, opaque launch sessions, audit events, backend-mediated AI jobs, and backend-mediated derived DICOM writeback.
 - RadSysX is an Electron desktop app and should remain cross-platform. Linux/NVIDIA is the first validation lane for heavy local model and ASR experiments, not a product boundary.
 
@@ -762,10 +763,16 @@ Goal:
 
 - Text-guided segmentation from the sidebar.
 
+Current demo milestone:
+
+- The first integration demo is intentionally narrower than the final sidebar adapter: it runs BioMedParse v2 on the bundled public CT AMOS sample, returns preview artifacts, and proves the optional worker boundary. It does not yet consume a RadSysX study, map coordinates, overlay in OHIF, or persist DICOM SEG.
+
 Tasks:
 
 - [x] Reproduce BiomedParse v2 example on the L40S with the bundled CT AMOS sample.
 - [x] Record the official CUDA 12.4 dependency-lane blocker and the CUDA 13 compatibility lane that succeeded.
+- [x] Add opt-in RadSysX demo endpoints and worklist UI panel for the bundled CT AMOS run.
+- [x] Add fake-worker backend tests so the integration contract is covered without requiring CUDA in normal CI.
 - [ ] Test simple 3D segmentation prompt on a RadSysX/public safe fixture.
 - [ ] Normalize mask output into RadSysX `SegmentationResult`.
 - [ ] Map mask back to image/volume coordinates.

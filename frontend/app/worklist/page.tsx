@@ -8,6 +8,8 @@ import { Activity, FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Up
 
 import { clinicalApi, resolveClinicalApiUrl } from "@/lib/clinical/client";
 import type {
+  BiomedParseDemoCapabilities,
+  BiomedParseDemoRunResponse,
   ClinicalPlatformConfig,
   LocalImagingImportResponse,
   LocalImagingStudyAsset,
@@ -93,6 +95,10 @@ export default function WorklistPage() {
   const [analyzingStudyUid, setAnalyzingStudyUid] = useState<string | null>(null);
   const [localStudyAssets, setLocalStudyAssets] = useState<LocalImagingStudyAssetsResponse | null>(null);
   const [localStudyAnalysis, setLocalStudyAnalysis] = useState<LocalImagingStudyAnalysisResponse | null>(null);
+  const [biomedParseDemoCapabilities, setBiomedParseDemoCapabilities] = useState<BiomedParseDemoCapabilities | null>(null);
+  const [biomedParseDemoResult, setBiomedParseDemoResult] = useState<BiomedParseDemoRunResponse | null>(null);
+  const [biomedParseDemoError, setBiomedParseDemoError] = useState<string | null>(null);
+  const [biomedParseDemoRunning, setBiomedParseDemoRunning] = useState(false);
   const [niftiPreviewStates, setNiftiPreviewStates] = useState<Record<string, NiftiPreviewState>>({});
   const [draggingLocalImport, setDraggingLocalImport] = useState(false);
   const consumedLocalStartInspectRef = useRef(false);
@@ -110,9 +116,10 @@ export default function WorklistPage() {
         return;
       }
 
-      const [platformConfig, worklist] = await Promise.all([
+      const [platformConfig, worklist, biomedParseDemo] = await Promise.all([
         clinicalApi.getPlatformConfig(),
         clinicalApi.getWorklist(),
+        clinicalApi.getBiomedParseDemoCapabilities().catch(() => null),
       ]);
 
       if (cancelled?.()) {
@@ -122,6 +129,7 @@ export default function WorklistPage() {
       setSession(sessionResponse.session);
       setConfig(platformConfig);
       setRows(worklist.rows);
+      setBiomedParseDemoCapabilities(biomedParseDemo);
     } catch (cause) {
       if (!cancelled?.()) {
         setError(cause instanceof Error ? cause.message : "Failed to load clinical worklist.");
@@ -213,6 +221,22 @@ export default function WorklistPage() {
       setError(cause instanceof Error ? cause.message : "Unable to analyze local imaging files.");
     } finally {
       setAnalyzingStudyUid(null);
+    }
+  };
+
+  const handleRunBiomedParseDemo = async () => {
+    setBiomedParseDemoRunning(true);
+    setBiomedParseDemoError(null);
+    setBiomedParseDemoResult(null);
+    try {
+      setBiomedParseDemoResult(await clinicalApi.runBiomedParseDemo({
+        source: "included_ct_amos",
+        sliceBatchSize: 4,
+      }));
+    } catch (cause) {
+      setBiomedParseDemoError(cause instanceof Error ? cause.message : "Unable to run BioMedParse demo.");
+    } finally {
+      setBiomedParseDemoRunning(false);
     }
   };
 
@@ -487,6 +511,109 @@ export default function WorklistPage() {
                   Import folder
                 </button>
               </div>
+            </div>
+          )}
+
+          {biomedParseDemoCapabilities?.enabled && (
+            <div
+              data-testid="biomedparse-demo-panel"
+              className="mt-6 rounded-2xl border border-violet-300/30 bg-slate-950/70 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-violet-200/80">
+                    <Activity className="h-4 w-4" />
+                    BioMedParse demo
+                  </div>
+                  <div className="mt-2 text-base font-medium text-white">
+                    {biomedParseDemoCapabilities.ready ? "Bundled CT sample ready" : "Worker unavailable"}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-300">
+                    {biomedParseDemoCapabilities.ready
+                      ? `${biomedParseDemoCapabilities.modelId} · ${biomedParseDemoCapabilities.license}`
+                      : biomedParseDemoCapabilities.reason}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="run-biomedparse-demo"
+                  disabled={!biomedParseDemoCapabilities.ready || biomedParseDemoRunning}
+                  onClick={() => void handleRunBiomedParseDemo()}
+                  className="inline-flex items-center gap-2 rounded-full border border-violet-200/40 bg-violet-300/10 px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-300/20 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {biomedParseDemoRunning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Activity className="h-4 w-4" />
+                  )}
+                  Run CT demo
+                </button>
+              </div>
+
+              {biomedParseDemoError && (
+                <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {biomedParseDemoError}
+                </div>
+              )}
+
+              {biomedParseDemoResult && (
+                <div
+                  data-testid="biomedparse-demo-result"
+                  className="mt-4 grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)]"
+                >
+                  <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900/70">
+                    <img
+                      src={resolveClinicalApiUrl(biomedParseDemoResult.artifacts.previewPngUrl)}
+                      alt=""
+                      className="aspect-square h-full w-full object-cover"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <MetricChip label="Mask" value={biomedParseDemoResult.maskShape.join(" × ")} />
+                      <MetricChip label="Voxels" value={biomedParseDemoResult.nonzeroVoxels.toLocaleString()} />
+                      <MetricChip
+                        label="VRAM"
+                        value={
+                          biomedParseDemoResult.runtime.peakVramGib == null
+                            ? "n/a"
+                            : `${biomedParseDemoResult.runtime.peakVramGib.toFixed(2)} GiB`
+                        }
+                      />
+                    </div>
+                    <div className="mt-3 text-xs text-slate-400">
+                      Run {biomedParseDemoResult.runId} · slice {biomedParseDemoResult.previewSlice + 1} · inference{" "}
+                      {biomedParseDemoResult.timings.inferenceSeconds?.toFixed(2) ?? "n/a"}s
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {biomedParseDemoResult.labels
+                        .filter((label) => label.voxelCount > 0)
+                        .slice(0, 8)
+                        .map((label) => (
+                          <span
+                            key={`${biomedParseDemoResult.runId}-${label.label}`}
+                            className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs text-slate-200"
+                            title={label.prompt}
+                          >
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: label.color }}
+                            />
+                            <span className="truncate">
+                              {label.label}: {label.voxelCount.toLocaleString()}
+                            </span>
+                          </span>
+                        ))}
+                    </div>
+                    <a
+                      href={resolveClinicalApiUrl(biomedParseDemoResult.artifacts.maskNpzUrl)}
+                      className="mt-3 inline-flex text-sm text-violet-200 underline-offset-4 hover:underline"
+                    >
+                      Download mask NPZ
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -774,6 +901,15 @@ export default function WorklistPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function MetricChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+      <div className="text-xs uppercase tracking-[0.12em] text-slate-500">{label}</div>
+      <div className="mt-1 break-words text-sm text-slate-100">{value}</div>
     </div>
   );
 }

@@ -15,7 +15,9 @@
 
 - `backend/server.py` is the FastAPI entrypoint and may gracefully degrade optional research imports, but new clinical behavior must route through `backend/clinical/*`.
 - The clinical service layer is authoritative for governed workflow, actor identity, audit, DICOMweb, reports, AI jobs, and derived results.
-- Research modules such as `backend/radsysx.py`, `backend/chat_interface.py`, `backend/biomedparse_api.py`, and `backend/biomedparse_api_simple.py` must not become clinical shortcuts.
+- Research modules such as `backend/radsysx.py`, `backend/chat_interface.py`, `backend/biomedparse_api.py`, `backend/biomedparse_api_simple.py`, `backend/biomedparse_demo.py`, and `backend/biomedparse_demo_worker.py` must not become clinical shortcuts.
+- `backend/biomedparse_demo.py` is a lightweight optional integration demo router/helper. It may expose capabilities and spawn a configured external BioMedParse worker, but it must not import CUDA, Detectron2, or BioMedParse dependencies into the clinical FastAPI process at import time.
+- `backend/biomedparse_demo_worker.py` is the subprocess worker entrypoint for the demo. It assumes a separately prepared BioMedParse checkout, Python environment, and checkpoint path supplied through environment variables.
 - Keep dependency guidance split: `requirements-clinical.txt` for clinical runtime, `requirements.txt` for broader research/agent runtime.
 
 ## Work Guidance

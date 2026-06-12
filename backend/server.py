@@ -3,7 +3,7 @@
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import asyncio
@@ -100,6 +100,14 @@ try:
     from backend.clinical.local_imaging import LocalImagingImporter, LocalImagingUploadPart
     from backend.clinical.repositories import ClinicalRepository
     from backend.clinical.services import ClinicalPlatformService
+    from backend.biomedparse_demo import (
+        BiomedParseDemoCapabilities,
+        BiomedParseDemoRunRequest,
+        BiomedParseDemoRunResponse,
+        biomedparse_demo_artifact_path,
+        biomedparse_demo_capabilities,
+        run_biomedparse_demo,
+    )
 except ModuleNotFoundError:
     from clinical.auth import ClinicalSessionManager
     from clinical.config import get_settings
@@ -128,6 +136,14 @@ except ModuleNotFoundError:
     from clinical.local_imaging import LocalImagingImporter, LocalImagingUploadPart
     from clinical.repositories import ClinicalRepository
     from clinical.services import ClinicalPlatformService
+    from biomedparse_demo import (
+        BiomedParseDemoCapabilities,
+        BiomedParseDemoRunRequest,
+        BiomedParseDemoRunResponse,
+        biomedparse_demo_artifact_path,
+        biomedparse_demo_capabilities,
+        run_biomedparse_demo,
+    )
 
 settings = get_settings()
 session_manager = ClinicalSessionManager(settings)
@@ -778,6 +794,47 @@ async def submit_ai_job(request: AIJobCreateRequest, http_request: Request):
         request,
         actor=actor,
         source_ip=_client_ip(http_request),
+    )
+
+
+@app.get("/api/ai/biomedparse-demo/capabilities", response_model=BiomedParseDemoCapabilities)
+async def get_biomedparse_demo_capabilities(http_request: Request):
+    """Return the optional research BioMedParse demo state without loading model code."""
+    _require_session(http_request)
+    return biomedparse_demo_capabilities()
+
+
+@app.post("/api/ai/biomedparse-demo/run", response_model=BiomedParseDemoRunResponse)
+async def run_biomedparse_integration_demo(
+    request: BiomedParseDemoRunRequest,
+    http_request: Request,
+):
+    """Run the opt-in BioMedParse v2 demo as an isolated worker process."""
+    _require_session(http_request)
+    return await run_biomedparse_demo(request)
+
+
+@app.get("/api/ai/biomedparse-demo/runs/{run_id}/mask.npz")
+async def get_biomedparse_demo_mask(run_id: str, http_request: Request):
+    """Return the mask NPZ for a completed BioMedParse demo run."""
+    _require_session(http_request)
+    return FileResponse(
+        biomedparse_demo_artifact_path(run_id, "mask.npz"),
+        media_type="application/octet-stream",
+        filename=f"{run_id}-mask.npz",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/ai/biomedparse-demo/runs/{run_id}/preview.png")
+async def get_biomedparse_demo_preview(run_id: str, http_request: Request):
+    """Return the preview PNG for a completed BioMedParse demo run."""
+    _require_session(http_request)
+    return FileResponse(
+        biomedparse_demo_artifact_path(run_id, "preview.png"),
+        media_type="image/png",
+        filename=f"{run_id}-preview.png",
+        headers={"Cache-Control": "no-store"},
     )
 
 

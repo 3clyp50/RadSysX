@@ -3,6 +3,9 @@ import type {
   AIJobRecord,
   AIJobRequest,
   AuditStudyResponse,
+  BiomedParseDemoCapabilities,
+  BiomedParseDemoRunRequest,
+  BiomedParseDemoRunResponse,
   ClinicalPlatformConfig,
   DerivedResultRequest,
   DerivedResultResponse,
@@ -125,6 +128,17 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
         undefined,
         options,
       );
+    },
+
+    getBiomedParseDemoCapabilities(): Promise<BiomedParseDemoCapabilities> {
+      return requestJson("/api/ai/biomedparse-demo/capabilities", undefined, options);
+    },
+
+    runBiomedParseDemo(payload: BiomedParseDemoRunRequest = {}): Promise<BiomedParseDemoRunResponse> {
+      return requestJson("/api/ai/biomedparse-demo/run", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, options);
     },
 
     launchImaging(payload: ImagingLaunchRequest): Promise<ImagingLaunchResponse> {
