@@ -54,7 +54,7 @@ This is not merely an upload button. The desired end state is a local app that c
 - There is not yet a local file ingest service that turns uploaded DICOM/DICOMDIR/NIFTI files into a clinical/local workspace.
 - There is now a first backend-owned local file ingest service in `backend/clinical/local_imaging.py`.
 - There is now an ignored repo-local storage default at `backend/local-imaging-data/`, enabled by Electron.
-- There is not yet a local DICOMweb-compatible adapter for the desktop fast path.
+- There is now a minimal backend local DICOMweb surface for imported DICOM: study/series/instance metadata, whole-instance multipart retrieval, bulk-data multipart retrieval, and simple frame multipart retrieval.
 - NIFTI display/analysis path needs explicit design because OHIF/DICOMweb is DICOM-centric.
 - DICOMDIR expansion needs parsing and file-path resolution rules.
 - Cross-platform file picker and directory upload behavior needs explicit testing.
@@ -119,7 +119,7 @@ Likely components:
 - [x] Create branch `easy`.
 - [x] Commit completed Electron fast path with title and description.
 - [x] Keep subsequent local-imaging changes on `easy`.
-- [ ] Before final completion, make one or more intentional commits for local imaging work.
+- [x] Before final completion, make one or more intentional commits for local imaging work.
 - [ ] Do not mark the goal complete until upload/use of local files is proven with runtime evidence.
 
 ### Discovery
@@ -133,9 +133,9 @@ Likely components:
 - [ ] Inspect `frontend/components/DicomViewer.tsx`.
 - [ ] Inspect `frontend/components/AdvancedViewer.tsx`.
 - [ ] Inspect `frontend/components/ViewportManager.tsx`.
-- [ ] Inspect `backend/clinical/contracts.py`.
-- [ ] Inspect `backend/clinical/repositories.py`.
-- [ ] Inspect `backend/clinical/services.py`.
+- [x] Inspect `backend/clinical/contracts.py`.
+- [x] Inspect `backend/clinical/repositories.py`.
+- [x] Inspect `backend/clinical/services.py`.
 - [ ] Inspect current test fixtures under `dicom-test-files/`.
 - [ ] Determine whether any NIFTI fixture exists; if not, generate a tiny safe synthetic fixture for tests or document missing manual fixture.
 
@@ -147,7 +147,7 @@ Likely components:
 - [x] Accept multipart uploads without writing to public static paths.
 - [x] Store files under ignored `backend/local-imaging-data/` by default.
 - [x] Add `.gitignore` rules for local uploaded image stores.
-- [ ] Enforce file size and count limits with clear errors.
+- [x] Enforce file size and count limits with clear errors.
 - [x] Detect DICOM by pydicom parse and magic.
 - [x] Detect DICOMDIR by filename and DICOM media storage metadata.
 - [x] Resolve DICOMDIR referenced files safely enough for included-file warning/grouping; deeper directory-record coverage remains future work.
@@ -156,8 +156,8 @@ Likely components:
 - [x] Return a structured ingest response with local study IDs, modality/format, count, and warnings.
 - [x] Avoid logging patient names, identifiers, raw DICOM tags, or paths containing PHI in tests/manifest.
 - [x] Record imported DICOM studies into the local clinical repository.
-- [ ] Preserve seeded demo worklist behavior.
-- [ ] Make local archive refs explicit, e.g. `local://...`, not `orthanc://default`.
+- [x] Preserve seeded demo worklist behavior.
+- [x] Make local archive refs explicit, e.g. `local://...`, not `orthanc://default`.
 
 ### Frontend Local Import
 
@@ -168,7 +168,7 @@ Likely components:
 - [ ] Clearly show supported formats without in-app instructional clutter.
 - [x] Show import success, warnings, and errors.
 - [x] Refresh worklist after import.
-- [ ] Route imported DICOM studies to viewer/workspace when available.
+- [x] Route imported DICOM studies to viewer/workspace launch path; backend now serves minimal local DICOMweb for imported DICOM.
 - [ ] Route NIFTI/fallback images to an analysis/preview path if OHIF is not immediately suitable.
 - [ ] Keep text inside buttons/cards from overflowing on mobile and desktop.
 
@@ -178,39 +178,39 @@ Likely components:
 - [ ] Keep drag-and-drop browser upload as a portable fallback.
 - [ ] Ensure desktop bridge/proxy behavior handles large upload sizes beyond focused smoke fixtures.
 - [x] Ensure startup environment points local upload storage to a predictable ignored path.
-- [ ] Verify `npm run desktop:smoke` still starts and cleans up.
+- [x] Verify `npm run desktop:smoke` still starts and cleans up.
 
 ### Viewer And Analysis
 
-- [ ] For DICOM, choose whether fast path serves a simple local DICOMweb endpoint or uses existing research DICOM viewer components first.
-- [ ] For DICOMDIR, ensure referenced DICOM files become a series/study collection.
+- [x] For DICOM, choose whether fast path serves a simple local DICOMweb endpoint or uses existing research DICOM viewer components first: first pass is simple local DICOMweb endpoint.
+- [x] For DICOMDIR, ensure referenced DICOM files become a series/study collection.
 - [ ] For NIFTI, choose short-term preview/metadata path and longer-term volume rendering/analysis path.
-- [ ] Avoid claiming full OHIF image rendering until a real DICOMweb or compatible local source is verified.
+- [x] Avoid claiming full OHIF image rendering until a real DICOMweb or compatible local source is verified; docs call this minimal local DICOM metadata/frame serving, not full archive parity.
 - [ ] Ensure analysis routes can consume local stored files server-side without browser direct third-party transfer.
 
 ### Tests And Verification
 
 - [x] Unit-test file format detection through backend endpoint tests for DICOM, DICOMDIR, and NIFTI.
-- [ ] Unit-test DICOM metadata extraction without PHI logging.
+- [x] Unit-test DICOM metadata extraction without PHI logging in manifest.
 - [x] Unit-test DICOMDIR reference handling for an included referenced DICOM.
 - [x] Unit-test NIFTI detection for `.nii`; `.nii.gz` still needs explicit coverage.
 - [x] Add backend API test for local import with synthetic/safe files.
-- [ ] Add frontend type-check coverage for import UI.
-- [ ] Run `npm run desktop:doctor`.
-- [ ] Run `npm run desktop:smoke`.
+- [x] Add frontend type-check coverage for import UI.
+- [x] Run `npm run desktop:doctor`.
+- [x] Run `npm run desktop:smoke`.
 - [x] Run `python3 -m pytest backend/tests/test_clinical_platform.py`.
 - [x] Run any new backend tests.
 - [x] Run `npm run type-check`.
-- [ ] Run `npm run build --workspace viewer`.
+- [x] Run `npm run build --workspace viewer`.
 - [ ] Perform at least one runtime upload smoke test if browser tooling is available.
 
 ### Documentation
 
-- [ ] Update root `AGENTS.md` if local imaging changes behavior/contracts.
-- [ ] Update closest child `AGENTS.md` files touched by local imaging work.
-- [ ] Update `README.md` with local import workflow once real behavior exists.
-- [ ] Update `DEPLOY_LOCAL.md` if desktop/local imaging run path changes.
-- [ ] Document limitations honestly: e.g. metadata import vs full OHIF rendering if not yet complete.
+- [x] Update root `AGENTS.md` if local imaging changes behavior/contracts.
+- [x] Update closest child `AGENTS.md` files touched by local imaging work.
+- [x] Update `README.md` with local import workflow once real behavior exists.
+- [x] Update `DEPLOY_LOCAL.md` if desktop/local imaging run path changes.
+- [x] Document limitations honestly: e.g. metadata import vs full OHIF rendering if not yet complete.
 
 ## Completion Audit Template
 

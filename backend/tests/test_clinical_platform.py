@@ -43,6 +43,7 @@ def make_test_dicom_bytes(
     *,
     study_uid: str = "1.2.826.0.1.3680043.10.54321.1",
     series_uid: str = "1.2.826.0.1.3680043.10.54321.2",
+    sop_uid: str = "1.2.826.0.1.3680043.10.54321.3",
 ) -> bytes:
     pydicom = pytest.importorskip("pydicom")
     from pydicom.dataset import FileDataset, FileMetaDataset
@@ -50,7 +51,7 @@ def make_test_dicom_bytes(
 
     file_meta = FileMetaDataset()
     file_meta.MediaStorageSOPClassUID = CTImageStorage
-    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.MediaStorageSOPInstanceUID = sop_uid or generate_uid()
     file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
 
     dataset = FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
@@ -60,6 +61,15 @@ def make_test_dicom_bytes(
     dataset.SeriesInstanceUID = series_uid
     dataset.Modality = "CT"
     dataset.PatientID = "DO-NOT-LOG"
+    dataset.Rows = 2
+    dataset.Columns = 2
+    dataset.SamplesPerPixel = 1
+    dataset.PhotometricInterpretation = "MONOCHROME2"
+    dataset.BitsAllocated = 8
+    dataset.BitsStored = 8
+    dataset.HighBit = 7
+    dataset.PixelRepresentation = 0
+    dataset.PixelData = bytes([0, 1, 2, 3])
     dataset.is_little_endian = True
     dataset.is_implicit_VR = False
 
@@ -331,6 +341,73 @@ def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
     assert imported["studyInstanceUID"] == study_uid
     assert imported["formats"] == ["dicom", "dicomdir"]
     assert imported["warnings"] == []
+
+
+def test_local_dicomweb_serves_imported_dicom_metadata_and_frame(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    study_uid = "1.2.826.0.1.3680043.10.54321.300"
+    series_uid = "1.2.826.0.1.3680043.10.54321.301"
+    sop_uid = "1.2.826.0.1.3680043.10.54321.302"
+
+    import_response = client.post(
+        "/api/local-imaging/import",
+        data={"relativePaths": json.dumps(["case-a/scan.dcm"])},
+        files=[
+            (
+                "files",
+                (
+                    "scan.dcm",
+                    make_test_dicom_bytes(
+                        study_uid=study_uid,
+                        series_uid=series_uid,
+                        sop_uid=sop_uid,
+                    ),
+                    "application/dicom",
+                ),
+            ),
+        ],
+    )
+    assert import_response.status_code == 200
+
+    studies_response = client.get(f"/dicom-web/studies?StudyInstanceUID={study_uid}")
+    assert studies_response.status_code == 200
+    assert studies_response.json()[0]["0020000D"]["Value"] == [study_uid]
+
+    metadata_response = client.get(
+        f"/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
+    )
+    assert metadata_response.status_code == 200
+    metadata = metadata_response.json()[0]
+    assert metadata["0020000D"]["Value"] == [study_uid]
+    assert metadata["0020000E"]["Value"] == [series_uid]
+    assert metadata["00080018"]["Value"] == [sop_uid]
+    assert metadata["7FE00010"]["BulkDataURI"].endswith("/bulkdata/7FE00010")
+
+    frame_response = client.get(
+        f"/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/1"
+    )
+    assert frame_response.status_code == 200
+    assert frame_response.headers["content-type"].startswith("multipart/related")
+    assert b"\x00\x01\x02\x03" in frame_response.content
+
+    bulk_response = client.get(
+        f"/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/bulkdata/7FE00010"
+    )
+    assert bulk_response.status_code == 200
+    assert bulk_response.headers["content-type"].startswith("multipart/related")
+    assert b"\x00\x01\x02\x03" in bulk_response.content
+
+    instance_response = client.get(
+        f"/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
+    )
+    assert instance_response.status_code == 200
+    assert instance_response.headers["content-type"].startswith("multipart/related")
+    assert b"DICM" in instance_response.content
 
 
 def test_imaging_launch_returns_opaque_token_and_viewer_url_without_phi_in_url() -> None:

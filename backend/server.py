@@ -14,6 +14,7 @@ import os
 import pathlib
 import traceback
 from typing import List, Dict, Any, Optional
+from uuid import uuid4
 
 RADSYSX_IMPORT_ERROR = None
 
@@ -406,6 +407,36 @@ def _require_session(request: Request) -> SessionClaims:
     return session
 
 
+def _require_local_dicomweb() -> None:
+    if not settings.local_imaging_enabled:
+        raise HTTPException(status_code=404, detail="Local DICOMweb is not enabled for this runtime.")
+
+
+def _parse_frame_numbers(value: str) -> list[int]:
+    try:
+        frame_numbers = [int(part) for part in value.split(",") if part.strip()]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Frame numbers must be integers.") from exc
+    if not frame_numbers or any(frame_number < 1 for frame_number in frame_numbers):
+        raise HTTPException(status_code=400, detail="Frame numbers are one-based integers.")
+    return frame_numbers
+
+
+def _multipart_related_response(parts: list[bytes], content_type: str) -> Response:
+    boundary = f"radsysx-local-{uuid4().hex}"
+    body = bytearray()
+    for part in parts:
+        body.extend(f"--{boundary}\r\n".encode("ascii"))
+        body.extend(f"Content-Type: {content_type}\r\n\r\n".encode("ascii"))
+        body.extend(part)
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("ascii"))
+    return Response(
+        content=bytes(body),
+        media_type=f'multipart/related; type="{content_type}"; boundary={boundary}',
+    )
+
+
 @app.post("/api/auth/local-login")
 async def clinical_local_login(payload: LocalLoginRequest, response: Response):
     """Issue a local clinical session for a seeded persona."""
@@ -549,6 +580,114 @@ async def import_local_imaging(
             )
         )
     return result
+
+
+@app.get("/dicom-web/studies")
+async def local_dicomweb_search_studies(StudyInstanceUID: str | None = None):
+    """Return DICOM JSON study metadata for local desktop imports."""
+    _require_local_dicomweb()
+    instances = local_imaging_importer.list_dicom_instances(study_instance_uid=StudyInstanceUID)
+    seen: set[str] = set()
+    studies: list[dict[str, Any]] = []
+    for instance in instances:
+        if instance.study_instance_uid in seen:
+            continue
+        seen.add(instance.study_instance_uid)
+        metadata = local_imaging_importer.dicom_json_metadata(
+            study_instance_uid=instance.study_instance_uid,
+            series_instance_uid=instance.series_instance_uid,
+            sop_instance_uid=instance.sop_instance_uid,
+        )
+        if metadata:
+            studies.append(metadata[0])
+    return studies
+
+
+@app.get("/dicom-web/studies/{study_uid}/metadata")
+async def local_dicomweb_study_metadata(study_uid: str):
+    """Return local DICOM instance metadata for a study."""
+    _require_local_dicomweb()
+    return local_imaging_importer.dicom_json_metadata(study_instance_uid=study_uid)
+
+
+@app.get("/dicom-web/studies/{study_uid}/series")
+async def local_dicomweb_search_series(study_uid: str):
+    """Return DICOM JSON series metadata for a local study."""
+    _require_local_dicomweb()
+    instances = local_imaging_importer.list_dicom_instances(study_instance_uid=study_uid)
+    seen: set[str] = set()
+    series: list[dict[str, Any]] = []
+    for instance in instances:
+        if instance.series_instance_uid in seen:
+            continue
+        seen.add(instance.series_instance_uid)
+        metadata = local_imaging_importer.dicom_json_metadata(
+            study_instance_uid=study_uid,
+            series_instance_uid=instance.series_instance_uid,
+            sop_instance_uid=instance.sop_instance_uid,
+        )
+        if metadata:
+            series.append(metadata[0])
+    return series
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/metadata")
+async def local_dicomweb_series_metadata(study_uid: str, series_uid: str):
+    """Return local DICOM instance metadata for a series."""
+    _require_local_dicomweb()
+    return local_imaging_importer.dicom_json_metadata(
+        study_instance_uid=study_uid,
+        series_instance_uid=series_uid,
+    )
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/instances")
+async def local_dicomweb_search_instances(study_uid: str, series_uid: str):
+    """Return DICOM JSON instance metadata for a local series."""
+    _require_local_dicomweb()
+    return local_imaging_importer.dicom_json_metadata(
+        study_instance_uid=study_uid,
+        series_instance_uid=series_uid,
+    )
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata")
+async def local_dicomweb_instance_metadata(study_uid: str, series_uid: str, sop_uid: str):
+    """Return DICOM JSON metadata for a local instance."""
+    _require_local_dicomweb()
+    return local_imaging_importer.dicom_json_metadata(
+        study_instance_uid=study_uid,
+        series_instance_uid=series_uid,
+        sop_instance_uid=sop_uid,
+    )
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}")
+async def local_dicomweb_instance(study_uid: str, series_uid: str, sop_uid: str):
+    """Return a local DICOM instance as multipart WADO-RS content."""
+    _require_local_dicomweb()
+    payload = local_imaging_importer.read_dicom_instance(study_uid, series_uid, sop_uid)
+    return _multipart_related_response([payload], "application/dicom")
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/bulkdata/{tag}")
+async def local_dicomweb_bulkdata(study_uid: str, series_uid: str, sop_uid: str, tag: str):
+    """Return local binary bulk data for a DICOM element."""
+    _require_local_dicomweb()
+    payload = local_imaging_importer.read_bulk_data(study_uid, series_uid, sop_uid, tag)
+    return _multipart_related_response([payload], "application/octet-stream")
+
+
+@app.get("/dicom-web/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{frames}")
+async def local_dicomweb_frames(study_uid: str, series_uid: str, sop_uid: str, frames: str):
+    """Return local uncompressed frame bytes for a DICOM instance."""
+    _require_local_dicomweb()
+    frame_numbers = _parse_frame_numbers(frames)
+    payloads = [
+        local_imaging_importer.read_frame(study_uid, series_uid, sop_uid, frame_number)
+        for frame_number in frame_numbers
+    ]
+    return _multipart_related_response(payloads, "application/octet-stream")
 
 
 @app.get("/api/studies/{study_uid}/workspace")

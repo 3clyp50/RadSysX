@@ -258,7 +258,7 @@ npm run desktop
 
 `desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, local import of DICOM/DICOMDIR/NIFTI/common image files, worklist registration, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, local import of DICOM/DICOMDIR/NIFTI/common image files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
 For a quick startup and cleanup check:
 

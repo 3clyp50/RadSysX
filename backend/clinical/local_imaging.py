@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 import pydicom
+from fastapi import HTTPException
+from pydicom.tag import Tag
 
 from .config import ClinicalPlatformSettings
 from .contracts import LocalImagingImportResponse, LocalImagingImportedStudy
@@ -39,6 +41,14 @@ class _DetectedFile:
     series_instance_uid: str | None = None
     sop_instance_uid: str | None = None
     modality: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalDicomInstance:
+    study_instance_uid: str
+    series_instance_uid: str
+    sop_instance_uid: str
+    stored_path: str
 
 
 class LocalImagingImporter:
@@ -245,6 +255,116 @@ class LocalImagingImporter:
         }
         (import_root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+    def list_dicom_instances(
+        self,
+        *,
+        study_instance_uid: str | None = None,
+        series_instance_uid: str | None = None,
+        sop_instance_uid: str | None = None,
+    ) -> list[LocalDicomInstance]:
+        instances: list[LocalDicomInstance] = []
+        for manifest in self._iter_manifests():
+            for file_entry in manifest.get("files", []):
+                if file_entry.get("format") != "dicom":
+                    continue
+                instance = LocalDicomInstance(
+                    study_instance_uid=str(file_entry.get("studyInstanceUID") or ""),
+                    series_instance_uid=str(file_entry.get("seriesInstanceUID") or ""),
+                    sop_instance_uid=str(file_entry.get("sopInstanceUID") or ""),
+                    stored_path=str(file_entry.get("storedPath") or ""),
+                )
+                if not all(
+                    [instance.study_instance_uid, instance.series_instance_uid, instance.sop_instance_uid]
+                ):
+                    continue
+                if study_instance_uid and instance.study_instance_uid != study_instance_uid:
+                    continue
+                if series_instance_uid and instance.series_instance_uid != series_instance_uid:
+                    continue
+                if sop_instance_uid and instance.sop_instance_uid != sop_instance_uid:
+                    continue
+                instances.append(instance)
+        return instances
+
+    def dicom_json_metadata(
+        self,
+        *,
+        study_instance_uid: str,
+        series_instance_uid: str | None = None,
+        sop_instance_uid: str | None = None,
+    ) -> list[dict]:
+        return [
+            self._dicom_json_for_instance(instance)
+            for instance in self.list_dicom_instances(
+                study_instance_uid=study_instance_uid,
+                series_instance_uid=series_instance_uid,
+                sop_instance_uid=sop_instance_uid,
+            )
+        ]
+
+    def read_dicom_instance(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        sop_instance_uid: str,
+    ) -> bytes:
+        instance = self._require_instance(study_instance_uid, series_instance_uid, sop_instance_uid)
+        return Path(instance.stored_path).read_bytes()
+
+    def read_bulk_data(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        sop_instance_uid: str,
+        tag: str,
+    ) -> bytes:
+        instance = self._require_instance(study_instance_uid, series_instance_uid, sop_instance_uid)
+        dataset = pydicom.dcmread(instance.stored_path, force=False)
+        try:
+            data_element = dataset.get(Tag(tag))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Bulk data tag is invalid.") from exc
+        if data_element is None:
+            raise HTTPException(status_code=404, detail="Bulk data element was not found.")
+        value = data_element.value
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        raise HTTPException(status_code=415, detail="Requested element is not binary bulk data.")
+
+    def read_frame(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        sop_instance_uid: str,
+        frame_number: int,
+    ) -> bytes:
+        if frame_number < 1:
+            raise HTTPException(status_code=400, detail="Frame numbers are one-based.")
+        instance = self._require_instance(study_instance_uid, series_instance_uid, sop_instance_uid)
+        dataset = pydicom.dcmread(instance.stored_path, force=False)
+        pixel_data = getattr(dataset, "PixelData", None)
+        if pixel_data is None:
+            raise HTTPException(status_code=404, detail="Pixel data was not found for this instance.")
+
+        number_of_frames = int(getattr(dataset, "NumberOfFrames", 1) or 1)
+        if frame_number > number_of_frames:
+            raise HTTPException(status_code=404, detail="Frame was not found.")
+
+        frame_size = self._uncompressed_frame_size(dataset)
+        if frame_size is None:
+            if frame_number == 1:
+                return bytes(pixel_data)
+            raise HTTPException(status_code=415, detail="Compressed multi-frame retrieval is not available locally.")
+
+        start = (frame_number - 1) * frame_size
+        end = start + frame_size
+        frame = bytes(pixel_data[start:end])
+        if not frame:
+            raise HTTPException(status_code=404, detail="Frame data was not found.")
+        return frame
+
     def _dicomdir_warnings(self, detected_files: list[_DetectedFile]) -> list[str]:
         warnings: list[str] = []
         dicomdir_files = [file for file in detected_files if file.format == "dicomdir"]
@@ -273,6 +393,63 @@ class LocalImagingImporter:
                 )
 
         return warnings
+
+    def _iter_manifests(self):
+        storage_root = Path(self._settings.local_imaging_storage_dir)
+        if not storage_root.exists():
+            return
+        for manifest_path in sorted(storage_root.glob("import-*/manifest.json")):
+            try:
+                yield json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    def _require_instance(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        sop_instance_uid: str,
+    ) -> LocalDicomInstance:
+        instances = self.list_dicom_instances(
+            study_instance_uid=study_instance_uid,
+            series_instance_uid=series_instance_uid,
+            sop_instance_uid=sop_instance_uid,
+        )
+        if not instances:
+            raise HTTPException(status_code=404, detail="Local DICOM instance was not found.")
+        instance = instances[0]
+        if not Path(instance.stored_path).is_file():
+            raise HTTPException(status_code=404, detail="Local DICOM object is missing from storage.")
+        return instance
+
+    def _dicom_json_for_instance(self, instance: LocalDicomInstance) -> dict:
+        dataset = pydicom.dcmread(instance.stored_path, force=False)
+
+        def bulk_data_uri(data_element) -> str:
+            tag = f"{data_element.tag.group:04X}{data_element.tag.element:04X}"
+            return (
+                f"/dicom-web/studies/{instance.study_instance_uid}"
+                f"/series/{instance.series_instance_uid}"
+                f"/instances/{instance.sop_instance_uid}/bulkdata/{tag}"
+            )
+
+        metadata = dataset.to_json_dict(
+            bulk_data_threshold=1,
+            bulk_data_element_handler=bulk_data_uri,
+            suppress_invalid_tags=True,
+        )
+        transfer_syntax = getattr(getattr(dataset, "file_meta", None), "TransferSyntaxUID", None)
+        if transfer_syntax:
+            metadata["00020010"] = {"vr": "UI", "Value": [str(transfer_syntax)]}
+        metadata["00081190"] = {
+            "vr": "UR",
+            "Value": [
+                f"/dicom-web/studies/{instance.study_instance_uid}"
+                f"/series/{instance.series_instance_uid}"
+                f"/instances/{instance.sop_instance_uid}"
+            ],
+        }
+        return metadata
 
     @staticmethod
     def _dicomdir_referenced_paths(dataset) -> list[str]:
@@ -384,3 +561,16 @@ class LocalImagingImporter:
         if any(file.format == "dicomdir" for file in files):
             return [warning for warning in warnings if "DICOMDIR" in warning]
         return []
+
+    @staticmethod
+    def _uncompressed_frame_size(dataset) -> int | None:
+        try:
+            rows = int(dataset.Rows)
+            columns = int(dataset.Columns)
+            samples_per_pixel = int(getattr(dataset, "SamplesPerPixel", 1))
+            bits_allocated = int(dataset.BitsAllocated)
+        except Exception:
+            return None
+
+        bytes_per_sample = max(bits_allocated // 8, 1)
+        return rows * columns * samples_per_pixel * bytes_per_sample
