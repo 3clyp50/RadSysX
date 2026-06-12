@@ -25,6 +25,7 @@
 - A missing local DICOMweb archive should degrade honestly. Full Orthanc-backed image retrieval remains the compose-stack path until a local archive bundle is added.
 - Desktop sets `RADSYSX_LOCAL_IMAGING_ENABLED=true` and stores local imports in an ignored repo-local backend data directory unless overridden.
 - When `RADSYSX_DESKTOP_DICOMWEB_TARGET` is unset, the desktop bridge routes `/dicom-web` to the backend's local DICOMweb endpoints for imported DICOM studies.
+- The Electron-supervised backend runs uvicorn without access logs so local DICOMweb query strings and workspace URLs are not casually printed during desktop use or smoke tests.
 - `preload.cjs` exposes only narrow desktop helpers, including native local imaging file/folder selection and the preferred direct desktop import bridge; browser drag-and-drop remains a portable frontend fallback and must still import through backend contracts. Do not expose raw filesystem or shell primitives to the renderer.
 - The preferred native desktop import path should keep selected file paths and file bytes in Electron main, attach the existing backend-issued session cookie from the Electron cookie jar, and POST multipart data to `POST /api/local-imaging/import` through the one-origin desktop bridge.
 - The legacy `selectLocalImagingFiles` helper may remain as a compatibility fallback, but normal desktop worklist imports should prefer `importLocalImaging` so large folders do not need to cross renderer IPC as ArrayBuffers.
@@ -37,6 +38,8 @@
 - `npm run desktop:smoke:picker-import` should keep proving the hydrated worklist UI can invoke the Electron native picker bridge through `preload.cjs`, read a selected folder through the main-process recursive collector, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker. This does not replace a human or OS-automation smoke of the actual native dialog.
 - `npm run desktop:smoke:picker-large-import` should keep proving the same direct native picker import path with an additional 8 MiB synthetic NIFTI volume, including backend asset summary, preview, and technical analysis checks.
 - `npm run desktop:smoke:picker-many-import` should keep proving the same direct native picker import path with a nested folder of 32 additional extensionless DICOM instances, including recursive folder collection, backend import of 37 files, DICOM asset summary, and technical analysis checks.
+- `npm run desktop:smoke:viewer-launch` should keep proving the hydrated worklist can import a local DICOM/DICOMDIR study, launch it through the governed viewer path, resolve the opaque launch in `/viewer/`, strip the launch token from the browser URL, bind OHIF runtime configuration to same-origin local DICOMweb roots, and query the imported study from the viewer origin.
+- Desktop UI smokes force-refresh the frontend production shell by default so smoke assertions always exercise the current source tree, not a stale stamped build.
 - Run desktop UI smoke commands sequentially unless their ports are explicitly overridden; by default they share fixed high ports for Electron, the bridge, Next.js, and FastAPI.
 
 ## Work Guidance
@@ -55,6 +58,7 @@
 - `npm run desktop:smoke:picker-many-import`
 - `npm run desktop:smoke:picker-import`
 - `npm run desktop:smoke:ui-import`
+- `npm run desktop:smoke:viewer-launch`
 - `node --check desktop/src/main.mjs`
 - `node --check desktop/scripts/dev-frontend.mjs`
 - `node --check desktop/scripts/doctor.mjs`

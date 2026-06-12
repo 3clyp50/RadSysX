@@ -315,6 +315,14 @@ npm run desktop:smoke:picker-many-import
 
 That variant adds a nested folder of 32 additional extensionless DICOM instances to the picker fixture folder and verifies recursive collection, import of 37 files into 2 local studies, DICOM asset summary, and technical analysis through the same direct Electron-main upload path.
 
+For an imported-DICOM viewer handoff check:
+
+```bash
+npm run desktop:smoke:viewer-launch
+```
+
+That smoke imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed OHIF viewer, verifies the opaque launch resolves under `/viewer/`, confirms the launch token is stripped from the browser URL, and checks that viewer-origin local DICOMweb/workspace requests can find the imported study. It proves viewer handoff and local DICOMweb binding, not full diagnostic pixel-rendering parity.
+
 ### Install the full backend/runtime dependency set
 
 If you want one local Python environment that can exercise both the governed clinical backend and the broader research/agent surface, use Python `3.12` and then install the full backend set:

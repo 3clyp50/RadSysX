@@ -23,6 +23,9 @@ let desktopProcess = null;
 let desktopPublicBaseUrl = null;
 
 function resolveSmokeMode() {
+  if (process.argv.includes("--viewer-launch")) {
+    return "viewer-launch";
+  }
   if (process.argv.includes("--picker-many-folder")) {
     return "picker-many-folder";
   }
@@ -289,6 +292,7 @@ async function startDesktopRuntime() {
     RADSYSX_CLINICAL_DATABASE_URL: `sqlite:///${asFileUrlPath(dbPath)}`,
     RADSYSX_SESSION_COOKIE_SECURE: "false",
     RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN: "1",
+    RADSYSX_DESKTOP_REBUILD_FRONTEND: process.env.RADSYSX_DESKTOP_REBUILD_FRONTEND ?? "1",
     ...(pickerSmokeModes.has(smokeMode)
       ? { RADSYSX_DESKTOP_PICKER_TEST_PATHS: JSON.stringify([fixtureRoot]) }
       : {}),
@@ -421,16 +425,136 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
       `(${uiSmokeInRenderer.toString()})(${JSON.stringify(readFixturePayloads())}, ${JSON.stringify(smokeMode)})`,
       120000,
     );
+    const viewerLaunch = smokeMode === "viewer-launch"
+      ? await verifyImportedDicomViewerLaunch(cdp, result.dicomStudyUid)
+      : null;
 
     return {
       ok: true,
       smokeMode,
       publicBaseUrl,
       ...result,
+      ...(viewerLaunch ? { viewerLaunch } : {}),
     };
   } finally {
     cdp.close();
   }
+}
+
+async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
+  if (!studyInstanceUid) {
+    throw new Error("Imported DICOM study UID was not returned by the UI smoke.");
+  }
+
+  await evaluateInRenderer(
+    cdp,
+    `(() => {
+      const rows = Array.from(document.querySelectorAll('[data-testid="worklist-row"]'));
+      const row = rows.find((candidate) => candidate.innerText.includes(${JSON.stringify(studyInstanceUid)}));
+      if (!row) {
+        throw new Error("Imported DICOM worklist row was not found for viewer launch.");
+      }
+      const button = row.querySelector('[data-testid="open-viewer"]');
+      if (!button) {
+        throw new Error("Open viewer action was not found for imported DICOM row.");
+      }
+      button.click();
+      return true;
+    })()`,
+    30000,
+  );
+
+  await waitForRendererCondition(
+    cdp,
+    `window.location.pathname.startsWith("/viewer") && Boolean(window.__RADSYSX_BOOTSTRAP_PROMISE__)`,
+    "viewer bootstrap script",
+    90000,
+  );
+
+  const viewerState = await evaluateInRenderer(
+    cdp,
+    `(async () => {
+      await window.__RADSYSX_BOOTSTRAP_PROMISE__;
+      const launch = window.__RADSYSX_LAUNCH__;
+      const runtime = window.__RADSYSX_VIEWER_RUNTIME__;
+      const dicomwebSource = window.config?.dataSources?.find((entry) => entry?.sourceName === "dicomweb");
+      return {
+        href: window.location.href,
+        pathname: window.location.pathname,
+        launchQueryPresent: new URL(window.location.href).searchParams.has("launch"),
+        loaderState: document.getElementById("radsysx-loader")?.dataset?.state ?? null,
+        studyInstanceUID: launch?.context?.studyInstanceUID ?? null,
+        viewerKind: runtime?.viewerKind ?? null,
+        viewerBasePath: runtime?.viewerBasePath ?? null,
+        qidoRoot: runtime?.qidoRoot ?? null,
+        wadoRoot: runtime?.wadoRoot ?? null,
+        configQidoRoot: dicomwebSource?.configuration?.qidoRoot ?? null,
+        configWadoRoot: dicomwebSource?.configuration?.wadoRoot ?? null
+      };
+    })()`,
+    90000,
+  );
+
+  if (viewerState.studyInstanceUID !== studyInstanceUid) {
+    throw new Error(`Viewer launch resolved ${viewerState.studyInstanceUID}, expected ${studyInstanceUid}.`);
+  }
+  if (viewerState.launchQueryPresent) {
+    throw new Error("Viewer launch token remained in the URL after bootstrap.");
+  }
+  if (viewerState.loaderState !== "ready") {
+    throw new Error(`Viewer bootstrap loader did not reach ready state: ${viewerState.loaderState ?? "missing"}.`);
+  }
+  if (viewerState.qidoRoot !== "/dicom-web" || viewerState.wadoRoot !== "/dicom-web") {
+    throw new Error(`Viewer runtime did not use local DICOMweb roots: ${JSON.stringify(viewerState)}`);
+  }
+
+  const dicomwebProbe = await evaluateInRenderer(
+    cdp,
+    `fetch("/dicom-web/studies?StudyInstanceUID=${encodeURIComponent(studyInstanceUid)}", {
+      credentials: "include"
+    }).then(async (response) => ({
+      ok: response.ok,
+      status: response.status,
+      body: await response.json()
+    }))`,
+    30000,
+  );
+
+  if (!dicomwebProbe.ok) {
+    throw new Error(`Viewer-origin local DICOMweb query failed with ${dicomwebProbe.status}.`);
+  }
+  if (!Array.isArray(dicomwebProbe.body) || dicomwebProbe.body.length === 0) {
+    throw new Error("Viewer-origin local DICOMweb query did not return the imported study.");
+  }
+
+  const workspaceProbe = await evaluateInRenderer(
+    cdp,
+    `fetch("/api/studies/${encodeURIComponent(studyInstanceUid)}/workspace", {
+      credentials: "include"
+    }).then(async (response) => ({
+      ok: response.ok,
+      status: response.status,
+      body: await response.json()
+    }))`,
+    30000,
+  );
+
+  if (!workspaceProbe.ok) {
+    throw new Error(`Viewer-origin workspace query failed with ${workspaceProbe.status}.`);
+  }
+
+  return {
+    href: viewerState.href,
+    studyInstanceUID: viewerState.studyInstanceUID,
+    viewerKind: viewerState.viewerKind,
+    viewerBasePath: viewerState.viewerBasePath,
+    qidoRoot: viewerState.qidoRoot,
+    wadoRoot: viewerState.wadoRoot,
+    configQidoRoot: viewerState.configQidoRoot,
+    configWadoRoot: viewerState.configWadoRoot,
+    dicomwebStudyCount: dicomwebProbe.body.length,
+    workspaceStudyUID: workspaceProbe.body?.worklistRow?.studyInstanceUID ?? null,
+  };
 }
 
 function readFixturePayloads() {
@@ -724,10 +848,14 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "1 x 1",
     ]);
 
+    const dicomRow = rowContaining("Local DICOMDIR import");
+    const dicomStudyUid = dicomRow?.innerText.match(/Study UID\s+([^\s]+)/)?.[1] ?? null;
+
     return {
       currentUrl: window.location.href,
       importPath: smokeMode,
       importMessage,
+      dicomStudyUid,
       localRows: Array.from(document.querySelectorAll('[data-testid="worklist-row"]'))
         .filter((row) => textMatches(row.innerText, "Local "))
         .map((row) => row.innerText.split("\\n").slice(0, 3).join(" | ")),

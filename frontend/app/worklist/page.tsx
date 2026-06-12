@@ -721,6 +721,7 @@ export default function WorklistPage() {
                     !["NIFTI", "IMG"].includes(row.modality.toUpperCase())) && (
                     <button
                       type="button"
+                      data-testid="open-viewer"
                       onClick={() => void handleOpenViewer(row)}
                       className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-70"
                       disabled={launchingStudyUid === row.studyInstanceUID}

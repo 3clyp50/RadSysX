@@ -12,6 +12,7 @@ npm run desktop:smoke:ui-import
 npm run desktop:smoke:picker-import
 npm run desktop:smoke:picker-large-import
 npm run desktop:smoke:picker-many-import
+npm run desktop:smoke:viewer-launch
 npm run desktop
 ```
 
@@ -28,6 +29,8 @@ The desktop launcher builds and stamps the frontend production shell for its sel
 `npm run desktop:smoke:picker-large-import` repeats that direct native picker path with an additional 8 MiB synthetic NIFTI volume and verifies backend asset summary, preview, and technical analysis for the larger payload.
 
 `npm run desktop:smoke:picker-many-import` repeats that direct native picker path with a nested folder of 32 additional extensionless DICOM instances and verifies recursive collection, import of 37 files into 2 local studies, DICOM asset summary, and backend technical analysis.
+
+`npm run desktop:smoke:viewer-launch` imports synthetic local DICOM/DICOMDIR data through the hydrated worklist, opens the governed viewer, verifies opaque launch resolution and launch-token stripping, and checks viewer-origin local DICOMweb/workspace access to the imported study. It proves viewer handoff and local DICOMweb binding without claiming full diagnostic pixel-rendering parity.
 
 ## Frontend Local, GPU Backend On Cloud VM
 

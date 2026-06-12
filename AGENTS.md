@@ -174,6 +174,7 @@ Last updated: 2026-06-12
   - `npm run desktop:smoke:picker-many-import`
   - `npm run desktop:smoke:picker-import`
   - `npm run desktop:smoke:ui-import`
+  - `npm run desktop:smoke:viewer-launch`
   - `npm run type-check --workspace frontend`
   - `npm run build --workspace frontend`
   - `npm run type-check --workspace viewer`
@@ -195,6 +196,7 @@ Last updated: 2026-06-12
 - Desktop many-file native picker import smoke test: `npm run desktop:smoke:picker-many-import`
 - Desktop native picker bridge import smoke test: `npm run desktop:smoke:picker-import`
 - Desktop hydrated UI local import smoke test: `npm run desktop:smoke:ui-import`
+- Desktop imported-DICOM viewer launch smoke test: `npm run desktop:smoke:viewer-launch`
 - Clinical backend tests: `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`
 - Whole backend runtime: `. .venv/bin/activate && RADSYSX_APP_MODE=research python3 backend/server.py`
 - Frontend dev server: `npm run dev --workspace frontend`
@@ -215,6 +217,7 @@ Last updated: 2026-06-12
   - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries/previews/technical analysis, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI/image files, verify worklist/asset-summary/analysis/DICOMweb/launch behavior, and cleanly shut down.
   - Run `npm run desktop:smoke:ui-import` to drive the hydrated Electron worklist UI, dispatch a local imaging drag/drop import, inspect imported studies, verify NIFTI previews including a coronal slice, run backend technical analysis, and cleanly shut down.
+  - Run `npm run desktop:smoke:viewer-launch` to drive the hydrated Electron worklist UI through local DICOM import, `Open viewer`, opaque launch resolution, launch-token stripping, same-origin local DICOMweb binding, viewer-origin workspace retrieval, and imported-study DICOMweb discovery.
   - Run `npm run desktop:smoke:picker-import` to drive the hydrated Electron worklist UI through the native picker bridge using smoke-injected test paths, proving the renderer button, preload IPC, main-process recursive collector, direct main-process upload to backend import, inspection, NIFTI preview controls, and analysis path without automating the OS dialog itself.
   - Run `npm run desktop:smoke:picker-large-import` to repeat the native picker bridge path with an additional 8 MiB synthetic NIFTI volume, proving direct main-process upload and backend preview/analysis behavior beyond the tiny focused fixtures.
   - Run `npm run desktop:smoke:picker-many-import` to repeat the native picker bridge path with 32 additional nested extensionless DICOM instances, proving recursive folder traversal and many-file upload behavior.

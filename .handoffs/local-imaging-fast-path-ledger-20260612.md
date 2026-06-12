@@ -23,6 +23,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - `npm run desktop:smoke:picker-import`
   - `npm run desktop:smoke:picker-large-import`
   - `npm run desktop:smoke:picker-many-import`
+  - `npm run desktop:smoke:viewer-launch`
 - Desktop runtime starts:
   - FastAPI backend on an internal loopback port.
   - Production Next.js standalone frontend shell on an internal loopback port by default.
@@ -40,6 +41,8 @@ This is not merely an upload button. The desired end state is a local app that c
 - The desktop picker import smoke can validate the hydrated worklist `Import folder` action through the Electron preload IPC/native picker bridge, main-process recursive folder collector, backend import, local study inspection, NIFTI slice controls, and backend technical analysis without automating the OS dialog itself.
 - The desktop large picker import smoke can validate the same direct native import path with an additional 8 MiB synthetic `256 x 256 x 128` NIFTI volume, proving the bridge/backend path beyond tiny fixtures.
 - The desktop many-file picker import smoke can validate the same direct native import path with a nested folder of 32 additional extensionless DICOM instances, proving recursive folder traversal and many-file upload behavior beyond tiny focused fixtures.
+- The desktop viewer-launch smoke can validate hydrated local DICOM/DICOMDIR import, `Open viewer`, opaque launch resolution under `/viewer/`, launch-token stripping, same-origin local DICOMweb runtime binding, viewer-origin workspace retrieval, and viewer-origin imported-study DICOMweb discovery.
+- Electron-supervised uvicorn now runs with access logging disabled so local DICOMweb query strings that may contain identifiers are not casually printed during desktop fast-path use or smoke tests.
 - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require compose unless a local DICOMweb target is configured.
 
 ## Non-Negotiable Project Constraints
@@ -259,6 +262,8 @@ Likely components:
 - [x] Replace the normal desktop frontend path with a production standalone Next.js shell so hydrated UI smokes no longer rely on the noisy Next.js dev chunk proxy path.
 - [x] Keep `RADSYSX_DESKTOP_FRONTEND_MODE=development` / `npm run desktop:dev-frontend` as an explicit live Next.js development escape hatch.
 - [x] Keep `desktop:dev-frontend` and `desktop:smoke` launcher scripts platform-neutral by setting runtime environment through Node launchers instead of POSIX inline shell assignment.
+- [x] Force-refresh the frontend production shell during desktop UI smokes so smoke assertions exercise current source, not a stale desktop build stamp.
+- [x] Disable Electron-supervised backend access logging to avoid printing local DICOMweb query strings that may include identifiers.
 - [x] Ensure startup environment points local upload storage to a predictable ignored path.
 - [x] Verify `npm run desktop:smoke` still starts and cleans up.
 - [x] Add `npm run desktop:smoke:import` for no-Docker local imaging import/use verification.
@@ -269,6 +274,7 @@ Likely components:
 ### Viewer And Analysis
 
 - [x] For DICOM, choose whether fast path serves a simple local DICOMweb endpoint or uses existing research DICOM viewer components first: first pass is simple local DICOMweb endpoint.
+- [x] Add a desktop viewer-launch smoke proving imported local DICOM studies can open the governed viewer, resolve the opaque launch, bind local DICOMweb roots, and query the imported study from the viewer origin.
 - [x] For DICOMDIR, ensure referenced DICOM files become a series/study collection.
 - [x] For NIFTI, choose and implement the short-term metadata path: backend asset summary plus header inspection.
 - [x] For NIFTI, add a short-term backend-mediated default axial preview path.
@@ -353,6 +359,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: needs manual or automation-backed native OS dialog upload smoke before final completion.
 - Upload/select local DICOM:
   - Evidence: backend endpoint tests import synthetic DICOM through `POST /api/local-imaging/import`; local DICOMweb and asset summary tests prove the stored DICOM is discoverable and viewer-eligible; `npm run desktop:smoke:import` imports synthetic DICOM and reports viewer eligibility.
+  - Evidence: `desktop:smoke:viewer-launch` imports synthetic DICOM/DICOMDIR through the hydrated worklist, clicks `Open viewer`, verifies `/viewer/` launch resolution and local DICOMweb runtime roots, and confirms viewer-origin DICOMweb/workspace access to the imported study.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove simple uncompressed DICOM pixel technical analysis, including frame dimensions, intensity range, and mean intensity.
   - Evidence: the Electron native picker can select local imaging files and preserve them for the existing backend import flow.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOM plus DICOMDIR through the hydrated worklist drag/drop UI and verifies DICOMDIR asset inspection plus DICOM intensity analysis.
@@ -394,6 +401,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; TIFF is accepted as an analyzable local image file but does not yet have a guaranteed browser-renderable preview.
 - Files become usable in worklist/viewer/analysis:
   - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
+  - Evidence: `desktop:smoke:viewer-launch` verifies the imported DICOM study can be opened from the hydrated worklist into the governed viewer path, with the launch token stripped from the browser URL after resolution and same-origin local DICOMweb roots applied to the viewer configuration.
   - Evidence: the worklist now renders NIFTI axis buttons and a slice slider backed by authenticated backend preview URLs.
   - Evidence: the worklist now exposes a backend-owned local analysis action and renders deterministic technical metrics returned by `GET /api/local-imaging/studies/{studyUid}/analysis`.
   - Evidence: `desktop:smoke:ui-import` proves those controls work in a hydrated Electron renderer rather than only through API-level smoke calls.
@@ -405,6 +413,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
 - No Docker required for the fast path:
   - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews/analysis, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
   - Evidence: `npm run desktop:smoke:ui-import` passed while compose/Orthanc were not running and exercised the hydrated Electron worklist drag/drop surface.
+  - Evidence: `npm run desktop:smoke:viewer-launch` passed while compose/Orthanc were not running and exercised imported-DICOM viewer handoff plus viewer-origin local DICOMweb/workspace access.
   - Evidence: `npm run desktop:smoke:picker-import` passed while compose/Orthanc were not running and exercised the native picker bridge path.
   - Evidence: `npm run desktop:smoke:picker-large-import` passed while compose/Orthanc were not running and exercised direct native picker upload of an 8 MiB NIFTI payload.
   - Evidence: `npm run desktop:smoke:picker-many-import` passed while compose/Orthanc were not running and exercised direct native picker upload of 37 synthetic local files, including nested extensionless DICOM instances.
@@ -419,6 +428,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: Windows/macOS native directory picker behavior is implemented via Electron but not yet tested on those OSes.
 - PHI/security guardrails preserved:
   - Evidence: imported files stay outside public static routes; manifests avoid raw DICOM patient identifiers in tests; local asset summaries/previews/analysis omit private stored paths and raw DICOM tags; endpoints require signed backend session and `RADSYSX_LOCAL_IMAGING_ENABLED`.
+  - Evidence: Electron-supervised uvicorn access logging is disabled after `desktop:smoke:viewer-launch` exposed that OHIF may issue DICOMweb prior queries containing DICOM identifiers in the URL query string.
   - Remaining gap: broader real-world PHI log audit remains open.
 - Tests and runtime smoke:
   - Evidence: focused local imaging backend tests and Python compile checks passed during this tranche; full clinical platform test suite passed; frontend/viewer type-checks passed; viewer build passed; desktop doctor and desktop smoke passed; committed desktop import smoke passed.
@@ -435,6 +445,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: final verification for this tranche passed `node --check` on `desktop/src/main.mjs`, `desktop/src/preload.cjs`, `desktop/scripts/dev-frontend.mjs`, `desktop/scripts/startup-smoke.mjs`, `desktop/scripts/doctor.mjs`, `desktop/scripts/import-smoke.mjs`, and `desktop/scripts/ui-import-smoke.mjs`; `npm run type-check`; `npm run build --workspace frontend`; `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`; `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`; `npm run build --workspace viewer`; `npm run desktop:doctor`; `npm run desktop:smoke`; `npm run desktop:smoke:import`; `npm run desktop:smoke:ui-import`; `npm run desktop:smoke:picker-import`; `npm run desktop:smoke:picker-large-import`; `npm run desktop:smoke:picker-many-import`; and `git diff --check`. Checked smoke ports were clear afterward. The desktop smokes launched the Node standalone frontend server in normal mode and did not reproduce the old Next.js dev chunk proxy parse warning.
   - Evidence: after the multi-study DICOMDIR tranche, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py -k "dicomdir or local_dicomweb"` passed with 3 selected tests, including the new media-root DICOMDIR fixture that references two different study UIDs.
   - Evidence: final verification for the multi-study DICOMDIR tranche passed `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`; `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py` with 27 tests; `npm run desktop:smoke:import`; `npm run desktop:smoke:picker-many-import`; `npm run desktop:doctor`; and `git diff --check`. Checked smoke ports were clear afterward.
+  - Evidence: after the viewer-launch smoke tranche, individual `node --check` invocations for `desktop/src/main.mjs` and `desktop/scripts/ui-import-smoke.mjs`, `npm run type-check --workspace frontend`, `npm run desktop:smoke:viewer-launch`, `npm run desktop:doctor`, `npm run desktop:smoke:ui-import`, and `git diff --check` passed before final hygiene. The viewer-launch smoke imported 5 local files into 2 local studies, opened `/viewer/`, resolved the launch to the imported DICOM study, verified local DICOMweb roots, queried `/dicom-web/studies` and `/api/studies/{studyUid}/workspace` from the viewer origin, and observed no backend access-log query string output after disabling Electron-supervised uvicorn access logs.
   - Remaining gap: native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

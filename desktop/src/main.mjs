@@ -585,7 +585,16 @@ async function startRuntime() {
   spawnService(
     "backend",
     pythonCommand(),
-    ["-m", "uvicorn", "backend.server:app", "--host", "127.0.0.1", "--port", String(backendPort)],
+    [
+      "-m",
+      "uvicorn",
+      "backend.server:app",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(backendPort),
+      "--no-access-log",
+    ],
     {
       cwd: workspaceRoot,
       env: sharedEnv,
