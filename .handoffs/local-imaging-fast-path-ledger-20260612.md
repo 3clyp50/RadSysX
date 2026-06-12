@@ -20,6 +20,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - `npm run desktop:smoke`
   - `npm run desktop:smoke:import`
   - `npm run desktop:smoke:ui-import`
+  - `npm run desktop:smoke:picker-import`
 - Desktop runtime starts:
   - FastAPI backend on an internal loopback port.
   - Next.js frontend shell on an internal loopback port.
@@ -28,8 +29,10 @@ This is not merely an upload button. The desired end state is a local app that c
 - Desktop runtime defaults to local `pilot` mode with local seeded auth and development secrets.
 - The current desktop fast path can validate seeded login, worklist, launch/session resolution, workspace/report/AI/audit contracts.
 - The Electron desktop path now exposes a native local imaging file/folder picker through a narrow preload bridge, while retaining browser file input and drag-and-drop fallbacks.
+- The native picker admits extensionless non-hidden files as DICOM candidates so DICOMDIR companion files such as `SCAN1DCM` can reach backend format detection instead of being filtered out in Electron.
 - The desktop import smoke can validate no-Docker import/use of synthetic DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files through the one-origin local bridge.
 - The desktop UI import smoke can validate a hydrated worklist UI drag/drop import path, local study inspection, NIFTI slice controls, and backend technical analysis through the Electron bridge.
+- The desktop picker import smoke can validate the hydrated worklist `Import folder` action through the Electron preload IPC/native picker bridge, main-process recursive folder collector, backend import, local study inspection, NIFTI slice controls, and backend technical analysis without automating the OS dialog itself.
 - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require compose unless a local DICOMweb target is configured.
 
 ## Non-Negotiable Project Constraints
@@ -65,12 +68,14 @@ This is not merely an upload button. The desired end state is a local app that c
 - The local asset endpoints read private stored files server-side and return safe technical metadata/previews/analysis, including NIFTI header dimensions/datatype, axial/coronal/sagittal NIFTI SVG slice previews, DICOM/image counts, common image previews, NIFTI voxel statistics, simple uncompressed DICOM pixel statistics, and common image header dimensions, without exposing stored paths or PHI-bearing DICOM tags.
 - There is now a reproducible desktop import smoke at `npm run desktop:smoke:import`; it starts Electron on high local ports, generates PHI-free synthetic imaging files, imports them, verifies worklist rows, asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the runtime down.
 - There is now a reproducible hydrated desktop UI import smoke at `npm run desktop:smoke:ui-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, dispatches a DOM drag/drop with PHI-free synthetic DICOMDIR/DICOM/NIFTI/PNG files, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
+- There is now a reproducible hydrated desktop native picker bridge smoke at `npm run desktop:smoke:picker-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, clicks the real `Import folder` button, routes through `window.radsysxDesktop.selectLocalImagingFiles`, uses a smoke-only main-process test-path override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1`, recursively collects the PHI-free fixture folder, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
+- The first picker bridge smoke exposed and fixed an Electron-side DICOMDIR usability defect: extensionless DICOM companion files were filtered out before backend detection. `desktop/src/main.mjs` now treats extensionless non-hidden files as DICOM candidates while backend import remains the final authority.
 - There is now an Electron-native file/folder selection bridge at `window.radsysxDesktop.selectLocalImagingFiles`; it reads selected files in the desktop main process, preserves folder-relative paths as `radsysxRelativePath`, and then the frontend imports through the same backend local imaging contract.
 - The desktop bridge now sanitizes hop-by-hop proxy headers, disables upstream socket reuse for proxied HTTP requests, and proxies WebSocket upgrades so Next.js dev assets and HMR can hydrate the Electron shell reliably through the one-origin bridge.
 - The shared clinical browser env now reads public `NEXT_PUBLIC_*` keys through guarded direct env access so Next.js can inline them consistently and avoid server/client mode hydration mismatch.
 - NIFTI display still needs a dedicated full volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries, multi-axis slice previews, and deterministic voxel statistics.
 - Deeper DICOMDIR directory-record parsing and file-path resolution rules remain future work beyond the current included-file grouping path.
-- Cross-platform file picker, directory upload, and real UI drag-and-drop behavior need explicit testing.
+- Real native OS-dialog behavior and Windows/macOS directory-picker behavior still need explicit testing beyond the smoke-only picker bridge override.
 - Diagnostic AI/segmentation remains future work; the current no-Docker analyzer is deliberately technical and deterministic, not a clinical diagnosis engine.
 
 ## Concrete Requirements Derived From User Objective
@@ -223,6 +228,10 @@ Likely components:
 - [x] Preserve folder-relative paths from Electron picks through `radsysxRelativePath`.
 - [x] Keep drag-and-drop browser upload as a portable fallback.
 - [x] Add a hydrated Electron UI smoke for drag/drop local imaging import through the worklist.
+- [x] Add a smoke-only picker bridge override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` and `RADSYSX_DESKTOP_PICKER_TEST_PATHS`, so automation can exercise the native picker IPC path without OS-dialog control.
+- [x] Add `desktop:smoke:picker-import` to exercise the real hydrated worklist `Import folder` button, preload IPC bridge, main-process recursive file/folder collector, backend import, local inspection, NIFTI preview controls, and technical analysis.
+- [x] Keep `RADSYSX_DESKTOP_PICKER_TEST_PATHS` out of normal runtime behavior when `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN` is not set.
+- [x] Allow extensionless non-hidden picked files to pass through as DICOM candidates so DICOMDIR companion files are not silently dropped before backend detection.
 - [x] Fix desktop bridge HTTP proxying so proxied Next.js chunks do not intermittently fail with HTTP parser errors.
 - [x] Proxy desktop bridge WebSocket upgrades so Next.js dev-mode hydration can run cleanly behind the one-origin Electron URL.
 - [ ] Ensure desktop bridge/proxy behavior handles large upload sizes beyond focused smoke fixtures.
@@ -269,6 +278,7 @@ Likely components:
 - [x] Run `npm run desktop:smoke`.
 - [x] Run `npm run desktop:smoke:import`.
 - [x] Run `npm run desktop:smoke:ui-import`.
+- [x] Run `npm run desktop:smoke:picker-import` after adding the picker bridge smoke.
 - [x] Run `python3 -m pytest backend/tests/test_clinical_platform.py`.
 - [x] Run any new backend tests.
 - [x] Run `npm run type-check`.
@@ -280,6 +290,7 @@ Likely components:
 - [x] Extend `desktop:smoke:import` to verify backend local analysis for DICOM intensity range, NIFTI voxel count/mean intensity, and PNG dimensions.
 - [x] Add `desktop:smoke:ui-import` to exercise hydrated Electron worklist controls, local drag/drop import, inspection, NIFTI preview controls, and backend technical analysis.
 - [x] Perform a true UI drag-and-drop upload smoke through the hydrated Electron worklist controls with synthetic PHI-free files.
+- [x] Perform the committed picker bridge smoke through `npm run desktop:smoke:picker-import`.
 - [ ] Perform a native OS file-picker smoke with real or realistic local files once OS-dialog automation is available.
 
 ### Documentation
@@ -301,6 +312,8 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: Electron now exposes a native local imaging file/folder picker through `window.radsysxDesktop.selectLocalImagingFiles`.
   - Evidence: the worklist local import panel now accepts browser drag-and-drop files and Chromium-exposed folders, preserving folder-relative paths as `radsysxRelativePath` before submitting to the backend import endpoint.
   - Evidence: `npm run desktop:smoke:ui-import` now proves the Electron shell hydrates through the one-origin bridge, clicks from the desktop root to `/worklist`, imports synthetic local files through a DOM drag/drop on the real worklist panel, inspects imported studies, switches a NIFTI preview to coronal, and runs backend technical analysis.
+  - Evidence: `npm run desktop:smoke:picker-import` is now a committed hydrated Electron picker-bridge smoke; it clicks the real worklist `Import folder` button and proves renderer button, preload IPC, main-process recursive folder collection, backend import, inspection, NIFTI preview controls, and backend technical analysis using PHI-free synthetic files.
+  - Evidence: `npm run desktop:smoke:picker-import` passed after fixing Electron-side extensionless DICOM candidate filtering, with `Imported 5 files into 2 local studies.`
   - Evidence: the desktop bridge now sanitizes proxied HTTP headers and proxies WebSocket upgrades, fixing the hydration failures found while creating `desktop:smoke:ui-import`.
   - Evidence: `desktop:smoke:import` now also fetches backend-mediated NIFTI SVG and PNG previews through the local bridge.
   - Evidence: `desktop:smoke:import` now verifies NIFTI preview slice metadata and a non-default coronal preview through the local bridge.
@@ -311,11 +324,14 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove simple uncompressed DICOM pixel technical analysis, including frame dimensions, intensity range, and mean intensity.
   - Evidence: the Electron native picker can select local imaging files and preserve them for the existing backend import flow.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOM plus DICOMDIR through the hydrated worklist drag/drop UI and verifies DICOMDIR asset inspection plus DICOM intensity analysis.
+  - Evidence: `desktop:smoke:picker-import` exercises the Electron picker bridge over a fixture folder containing DICOMDIR plus a DICOM instance, then verifies DICOMDIR inspection and DICOM intensity analysis.
+  - Evidence: the picker now passes extensionless DICOM candidates such as `SCAN1DCM` through to backend detection, matching common DICOMDIR folder layouts.
   - Remaining gap: native OS dialog upload of a real local DICOM file still needs runtime smoke evidence.
 - Upload/select DICOMDIR:
   - Evidence: backend endpoint tests import synthetic DICOMDIR plus referenced DICOM and group them into one local study row; `npm run desktop:smoke:import` imports synthetic DICOMDIR plus referenced DICOM and returns `dicom`/`dicomdir` asset summary.
   - Evidence: the Electron native folder picker preserves relative paths for DICOMDIR-style folder imports.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOMDIR plus referenced DICOM through a hydrated worklist drag/drop and verifies the local DICOMDIR row can be inspected.
+  - Evidence: `desktop:smoke:picker-import` exercises the hydrated `Import folder` action through the Electron picker bridge and recursive folder collector for a DICOMDIR-style folder.
   - Remaining gap: native OS directory-picker runtime smoke with a realistic DICOMDIR folder remains open.
 - Upload/select NIFTI `.nii`:
   - Evidence: backend endpoint tests import a synthetic `.nii` file and register a local worklist row; `npm run desktop:smoke:import` imports `.nii` and verifies analysis-supported asset summary.
@@ -323,6 +339,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend technical analysis now computes NIFTI dimensions, voxel count, intensity range, and mean intensity from private local voxel bytes.
   - Evidence: NIFTI assets now expose preview slice counts and can render axial/coronal/sagittal SVG slices through authenticated backend preview URLs.
   - Evidence: `desktop:smoke:ui-import` imports `.nii` and `.nii.gz` through the hydrated worklist drag/drop UI, verifies the NIFTI row, loaded previews, coronal preview control, and voxel technical analysis.
+  - Evidence: `desktop:smoke:picker-import` imports `.nii` through the hydrated `Import folder` picker bridge path and verifies NIFTI inspection, preview loading, coronal preview control, and voxel technical analysis.
   - Remaining gap: native OS dialog upload/inspection of `.nii` remains open; full volume rendering and diagnostic/AI analysis are still future work.
 - Upload/select NIFTI `.nii.gz`:
   - Evidence: backend endpoint tests import synthetic gzipped NIFTI, preserve relative path, and extract `2 x 3 x 4` dimensions through the asset-summary endpoint; `npm run desktop:smoke:import` imports `.nii.gz` and returns the same dimension summary.
@@ -330,26 +347,31 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove deterministic voxel statistics for imported NIFTI assets.
   - Evidence: backend endpoint tests now fetch axial/coronal/sagittal preview slices for `.nii.gz`, and `desktop:smoke:import` verifies non-default coronal preview retrieval.
   - Evidence: `desktop:smoke:ui-import` verifies a NIFTI preview image loads in the UI and that selecting the coronal control changes the preview URL to a coronal slice.
+  - Evidence: `desktop:smoke:picker-import` imports `.nii.gz` through the hydrated `Import folder` picker bridge path and verifies loaded preview plus coronal preview URL transition.
   - Remaining gap: native OS dialog upload/inspection of `.nii.gz` remains open; full NIFTI volume rendering and diagnostic/AI analysis remain open.
 - Generic suitable medical files:
   - Evidence: backend endpoint tests import a synthetic PNG fallback and report it through the asset-summary endpoint; importer accepts PNG/JPEG/TIFF/BMP/GIF extensions; `npm run desktop:smoke:import` imports a PNG fallback and reports it as analysis-supported.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch authenticated PNG preview bytes through the backend preview endpoint.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove local PNG header analysis, including image dimensions.
   - Evidence: `desktop:smoke:ui-import` imports PNG through the hydrated worklist drag/drop UI, verifies a preview image loads, and verifies local image dimension analysis.
+  - Evidence: `desktop:smoke:picker-import` imports PNG through the hydrated picker bridge path, verifies preview loading, and verifies local image dimension analysis.
   - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; TIFF is accepted as an analyzable local image file but does not yet have a guaranteed browser-renderable preview.
 - Files become usable in worklist/viewer/analysis:
   - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
   - Evidence: the worklist now renders NIFTI axis buttons and a slice slider backed by authenticated backend preview URLs.
   - Evidence: the worklist now exposes a backend-owned local analysis action and renders deterministic technical metrics returned by `GET /api/local-imaging/studies/{studyUid}/analysis`.
   - Evidence: `desktop:smoke:ui-import` proves those controls work in a hydrated Electron renderer rather than only through API-level smoke calls.
+  - Evidence: `desktop:smoke:picker-import` proves those controls also work after files arrive from the Electron native picker bridge rather than synthetic DOM drag/drop.
   - Remaining gap: full OHIF pixel rendering across real-world DICOM and richer diagnostic/AI NIFTI/image analysis remain unproven.
 - No Docker required for the fast path:
   - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews/analysis, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
   - Evidence: `npm run desktop:smoke:ui-import` passed while compose/Orthanc were not running and exercised the hydrated Electron worklist drag/drop surface.
+  - Evidence: `npm run desktop:smoke:picker-import` passed while compose/Orthanc were not running and exercised the native picker bridge path.
   - Remaining gap: final native OS dialog smoke should be repeated with real or realistic local files.
 - Cross-platform design:
   - Evidence: browser file inputs preserve `webkitRelativePath` when available; browser drag-and-drop preserves Chromium directory-entry relative paths as `radsysxRelativePath`; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
   - Evidence: desktop UI smoke uses Electron/Chromium APIs and repo-local temp storage/database, avoiding Linux-only paths inside the app/runtime path.
+  - Evidence: picker bridge smoke uses JSON-encoded fixture paths and Electron IPC, avoiding Linux-only renderer file APIs while still preserving POSIX-style relative paths for backend manifests.
   - Remaining gap: Windows/macOS native directory picker behavior is implemented via Electron but not yet tested on those OSes.
 - PHI/security guardrails preserved:
   - Evidence: imported files stay outside public static routes; manifests avoid raw DICOM patient identifiers in tests; local asset summaries/previews/analysis omit private stored paths and raw DICOM tags; endpoints require signed backend session and `RADSYSX_LOCAL_IMAGING_ENABLED`.
@@ -360,6 +382,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: after the local technical analysis tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings; broader verification must be rerun after final edits.
   - Evidence: after the drag-and-drop import tranche, `npm run type-check --workspace frontend`, `npm run type-check`, `npm run desktop:smoke:import`, `npm run desktop:doctor`, `python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run desktop:smoke`, and `git diff --check` passed.
   - Evidence: after the hydrated UI import smoke tranche, `node --check desktop/src/main.mjs desktop/scripts/doctor.mjs desktop/scripts/import-smoke.mjs desktop/scripts/ui-import-smoke.mjs`, `npm run type-check`, `npm run desktop:doctor`, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:import`, `npm run desktop:smoke`, `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`, `npm run build --workspace viewer`, and `git diff --check` passed; smoke ports were clear afterward.
+  - Evidence: after the native picker bridge smoke tranche, `node --check desktop/src/main.mjs desktop/scripts/ui-import-smoke.mjs`, `node --check desktop/src/main.mjs desktop/scripts/ui-import-smoke.mjs desktop/scripts/doctor.mjs desktop/scripts/import-smoke.mjs`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:import`, `npm run desktop:doctor`, `npm run type-check`, `npm run desktop:smoke`, `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run build --workspace viewer`, and `git diff --check` passed; checked smoke ports were clear afterward.
   - Remaining gap: native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

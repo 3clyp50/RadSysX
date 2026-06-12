@@ -13,6 +13,7 @@
     "desktop:bootstrap": "python3 -m venv .venv && . .venv/bin/activate && python3 -m pip install --upgrade pip && python3 -m pip install -r backend/requirements-clinical.txt && npm install --legacy-peer-deps",
     "desktop:doctor": "npm run doctor --workspace @radsysx/desktop",
     "desktop:smoke:import": "npm run smoke:import --workspace @radsysx/desktop",
+    "desktop:smoke:picker-import": "npm run smoke:picker-import --workspace @radsysx/desktop",
     "desktop:smoke:ui-import": "npm run smoke:ui-import --workspace @radsysx/desktop",
     "desktop:smoke": "npm run smoke --workspace @radsysx/desktop",
     "dev:desktop": "npm run desktop",

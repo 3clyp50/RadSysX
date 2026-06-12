@@ -23,9 +23,12 @@
 - Desktop sets `RADSYSX_LOCAL_IMAGING_ENABLED=true` and stores local imports in an ignored repo-local backend data directory unless overridden.
 - When `RADSYSX_DESKTOP_DICOMWEB_TARGET` is unset, the desktop bridge routes `/dicom-web` to the backend's local DICOMweb endpoints for imported DICOM studies.
 - `preload.cjs` exposes only narrow desktop helpers, including the native local imaging file/folder picker; browser drag-and-drop remains a portable frontend fallback and must still import through backend contracts. Do not expose raw filesystem or shell primitives to the renderer.
+- The desktop native picker must admit extensionless non-hidden files as DICOM candidates so DICOMDIR companion files can reach backend format detection; unsupported candidates are still rejected by the backend import contract.
 - `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` enables the local `/_radsysx/desktop/shutdown` endpoint for smoke tests only; do not enable it for normal desktop runs.
+- `RADSYSX_DESKTOP_PICKER_TEST_PATHS` may be honored only when `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1`; it is a smoke-only native picker bridge override, not a normal desktop runtime feature.
 - `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/image import, asset summaries, local previews including NIFTI slice navigation, backend technical analysis, DICOMweb discovery, and opaque launch without Docker.
 - `npm run desktop:smoke:ui-import` should keep proving the hydrated worklist UI can import dropped local imaging files, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker.
+- `npm run desktop:smoke:picker-import` should keep proving the hydrated worklist UI can invoke the Electron native picker bridge through `preload.cjs`, read a selected folder through the main-process recursive collector, submit the returned files to backend import, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker. This does not replace a human or OS-automation smoke of the actual native dialog.
 
 ## Work Guidance
 
@@ -39,6 +42,7 @@
 - `npm run desktop:doctor`
 - `npm run desktop:smoke`
 - `npm run desktop:smoke:import`
+- `npm run desktop:smoke:picker-import`
 - `npm run desktop:smoke:ui-import`
 - `node --check desktop/src/main.mjs`
 - `node --check desktop/scripts/doctor.mjs`

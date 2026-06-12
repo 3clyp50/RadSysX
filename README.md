@@ -261,7 +261,7 @@ npm run desktop
 
 `desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, Next.js, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local UI iteration. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
 For a quick startup and cleanup check:
 
@@ -284,6 +284,14 @@ npm run desktop:smoke:ui-import
 ```
 
 That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI/PNG files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
+
+For a native picker bridge check:
+
+```bash
+npm run desktop:smoke:picker-import
+```
+
+That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. It proves the picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
 
 ### Install the full backend/runtime dependency set
 
@@ -360,20 +368,21 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 7. `npm run desktop:smoke`
 8. `npm run desktop:smoke:import`
 9. `npm run desktop:smoke:ui-import`
-9. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-10. `python3 -m pytest backend/tests/test_clinical_platform.py`
-11. `npm run type-check --workspace frontend`
-12. `npm run type-check --workspace viewer`
-13. `npm run build --workspace viewer`
-14. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-15. Separately validate the governed clinical surface with `docker compose up --build`
+10. `npm run desktop:smoke:picker-import`
+11. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+12. `python3 -m pytest backend/tests/test_clinical_platform.py`
+13. `npm run type-check --workspace frontend`
+14. `npm run type-check --workspace viewer`
+15. `npm run build --workspace viewer`
+16. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+17. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, and `npm run desktop:smoke:ui-import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, and `npm run desktop:smoke:picker-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

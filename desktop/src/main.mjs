@@ -78,7 +78,11 @@ function isLocalImagingFile(filePath) {
   if (lowerName.endsWith(".nii.gz")) {
     return true;
   }
-  return LOCAL_IMAGING_EXTENSIONS.has(path.extname(lowerName));
+  const extension = path.extname(lowerName);
+  if (!extension && !fileName.startsWith(".")) {
+    return true;
+  }
+  return LOCAL_IMAGING_EXTENSIONS.has(extension);
 }
 
 function guessContentType(filePath) {
@@ -138,6 +142,35 @@ async function collectPickedFiles(pathsToImport) {
   }
 
   return selectedFiles;
+}
+
+function readPickerTestPaths() {
+  if (process.env.RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN !== "1") {
+    return null;
+  }
+
+  const rawPaths = process.env.RADSYSX_DESKTOP_PICKER_TEST_PATHS;
+  if (!rawPaths) {
+    return null;
+  }
+
+  let parsedPaths;
+  try {
+    parsedPaths = JSON.parse(rawPaths);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid RADSYSX_DESKTOP_PICKER_TEST_PATHS JSON: ${message}`);
+  }
+
+  if (
+    !Array.isArray(parsedPaths) ||
+    parsedPaths.length === 0 ||
+    parsedPaths.some((item) => typeof item !== "string" || item.trim().length === 0)
+  ) {
+    throw new Error("RADSYSX_DESKTOP_PICKER_TEST_PATHS must be a non-empty JSON array of paths.");
+  }
+
+  return parsedPaths;
 }
 
 async function* walkDirectory(root) {
@@ -740,6 +773,12 @@ function createMainWindow() {
 function registerDesktopIpc() {
   ipcMain.handle("radsysx:select-local-imaging", async (event, options = {}) => {
     const mode = options?.mode === "folder" ? "folder" : "files";
+    const testPaths = readPickerTestPaths();
+    if (testPaths) {
+      const files = await collectPickedFiles(testPaths);
+      return { cancelled: false, files };
+    }
+
     const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     const dialogOptions = {
       title: mode === "folder" ? "Import local imaging folder" : "Import local imaging files",

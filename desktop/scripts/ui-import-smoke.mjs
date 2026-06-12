@@ -15,6 +15,7 @@ const fixtureRoot = path.join(tmpRoot, "fixtures");
 const storageRoot = path.join(tmpRoot, "local-imaging-data");
 const dbPath = path.join(tmpRoot, "clinical.db");
 const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP_MS ?? "120000", 10);
+const smokeMode = process.argv.includes("--picker-folder") ? "picker-folder" : "drag-drop";
 
 let desktopProcess = null;
 let desktopPublicBaseUrl = null;
@@ -218,6 +219,9 @@ async function startDesktopRuntime() {
     RADSYSX_CLINICAL_DATABASE_URL: `sqlite:///${asFileUrlPath(dbPath)}`,
     RADSYSX_SESSION_COOKIE_SECURE: "false",
     RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN: "1",
+    ...(smokeMode === "picker-folder"
+      ? { RADSYSX_DESKTOP_PICKER_TEST_PATHS: JSON.stringify([fixtureRoot]) }
+      : {}),
   };
 
   return new Promise((resolve, reject) => {
@@ -344,12 +348,13 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
 
     const result = await evaluateInRenderer(
       cdp,
-      `(${uiSmokeInRenderer.toString()})(${JSON.stringify(readFixturePayloads())})`,
+      `(${uiSmokeInRenderer.toString()})(${JSON.stringify(readFixturePayloads())}, ${JSON.stringify(smokeMode)})`,
       120000,
     );
 
     return {
       ok: true,
+      smokeMode,
       publicBaseUrl,
       ...result,
     };
@@ -461,7 +466,7 @@ function formatCdpException(exceptionDetails) {
   return exceptionDetails.text ?? "Renderer evaluation failed.";
 }
 
-function uiSmokeInRenderer(fixtures) {
+function uiSmokeInRenderer(fixtures, smokeMode) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
 
@@ -538,14 +543,7 @@ function uiSmokeInRenderer(fixtures) {
     return file;
   };
 
-  return (async () => {
-    await waitFor(
-      () => window.location.pathname === "/worklist" &&
-        document.querySelector('[data-testid="local-import-panel"]'),
-      "hydrated worklist local import panel",
-    );
-
-    const importPanel = document.querySelector('[data-testid="local-import-panel"]');
+  const dispatchDragDropImport = (importPanel) => {
     const transfer = new DataTransfer();
     for (const payload of fixtures) {
       transfer.items.add(makeFile(payload));
@@ -561,6 +559,34 @@ function uiSmokeInRenderer(fixtures) {
       cancelable: true,
       dataTransfer: transfer,
     }));
+  };
+
+  const clickPickerFolderImport = async (importPanel) => {
+    if (!window.radsysxDesktop?.selectLocalImagingFiles) {
+      throw new Error("Desktop local imaging picker bridge was not exposed to the renderer.");
+    }
+
+    const button = await waitFor(
+      () => findButton(importPanel, "Import folder"),
+      "desktop Import folder button",
+    );
+    button.click();
+  };
+
+  return (async () => {
+    await waitFor(
+      () => window.location.pathname === "/worklist" &&
+        document.querySelector('[data-testid="local-import-panel"]'),
+      "hydrated worklist local import panel",
+    );
+
+    const importPanel = document.querySelector('[data-testid="local-import-panel"]');
+
+    if (smokeMode === "picker-folder") {
+      await clickPickerFolderImport(importPanel);
+    } else {
+      dispatchDragDropImport(importPanel);
+    }
 
     const importMessage = await waitFor(
       () => {
@@ -612,6 +638,7 @@ function uiSmokeInRenderer(fixtures) {
 
     return {
       currentUrl: window.location.href,
+      importPath: smokeMode,
       importMessage,
       localRows: Array.from(document.querySelectorAll('[data-testid="worklist-row"]'))
         .filter((row) => textMatches(row.innerText, "Local "))
