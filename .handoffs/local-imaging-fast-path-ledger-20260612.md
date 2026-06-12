@@ -19,6 +19,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - `npm run desktop`
   - `npm run desktop:smoke`
   - `npm run desktop:smoke:import`
+  - `npm run desktop:smoke:local-start`
   - `npm run desktop:smoke:ui-import`
   - `npm run desktop:smoke:picker-files-import`
   - `npm run desktop:smoke:picker-import`
@@ -30,10 +31,16 @@ This is not merely an upload button. The desired end state is a local app that c
   - Production Next.js standalone frontend shell on an internal loopback port by default.
   - A local one-origin bridge, usually `http://127.0.0.1:3000`.
   - Generated OHIF viewer assets from `viewer/dist/`.
+- The desktop window now opens `/viewer/?local=1` by default instead of the root shell, then the OHIF bootstrap strips the visible `local` query and leaves the user at `/viewer/` with a local import screen ready.
+- `RADSYSX_DESKTOP_START_PATH` exists as an explicit override for focused validation only; normal local use should keep the default OHIF-first route.
 - `npm run desktop:bootstrap` is now a Node-based cross-platform helper that creates or reuses `.venv`, installs clinical Python requirements with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; `npm run desktop:bootstrap -- --check` verifies an existing install without reinstalling dependencies.
 - The desktop launcher builds and stamps the frontend production shell for the selected bridge URL, then serves it with the generated standalone server; `RADSYSX_DESKTOP_FRONTEND_MODE=development` remains available for intentional live Next.js UI development.
 - Desktop runtime defaults to local `pilot` mode with local seeded auth and development secrets.
 - The current desktop fast path can validate seeded login, worklist, launch/session resolution, workspace/report/AI/audit contracts.
+- The OHIF bootstrap has one narrow no-launch exception: when Electron opens `/viewer/?local=1` and exposes `window.radsysxDesktop.importLocalImaging`, the viewer can auto-establish the seeded local session, show a compact local import card, and keep the user in the viewer surface rather than asking them to choose between product modes.
+- The OHIF local-start card provides primary local import actions backed by the existing Electron native import bridge; selected paths and bytes still stay in Electron main and upload to `POST /api/local-imaging/import` through the backend contract.
+- DICOM imports from the OHIF local-start card automatically create a governed imaging launch with `POST /api/imaging/launch` and return to `/viewer/` through the same launch resolution/runtime binding as the worklist `Open viewer` path.
+- Non-DICOM-only local-start imports store the first imported study UID in `sessionStorage["radsysx.localStart.inspectStudyUid"]` and route to `/worklist`, where the existing local asset panel auto-opens for inspection instead of trying to invent a Next.js viewer fallback.
 - The Electron desktop path now exposes a native local imaging file/folder picker through a narrow preload bridge, while retaining browser file input and drag-and-drop fallbacks.
 - The preferred Electron native import path now keeps selected paths and file bytes in Electron main, uses file-backed blobs for multipart form data, attaches the backend-issued session cookie from the Electron cookie jar, and posts directly to `POST /api/local-imaging/import` through the one-origin desktop bridge; the renderer receives only the backend response.
 - The native picker admits extensionless non-hidden files as DICOM candidates so DICOMDIR companion files such as `SCAN1DCM` can reach backend format detection instead of being filtered out in Electron.
@@ -46,6 +53,7 @@ This is not merely an upload button. The desired end state is a local app that c
 - The desktop large picker import smoke can validate the same direct native import path with an additional 8 MiB synthetic `256 x 256 x 128` NIFTI volume, proving the bridge/backend path beyond tiny fixtures.
 - The desktop many-file picker import smoke can validate the same direct native import path with a nested folder of 32 additional extensionless DICOM instances, proving recursive folder traversal and many-file upload behavior beyond tiny focused fixtures.
 - The desktop viewer-launch smoke can validate hydrated local DICOM/DICOMDIR import, `Open viewer`, opaque launch resolution under `/viewer/`, launch-token stripping, same-origin local DICOMweb runtime binding, viewer-origin workspace retrieval, viewer-origin imported-study DICOMweb discovery, and a nonblank OHIF canvas render for the synthetic imported DICOM.
+- The desktop local-start smoke can validate the current desired first experience: Electron starts on `/viewer/`, the OHIF local import card is present without navigating through the root shell/worklist first, the primary import action ingests synthetic local files, imported DICOM opens in OHIF through the governed launch contract, the visible URL remains clean, viewer-origin local DICOMweb/workspace reads succeed, and the synthetic DICOM paints a nonblank canvas.
 - Electron-supervised uvicorn now runs with access logging disabled so local DICOMweb query strings that may contain identifiers are not casually printed during desktop fast-path use or smoke tests.
 - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require compose unless a local DICOMweb target is configured.
 
@@ -444,7 +452,12 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; full pixel-decoded TIFF rendering remains future work if needed.
 - Files become usable in worklist/viewer/analysis:
   - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
+  - Evidence: Electron now opens first into the OHIF local-start screen instead of requiring the user to land on `/`, understand the product split, click into worklist, import, and then open the viewer.
+  - Evidence: the OHIF local-start path imports through `window.radsysxDesktop.importLocalImaging`, preserving the direct Electron-main upload path and avoiding a renderer-owned file-byte bridge for the default desktop experience.
+  - Evidence: DICOM imported from the OHIF local-start screen is immediately opened in OHIF by creating a backend governed imaging launch; no PHI-bearing study UID is left in the visible URL and the helper `local=1` query is stripped once the local-start card is shown.
+  - Evidence: if the local-start import produces only NIFTI/image studies, the viewer does not pretend OHIF can render those assets directly yet; it sets `radsysx.localStart.inspectStudyUid` in session storage and hands off to the worklist's existing backend-owned asset inspection panel.
   - Evidence: `desktop:smoke:viewer-launch` verifies the imported DICOM study can be opened from the hydrated worklist into the governed viewer path, with the launch token stripped from the browser URL after resolution, same-origin local DICOMweb roots applied to the viewer configuration, and a nonblank OHIF canvas painted for the synthetic DICOM.
+  - Evidence: `desktop:smoke:local-start` verifies the OHIF-first path directly: `localStartState.href` is `/viewer/`, `localQueryPresent` is false, the local-start loader state is present, the primary import action works, the imported DICOM study resolves under `/viewer/`, local DICOMweb/workspace probes succeed, and the OHIF canvas has one nonblank sampled canvas.
   - Evidence: the worklist now renders NIFTI axis buttons and a slice slider backed by authenticated backend preview URLs.
   - Evidence: the worklist now exposes a backend-owned local analysis action and renders deterministic technical metrics returned by `GET /api/local-imaging/studies/{studyUid}/analysis`.
   - Evidence: `desktop:smoke:ui-import` proves those controls work in a hydrated Electron renderer rather than only through API-level smoke calls.
@@ -456,6 +469,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: full OHIF pixel rendering across varied real-world DICOM archives and richer diagnostic/AI NIFTI/image analysis remain unproven.
 - No Docker required for the fast path:
   - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews/analysis, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
+  - Evidence: `npm run desktop:smoke:local-start` passed while compose/Orthanc were not running and exercised the exact default first route plus imported-DICOM OHIF rendering through the local backend DICOMweb surface.
   - Evidence: `npm run desktop:smoke:ui-import` passed while compose/Orthanc were not running and exercised the hydrated Electron worklist drag/drop surface.
   - Evidence: `npm run desktop:smoke:viewer-launch` passed while compose/Orthanc were not running and exercised imported-DICOM viewer handoff plus viewer-origin local DICOMweb/workspace access.
   - Evidence: `npm run desktop:smoke:picker-files-import` passed while compose/Orthanc were not running and exercised direct native file picker upload of individual synthetic local files.
@@ -478,6 +492,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: broader real-world PHI log audit remains open.
 - Tests and runtime smoke:
   - Evidence: focused local imaging backend tests and Python compile checks passed during this tranche; full clinical platform test suite passed; frontend/viewer type-checks passed; viewer build passed; desktop doctor and desktop smoke passed; committed desktop import smoke passed.
+  - Evidence: after the OHIF-first desktop local-start tranche, `node --check desktop/src/main.mjs`, `node --check desktop/scripts/ui-import-smoke.mjs`, `node --check viewer/assets/radsysx-bootstrap.js`, `npm run build --workspace viewer`, `npm run desktop:smoke:local-start`, `npm run type-check --workspace frontend`, `npm run type-check --workspace viewer`, `npm run desktop:smoke`, `npm run desktop:smoke:ui-import`, and `npm run desktop:smoke:viewer-launch` passed before the final docs/hygiene pass. The local-start smoke reported `href: http://127.0.0.1:37100/viewer/`, `localQueryPresent: false`, `loaderState: local-start`, imported DICOM study UID `1.2.826.0.1.3680043.10.54321.910`, same-origin `/dicom-web` runtime roots, one DICOMweb study, matching workspace UID, and one nonblank OHIF canvas with 2304 nonblack sampled pixels.
   - Evidence: after the preview tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings.
   - Evidence: after the local technical analysis tranche, `python3 -m pytest backend/tests/test_clinical_platform.py` passed with 26 tests and the expected warnings; broader verification must be rerun after final edits.
   - Evidence: after the drag-and-drop import tranche, `npm run type-check --workspace frontend`, `npm run type-check`, `npm run desktop:smoke:import`, `npm run desktop:doctor`, `python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run desktop:smoke`, and `git diff --check` passed.

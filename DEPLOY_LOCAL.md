@@ -7,6 +7,7 @@ For the shortest no-Docker local run of RadSysX, use the Electron desktop path f
 ```bash
 npm run desktop:bootstrap
 npm run desktop:doctor
+npm run desktop:smoke:local-start
 npm run desktop:smoke:import
 npm run desktop:smoke:ui-import
 npm run desktop:smoke:picker-files-import
@@ -17,11 +18,15 @@ npm run desktop:smoke:viewer-launch
 npm run desktop
 ```
 
-This starts the local clinical FastAPI backend, a production Next.js standalone shell, and OHIF viewer bridge under one localhost origin. It is the preferred quick path for local login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/ZIP archive import including extensionless and multi-study DICOMDIR companion files, imported-study asset summaries, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including PNG/JPEG byte previews and TIFF SVG header previews, deterministic technical analysis, NIFTI header inspection, worklist registration, local DICOM metadata/frame serving, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval, full NIFTI volume rendering, full TIFF pixel decoding, and durable STOW validation still require deeper validation or a configured local imaging backend.
+This starts the local clinical FastAPI backend, a production Next.js standalone shell, and OHIF viewer bridge under one localhost origin. Electron opens directly to the OHIF local-start screen, where DICOM imports auto-open in OHIF through the governed launch contract and non-DICOM-only imports fall back to worklist inspection. It is the preferred quick path for local login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/ZIP archive import including extensionless and multi-study DICOMDIR companion files, imported-study asset summaries, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including PNG/JPEG byte previews and TIFF SVG header previews, deterministic technical analysis, NIFTI header inspection, worklist registration, local DICOM metadata/frame serving, launch/session, workspace, report, AI job, and audit contract work. Full Orthanc-backed DICOMweb retrieval, full NIFTI volume rendering, full TIFF pixel decoding, and durable STOW validation still require deeper validation or a configured local imaging backend.
+
+`RADSYSX_DESKTOP_START_PATH` can override the first route for focused validation, but normal local use should keep the default `/viewer/?local=1` so OHIF is the first screen.
 
 The desktop launcher builds and stamps the frontend production shell for its selected bridge URL when needed. Use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop` to force a rebuild, or `npm run desktop:dev-frontend` when intentionally developing against the Next.js dev server.
 
 `npm run desktop:bootstrap` is a cross-platform Node bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. Use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
+
+`npm run desktop:smoke:local-start` starts Electron at the OHIF local-start screen, verifies the visible URL is cleaned to `/viewer/`, imports synthetic local files through the primary desktop import action, opens the imported DICOM study in OHIF via a governed launch, checks same-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
 `npm run desktop:smoke:import` starts the desktop runtime on high local ports, creates PHI-free synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP with supported NIFTI/PNG members, plus PNG/JPEG/TIFF files, imports them through the local bridge, verifies worklist, local DICOMweb, asset-summary, preview, analysis, and launch behavior, and shuts the runtime down.
 

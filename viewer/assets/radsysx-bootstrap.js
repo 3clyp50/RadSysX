@@ -1,14 +1,17 @@
 // @ts-check
 
 /** @typedef {import("@radsysx/clinical-web/contracts").ImagingLaunchResolveResponse} ImagingLaunchResolveResponse */
+/** @typedef {import("@radsysx/clinical-web/contracts").ImagingLaunchResponse} ImagingLaunchResponse */
 /** @typedef {import("@radsysx/clinical-web/contracts").SessionResponse} SessionResponse */
 
 (async function radsysxBootstrap() {
   const LAUNCH_STORAGE_KEY = "radsysx.clinical.launchToken";
+  const LOCAL_START_INSPECT_KEY = "radsysx.localStart.inspectStudyUid";
   const REQUEST_TIMEOUT_MS = 10000;
   const loader = await ensureLoader();
   const params = new URLSearchParams(window.location.search);
   const launchFromUrl = params.get("launch");
+  const localStartRequested = params.get("local") === "1";
   const initialViewerBasePath = normalizeViewerBasePath(window.location.pathname) ?? "/";
 
   window.__RADSYSX_VIEWER_BASE_PATH__ = initialViewerBasePath;
@@ -31,6 +34,11 @@
 
     const launchToken = window.__RADSYSX_LAUNCH__ ? null : getStoredLaunchToken() ?? launchFromUrl;
     if (!launchToken && !window.__RADSYSX_LAUNCH__) {
+      if (localStartRequested && hasDesktopLocalImport()) {
+        await ensureDesktopLocalSession();
+        showLocalStart();
+        return;
+      }
       throw new Error("The OHIF viewer requires a governed launch session.");
     }
 
@@ -82,7 +90,7 @@
       "Preparing the OHIF runtime and workspace panels.";
   }
 
-  async function requestJson(path) {
+  async function requestJson(path, init = {}) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -90,6 +98,10 @@
       const response = await fetch(path, {
         credentials: "include",
         signal: controller.signal,
+        ...init,
+        headers: {
+          ...(init.headers ?? {}),
+        },
       });
 
       if (!response.ok) {
@@ -108,6 +120,115 @@
     }
   }
 
+  function hasDesktopLocalImport() {
+    return typeof window.radsysxDesktop?.importLocalImaging === "function";
+  }
+
+  async function ensureDesktopLocalSession() {
+    /** @type {SessionResponse} */
+    const session = await requestJson("/api/auth/session");
+    if (session.authenticated && session.session) {
+      return;
+    }
+
+    await requestJson("/api/auth/local-login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "demo-radiologist" }),
+    });
+  }
+
+  function showLocalStart() {
+    stripLocalStartQuery();
+    loader.dataset.state = "local-start";
+    loader.innerHTML = `
+      <div class="radsysx-loader-card radsysx-local-start-card">
+        <div class="radsysx-loader-kicker">RadSysX Local Viewer</div>
+        <div class="radsysx-loader-title" data-role="title">Open local images</div>
+        <div class="radsysx-loader-body" data-role="body">
+          Choose a DICOM, DICOMDIR, NIFTI, image, or ZIP bundle. DICOM studies open here in OHIF as soon as import finishes.
+        </div>
+        <div class="radsysx-local-start-actions">
+          <button type="button" data-testid="radsysx-local-import-files" data-mode="files">Import files</button>
+          <button type="button" data-testid="radsysx-local-import-folder" data-mode="folder">Import folder</button>
+        </div>
+        <div class="radsysx-local-start-status" data-testid="radsysx-local-import-status" aria-live="polite"></div>
+      </div>
+    `;
+    window.__RADSYSX_LOCAL_START_READY__ = true;
+
+    for (const button of loader.querySelectorAll("[data-mode]")) {
+      button.addEventListener("click", () => {
+        const mode = button.getAttribute("data-mode") === "folder" ? "folder" : "files";
+        void importLocalImagingFromDesktop(mode);
+      });
+    }
+  }
+
+  async function importLocalImagingFromDesktop(mode) {
+    const buttons = Array.from(loader.querySelectorAll("[data-mode]"));
+    const status = loader.querySelector("[data-testid='radsysx-local-import-status']");
+    for (const button of buttons) {
+      button.disabled = true;
+    }
+    if (status) {
+      status.textContent = mode === "folder" ? "Importing local folder..." : "Importing local files...";
+    }
+
+    try {
+      const result = await window.radsysxDesktop.importLocalImaging({ mode });
+      if (result.cancelled) {
+        if (status) {
+          status.textContent = "Import cancelled.";
+        }
+        return;
+      }
+      if (!result.response) {
+        throw new Error("Local import did not return a backend response.");
+      }
+      await openImportedStudy(result.response);
+    } catch (error) {
+      if (status) {
+        status.textContent = error instanceof Error ? error.message : "Unable to import local imaging files.";
+      }
+    } finally {
+      for (const button of buttons) {
+        button.disabled = false;
+      }
+    }
+  }
+
+  async function openImportedStudy(response) {
+    const importedStudies = response.importedStudies ?? [];
+    const dicomStudy = importedStudies.find((study) =>
+      Array.isArray(study.formats) && study.formats.includes("dicom")
+    );
+    if (dicomStudy) {
+      const status = loader.querySelector("[data-testid='radsysx-local-import-status']");
+      if (status) {
+        status.textContent = "Opening imported DICOM study in OHIF...";
+      }
+      /** @type {ImagingLaunchResponse} */
+      const launch = await requestJson("/api/imaging/launch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ studyInstanceUID: dicomStudy.studyInstanceUID }),
+      });
+      window.location.assign(launch.viewerUrl);
+      return;
+    }
+
+    const firstStudy = importedStudies[0];
+    if (firstStudy?.studyInstanceUID) {
+      try {
+        window.sessionStorage.setItem(LOCAL_START_INSPECT_KEY, firstStudy.studyInstanceUID);
+      } catch (error) {
+        console.warn("Unable to preserve imported local study for inspection.", error);
+      }
+    }
+    window.location.assign("/worklist");
+  }
+
   function stripSensitiveQuery() {
     const cleanParams = new URLSearchParams(window.location.search);
     cleanParams.delete("launch");
@@ -116,6 +237,15 @@
     cleanParams.delete("studyInstanceUIDs");
     cleanParams.delete("SeriesInstanceUIDs");
     cleanParams.delete("seriesInstanceUIDs");
+    const nextUrl = cleanParams.toString()
+      ? `${window.location.pathname}?${cleanParams.toString()}`
+      : window.location.pathname;
+    history.replaceState(history.state, "", nextUrl);
+  }
+
+  function stripLocalStartQuery() {
+    const cleanParams = new URLSearchParams(window.location.search);
+    cleanParams.delete("local");
     const nextUrl = cleanParams.toString()
       ? `${window.location.pathname}?${cleanParams.toString()}`
       : window.location.pathname;

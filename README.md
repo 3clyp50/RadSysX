@@ -14,7 +14,7 @@ RadSysX is a medical imaging and analysis platform with two distinct product sur
 - `research`: the experimentation surface for prototype workflows, a LangGraph/deepagents-based multi-agent stack, MCP/FHIR integrations, and imaging/AI exploration that is explicitly not the clinical source of truth.
 
 The two surfaces are not interchangeable.
-The repo also includes an Electron desktop fast path that runs the local clinical shell without the Docker/nginx/Orthanc composition required for full governed archive validation.
+The repo also includes an Electron desktop fast path that opens directly into an OHIF local-start screen and runs the local clinical shell without the Docker/nginx/Orthanc composition required for full governed archive validation.
 
 ## Platform Overview
 
@@ -35,7 +35,7 @@ The current clinical baseline on this branch is:
 - Backend-issued signed cookies provide local seeded clinical identity until institutional auth replaces them.
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
-- The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path.
+- The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path, opening OHIF first with local import ready.
 - The desktop app enables native local file/folder selection plus browser drag-and-drop fallback for backend-owned local imaging import of DICOM, DICOMDIR, NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP archives containing supported files, and common image files, with safe imported-study asset summaries, backend-mediated NIFTI slice previews/common-image previews including TIFF SVG header previews, and deterministic technical analysis for local analysis readiness.
 
 The current research/agent baseline still includes:
@@ -259,9 +259,11 @@ npm run desktop:doctor
 npm run desktop
 ```
 
-`desktop:bootstrap` is a Node-based cross-platform bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. `desktop` opens Electron and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
+`desktop:bootstrap` is a Node-based cross-platform bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. `desktop` opens Electron directly to the OHIF local-start screen and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, deterministic technical analysis, opaque launch/session resolution, OHIF rendering of imported DICOM from the first screen, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+
+By default Electron starts at `/viewer/?local=1`, strips that helper query from the visible URL, and shows a compact OHIF local import screen. DICOM imports auto-open in OHIF through the governed launch contract. Non-DICOM-only imports fall back to the worklist's local asset inspection panel.
 
 The desktop launcher builds the frontend production shell on first launch for the selected local bridge URL, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the stamp matches. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
 
@@ -274,6 +276,14 @@ For a quick startup and cleanup check:
 ```bash
 npm run desktop:smoke
 ```
+
+For the first-screen OHIF local import/render check:
+
+```bash
+npm run desktop:smoke:local-start
+```
+
+That smoke starts Electron on the OHIF local-start screen, imports synthetic local files through the primary desktop import action, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
 For a stronger no-Docker import/use check:
 
@@ -404,27 +414,28 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 5. `npm install --legacy-peer-deps`
 6. `npm run desktop:doctor`
 7. `npm run desktop:smoke`
-8. `npm run desktop:smoke:import`
-9. `npm run desktop:smoke:ui-import`
-10. `npm run desktop:smoke:picker-files-import`
-11. `npm run desktop:smoke:picker-import`
-12. `npm run desktop:smoke:picker-large-import`
-13. `npm run desktop:smoke:picker-many-import`
-14. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-15. `python3 -m pytest backend/tests/test_clinical_platform.py`
-16. `npm run type-check --workspace frontend`
-17. `npm run build --workspace frontend`
-18. `npm run type-check --workspace viewer`
-19. `npm run build --workspace viewer`
-20. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-21. Separately validate the governed clinical surface with `docker compose up --build`
+8. `npm run desktop:smoke:local-start`
+9. `npm run desktop:smoke:import`
+10. `npm run desktop:smoke:ui-import`
+11. `npm run desktop:smoke:picker-files-import`
+12. `npm run desktop:smoke:picker-import`
+13. `npm run desktop:smoke:picker-large-import`
+14. `npm run desktop:smoke:picker-many-import`
+15. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+16. `python3 -m pytest backend/tests/test_clinical_platform.py`
+17. `npm run type-check --workspace frontend`
+18. `npm run build --workspace frontend`
+19. `npm run type-check --workspace viewer`
+20. `npm run build --workspace viewer`
+21. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+22. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:local-start`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

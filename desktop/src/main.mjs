@@ -33,6 +33,7 @@ const frontendPublicTarget = path.join(frontendStandaloneRoot, "public");
 const DEFAULT_APP_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_PORT ?? "3000", 10);
 const DEFAULT_FRONTEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "3010", 10);
 const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "8000", 10);
+const DEFAULT_DESKTOP_START_PATH = "/viewer/?local=1";
 const DESKTOP_FRONTEND_MODE = normalizeFrontendMode(process.env.RADSYSX_DESKTOP_FRONTEND_MODE);
 const DESKTOP_PICKER_MAX_FILES = Number.parseInt(process.env.RADSYSX_DESKTOP_PICKER_MAX_FILES ?? "500", 10);
 const DESKTOP_PICKER_MAX_BYTES = Number.parseInt(
@@ -99,6 +100,23 @@ function normalizeFrontendMode(value) {
     return "development";
   }
   return "production";
+}
+
+function desktopStartUrl(baseUrl = publicBaseUrl) {
+  if (!baseUrl) {
+    return null;
+  }
+
+  const rawPath = process.env.RADSYSX_DESKTOP_START_PATH ?? DEFAULT_DESKTOP_START_PATH;
+  try {
+    const url = new URL(rawPath, baseUrl);
+    if (url.origin !== baseUrl) {
+      return `${baseUrl}${DEFAULT_DESKTOP_START_PATH}`;
+    }
+    return url.href;
+  } catch {
+    return `${baseUrl}${DEFAULT_DESKTOP_START_PATH}`;
+  }
 }
 
 function isLocalImagingFile(filePath) {
@@ -1190,7 +1208,7 @@ app.whenReady().then(async () => {
   try {
     const runtime = await startRuntime();
     scheduleSmokeExit();
-    await mainWindow.loadURL(runtime.publicBaseUrl);
+    await mainWindow.loadURL(desktopStartUrl(runtime.publicBaseUrl) ?? runtime.publicBaseUrl);
   } catch (error) {
     if (shuttingDown) {
       return;
@@ -1202,7 +1220,9 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createMainWindow();
-      mainWindow.loadURL(publicBaseUrl ?? `data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
+      mainWindow.loadURL(
+        desktopStartUrl() ?? `data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`,
+      );
     }
   });
 });

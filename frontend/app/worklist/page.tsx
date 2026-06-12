@@ -17,6 +17,8 @@ import type {
   WorklistRow,
 } from "@/lib/clinical/contracts";
 
+const LOCAL_START_INSPECT_KEY = "radsysx.localStart.inspectStudyUid";
+
 type DesktopPickedFile = {
   data: ArrayBuffer | ArrayBufferView;
   lastModified?: number;
@@ -93,6 +95,7 @@ export default function WorklistPage() {
   const [localStudyAnalysis, setLocalStudyAnalysis] = useState<LocalImagingStudyAnalysisResponse | null>(null);
   const [niftiPreviewStates, setNiftiPreviewStates] = useState<Record<string, NiftiPreviewState>>({});
   const [draggingLocalImport, setDraggingLocalImport] = useState(false);
+  const consumedLocalStartInspectRef = useRef(false);
 
   const directoryInputProps = {
     directory: "",
@@ -170,6 +173,35 @@ export default function WorklistPage() {
       setInspectingStudyUid(null);
     }
   };
+
+  useEffect(() => {
+    if (consumedLocalStartInspectRef.current || !config?.localImagingEnabled || rows.length === 0) {
+      return;
+    }
+
+    let studyInstanceUID: string | null = null;
+    try {
+      studyInstanceUID = window.sessionStorage.getItem(LOCAL_START_INSPECT_KEY);
+    } catch {
+      studyInstanceUID = null;
+    }
+    if (!studyInstanceUID) {
+      return;
+    }
+
+    const row = rows.find((candidate) => candidate.studyInstanceUID === studyInstanceUID);
+    if (!row || !row.archiveRef.startsWith("local://")) {
+      return;
+    }
+
+    consumedLocalStartInspectRef.current = true;
+    try {
+      window.sessionStorage.removeItem(LOCAL_START_INSPECT_KEY);
+    } catch {
+      // Ignore storage failures; inspection can still proceed.
+    }
+    void handleInspectLocalStudy(row);
+  }, [config?.localImagingEnabled, rows]);
 
   const handleAnalyzeLocalStudy = async (studyInstanceUID: string) => {
     setAnalyzingStudyUid(studyInstanceUID);

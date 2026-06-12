@@ -18,6 +18,7 @@ const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP
 const manyDicomCount = 32;
 const smokeMode = resolveSmokeMode();
 const pickerSmokeModes = new Set([
+  "local-start",
   "picker-files",
   "picker-folder",
   "picker-large-folder",
@@ -28,6 +29,9 @@ let desktopProcess = null;
 let desktopPublicBaseUrl = null;
 
 function resolveSmokeMode() {
+  if (process.argv.includes("--local-start")) {
+    return "local-start";
+  }
   if (process.argv.includes("--viewer-launch")) {
     return "viewer-launch";
   }
@@ -417,10 +421,20 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
     await waitForRendererCondition(
       cdp,
       `window.location.origin === ${JSON.stringify(publicBaseUrl)} &&
-        window.location.pathname === "/" &&
         document.readyState !== "loading"`,
-      "settled desktop root renderer",
+      "settled desktop renderer",
     );
+
+    if (smokeMode === "local-start") {
+      const localStartResult = await runLocalStartSmoke(cdp, publicBaseUrl);
+      return {
+        ok: true,
+        smokeMode,
+        publicBaseUrl,
+        ...localStartResult,
+      };
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await evaluateInRenderer(
       cdp,
@@ -439,15 +453,7 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
     );
     await evaluateInRenderer(
       cdp,
-      `(() => {
-        const clinicalLink = Array.from(document.querySelectorAll("a"))
-          .find((link) => link.getAttribute("href") === "/worklist");
-        if (!clinicalLink) {
-          throw new Error("Clinical worklist link was not found on the desktop root page.");
-        }
-        clinicalLink.click();
-        return true;
-      })()`,
+      `window.location.assign("/worklist")`,
       30000,
     );
     await waitForRendererCondition(
@@ -478,6 +484,60 @@ async function runUiImportSmoke(publicBaseUrl, debugPort) {
   }
 }
 
+async function runLocalStartSmoke(cdp, publicBaseUrl) {
+  await waitForRendererCondition(
+    cdp,
+    `window.location.origin === ${JSON.stringify(publicBaseUrl)} &&
+      window.location.pathname.startsWith("/viewer") &&
+      window.__RADSYSX_LOCAL_START_READY__ === true &&
+      Boolean(document.querySelector('[data-testid="radsysx-local-import-files"]'))`,
+    "desktop OHIF local start screen",
+    90000,
+  );
+
+  const localStartState = await evaluateInRenderer(
+    cdp,
+    `(() => ({
+      href: window.location.href,
+      pathname: window.location.pathname,
+      localQueryPresent: new URL(window.location.href).searchParams.has("local"),
+      loaderState: document.getElementById("radsysx-loader")?.dataset?.state ?? null,
+      title: document.querySelector("[data-role='title']")?.textContent ?? null,
+      body: document.querySelector("[data-role='body']")?.textContent ?? null,
+      filesButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-files"]')),
+      folderButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-folder"]'))
+    }))()`,
+    30000,
+  );
+
+  if (localStartState.localQueryPresent) {
+    throw new Error(`Local start query was not stripped from the visible viewer URL: ${localStartState.href}`);
+  }
+  if (localStartState.loaderState !== "local-start") {
+    throw new Error(`Desktop local start did not settle into the import-ready state: ${localStartState.loaderState}`);
+  }
+
+  await evaluateInRenderer(
+    cdp,
+    `(() => {
+      const button = document.querySelector('[data-testid="radsysx-local-import-files"]');
+      if (!button) {
+        throw new Error("Desktop OHIF local start Import files button was missing.");
+      }
+      button.click();
+      return true;
+    })()`,
+    30000,
+  );
+
+  const viewerLaunch = await verifyResolvedImportedDicomViewer(cdp, null);
+  return {
+    importPath: "local-start",
+    localStartState,
+    viewerLaunch,
+  };
+}
+
 async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
   if (!studyInstanceUid) {
     throw new Error("Imported DICOM study UID was not returned by the UI smoke.");
@@ -501,10 +561,16 @@ async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
     30000,
   );
 
+  return verifyResolvedImportedDicomViewer(cdp, studyInstanceUid);
+}
+
+async function verifyResolvedImportedDicomViewer(cdp, expectedStudyInstanceUid) {
   await waitForRendererCondition(
     cdp,
-    `window.location.pathname.startsWith("/viewer") && Boolean(window.__RADSYSX_BOOTSTRAP_PROMISE__)`,
-    "viewer bootstrap script",
+    `window.location.pathname.startsWith("/viewer") &&
+      Boolean(window.__RADSYSX_BOOTSTRAP_PROMISE__) &&
+      Boolean(window.__RADSYSX_LAUNCH__?.context?.studyInstanceUID)`,
+    "resolved imported DICOM viewer bootstrap",
     90000,
   );
 
@@ -532,13 +598,19 @@ async function verifyImportedDicomViewerLaunch(cdp, studyInstanceUid) {
     90000,
   );
 
-  if (viewerState.studyInstanceUID !== studyInstanceUid) {
-    throw new Error(`Viewer launch resolved ${viewerState.studyInstanceUID}, expected ${studyInstanceUid}.`);
+  const studyInstanceUid = expectedStudyInstanceUid ?? viewerState.studyInstanceUID;
+  if (!studyInstanceUid) {
+    throw new Error("Viewer launch did not resolve an imported DICOM study UID.");
+  }
+  if (expectedStudyInstanceUid && viewerState.studyInstanceUID !== expectedStudyInstanceUid) {
+    throw new Error(
+      `Viewer launch resolved ${viewerState.studyInstanceUID}, expected ${expectedStudyInstanceUid}.`,
+    );
   }
   if (viewerState.launchQueryPresent) {
     throw new Error("Viewer launch token remained in the URL after bootstrap.");
   }
-  if (viewerState.loaderState !== "ready") {
+  if (viewerState.loaderState && viewerState.loaderState !== "ready") {
     throw new Error(`Viewer bootstrap loader did not reach ready state: ${viewerState.loaderState ?? "missing"}.`);
   }
   if (viewerState.qidoRoot !== "/dicom-web" || viewerState.wadoRoot !== "/dicom-web") {
@@ -703,7 +775,7 @@ function viewerRenderProbeInRenderer() {
 }
 
 function pickerTestPathsForSmokeMode() {
-  if (smokeMode !== "picker-files") {
+  if (smokeMode !== "picker-files" && smokeMode !== "local-start") {
     return [fixtureRoot];
   }
 

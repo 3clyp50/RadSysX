@@ -8,7 +8,7 @@ Last updated: 2026-06-12
 - RadSysX has two parallel product surfaces:
   - `research`: rapid experimentation, legacy viewer flows, browser-side AI prototypes, and agent/MCP exploration.
   - `clinical`: governed FastAPI contracts, worklist-driven launch, opaque viewer sessions, OHIF reading, audited reporting, AI workflow state, and backend-mediated derived DICOM writeback.
-- RadSysX now also has a `desktop` runtime path: an Electron fast path that starts the local backend, Next.js shell, and OHIF viewer bridge under one localhost origin without Docker.
+- RadSysX now also has a `desktop` runtime path: an Electron fast path that starts the local backend, Next.js shell, and OHIF viewer bridge under one localhost origin without Docker; by default it opens directly into the OHIF local-start screen for immediate local image import.
 - Do not treat the research and clinical surfaces as equivalent.
 
 ## Ownership
@@ -171,6 +171,7 @@ Last updated: 2026-06-12
   - `npm run desktop:doctor`
   - `npm run desktop:smoke`
   - `npm run desktop:smoke:import`
+  - `npm run desktop:smoke:local-start`
   - `npm run desktop:smoke:picker-files-import`
   - `npm run desktop:smoke:picker-large-import`
   - `npm run desktop:smoke:picker-many-import`
@@ -195,6 +196,7 @@ Last updated: 2026-06-12
 - Desktop app with live Next.js dev frontend: `npm run desktop:dev-frontend`
 - Desktop startup smoke test: `npm run desktop:smoke`
 - Desktop local import smoke test: `npm run desktop:smoke:import`
+- Desktop OHIF local-start import/render smoke test: `npm run desktop:smoke:local-start`
 - Desktop native file picker bridge import smoke test: `npm run desktop:smoke:picker-files-import`
 - Desktop large native picker import smoke test: `npm run desktop:smoke:picker-large-import`
 - Desktop many-file native picker import smoke test: `npm run desktop:smoke:picker-many-import`
@@ -218,9 +220,11 @@ Last updated: 2026-06-12
   - `npm run desktop:bootstrap` is a cross-platform Node helper that creates/uses `.venv`, installs clinical Python requirements, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
   - Run `npm run desktop` for the Electron app.
   - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, a stamped production Next.js standalone shell, and the generated OHIF viewer bridge.
+  - Electron opens `/viewer/?local=1` by default, strips the visible `local` query after bootstrap, and presents the OHIF local-start import screen first; use `RADSYSX_DESKTOP_START_PATH` only when intentionally validating a different first route.
   - The desktop launcher builds or refreshes the frontend production shell when the expected desktop build stamp is missing or mismatched; use `npm run desktop:dev-frontend` or `RADSYSX_DESKTOP_FRONTEND_MODE=development npm run desktop` only when intentionally doing live Next.js UI development.
   - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries/previews/technical analysis, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP archives containing supported files, plus PNG/JPEG/TIFF files, verify worklist/asset-summary/preview/analysis/DICOMweb/launch behavior, and cleanly shut down.
+  - Run `npm run desktop:smoke:local-start` to start Electron at the OHIF local-start screen, import synthetic local files through the primary desktop import action, auto-launch the imported DICOM study through the governed imaging launch contract, and verify same-origin local DICOMweb/workspace access plus a nonblank OHIF canvas.
   - Run `npm run desktop:smoke:ui-import` to drive the hydrated Electron worklist UI, dispatch a local imaging drag/drop import, inspect imported studies, verify NIFTI previews including a coronal slice, run backend technical analysis, and cleanly shut down.
   - Run `npm run desktop:smoke:viewer-launch` to drive the hydrated Electron worklist UI through local DICOM import, `Open viewer`, opaque launch resolution, launch-token stripping, same-origin local DICOMweb binding, viewer-origin workspace retrieval, and imported-study DICOMweb discovery.
   - Run `npm run desktop:smoke:picker-files-import` to drive the hydrated Electron worklist UI through the native file picker bridge using smoke-injected individual file paths, proving the `Import files` button, preload IPC, direct main-process upload to backend import, inspection, NIFTI preview controls, and analysis path without automating the OS dialog itself.
