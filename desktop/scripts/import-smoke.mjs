@@ -282,12 +282,27 @@ async function runImportSmoke(publicBaseUrl) {
   const niftiPreviewAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("volume.nii.gz"));
   assert(niftiPreviewAsset?.previewSupported, "NIFTI asset was not marked preview-supported.");
   assert(niftiPreviewAsset?.previewUrl, "NIFTI asset did not include a preview URL.");
+  assert(
+    niftiPreviewAsset.previewSlices?.axial === 4 &&
+      niftiPreviewAsset.previewSlices?.coronal === 3 &&
+      niftiPreviewAsset.previewSlices?.sagittal === 2,
+    "NIFTI preview slices were not reported.",
+  );
   const niftiPreview = await getRaw(resolveLocalUrl(publicBaseUrl, niftiPreviewAsset.previewUrl), cookie);
   assert(
     niftiPreview.contentType.startsWith("image/svg+xml"),
     `NIFTI preview returned ${niftiPreview.contentType}.`,
   );
   assert(niftiPreview.body.includes("<svg"), "NIFTI preview did not return SVG content.");
+  assert(niftiPreview.body.includes("NIFTI axial slice 3 preview"), "NIFTI default axial preview was not returned.");
+  const coronalPreview = await getRaw(
+    resolveLocalUrl(publicBaseUrl, `${niftiPreviewAsset.previewUrl}?axis=coronal&slice=1`),
+    cookie,
+  );
+  assert(
+    coronalPreview.body.includes("NIFTI coronal slice 2 preview"),
+    "NIFTI coronal preview was not returned.",
+  );
 
   const imagePreviewAsset = niftiSummary.assets.find((asset) => asset.format === "png");
   assert(imagePreviewAsset?.previewSupported, "PNG asset was not marked preview-supported.");

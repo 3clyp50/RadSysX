@@ -106,6 +106,9 @@ export type LocalImagingStudyAsset = {
   viewerSupported: boolean;
   previewSupported: boolean;
   previewUrl?: string | null;
+  previewSlices: Record<string, number>;
+  defaultPreviewAxis?: string | null;
+  defaultPreviewSlice?: number | null;
 };
 
 export type LocalImagingStudyFinding = {

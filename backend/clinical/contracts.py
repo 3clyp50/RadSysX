@@ -280,6 +280,9 @@ class LocalImagingStudyAsset(ClinicalModel):
     viewer_supported: bool = Field(default=False, alias="viewerSupported")
     preview_supported: bool = Field(default=False, alias="previewSupported")
     preview_url: str | None = Field(default=None, alias="previewUrl")
+    preview_slices: dict[str, int] = Field(default_factory=dict, alias="previewSlices")
+    default_preview_axis: str | None = Field(default=None, alias="defaultPreviewAxis")
+    default_preview_slice: int | None = Field(default=None, alias="defaultPreviewSlice")
 
 
 class LocalImagingStudyFinding(ClinicalModel):

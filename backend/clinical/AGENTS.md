@@ -25,7 +25,7 @@
 - Put orchestration and policy in `services.py`.
 - Put persistence in `repositories.py` and `models.py`.
 - Put DICOMweb/Orthanc boundary logic in `dicomweb.py`.
-- Put local DICOM/DICOMDIR/NIFTI/fallback-file import detection, storage, asset summaries, backend-mediated previews, deterministic technical analysis, NIFTI header/slice inspection, and local DICOMweb metadata/frame serving logic in `local_imaging.py`.
+- Put local DICOM/DICOMDIR/NIFTI/fallback-file import detection, storage, asset summaries, backend-mediated previews, deterministic technical analysis, NIFTI header/multi-axis slice inspection, and local DICOMweb metadata/frame serving logic in `local_imaging.py`.
 - Keep audit events meaningful but avoid recording unnecessary identifiers or payload detail.
 
 ## Verification

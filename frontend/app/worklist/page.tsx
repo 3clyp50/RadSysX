@@ -8,6 +8,7 @@ import { Activity, FileSearch, FolderOpen, Loader2, ShieldCheck, Stethoscope, Up
 import { clinicalApi, resolveClinicalApiUrl } from "@/lib/clinical/client";
 import type {
   ClinicalPlatformConfig,
+  LocalImagingStudyAsset,
   LocalImagingStudyAnalysisResponse,
   LocalImagingStudyAssetsResponse,
   SessionClaims,
@@ -24,6 +25,10 @@ type DesktopPickedFile = {
 };
 
 type DesktopPickerMode = "files" | "folder";
+type NiftiPreviewState = {
+  axis: string;
+  slice: number;
+};
 
 declare global {
   interface Window {
@@ -57,6 +62,7 @@ export default function WorklistPage() {
   const [analyzingStudyUid, setAnalyzingStudyUid] = useState<string | null>(null);
   const [localStudyAssets, setLocalStudyAssets] = useState<LocalImagingStudyAssetsResponse | null>(null);
   const [localStudyAnalysis, setLocalStudyAnalysis] = useState<LocalImagingStudyAnalysisResponse | null>(null);
+  const [niftiPreviewStates, setNiftiPreviewStates] = useState<Record<string, NiftiPreviewState>>({});
 
   const directoryInputProps = {
     directory: "",
@@ -124,6 +130,7 @@ export default function WorklistPage() {
     setInspectingStudyUid(row.studyInstanceUID);
     setError(null);
     setLocalStudyAnalysis(null);
+    setNiftiPreviewStates({});
     try {
       const assets = await clinicalApi.getLocalImagingStudyAssets(row.studyInstanceUID);
       setLocalStudyAssets(assets);
@@ -158,6 +165,7 @@ export default function WorklistPage() {
     setImportWarnings([]);
     setLocalStudyAssets(null);
     setLocalStudyAnalysis(null);
+    setNiftiPreviewStates({});
 
     try {
       const response = await clinicalApi.importLocalImaging(files);
@@ -206,6 +214,27 @@ export default function WorklistPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to choose local imaging files.");
     }
+  };
+
+  const updateNiftiPreviewState = (
+    asset: LocalImagingStudyAsset,
+    next: Partial<NiftiPreviewState>,
+  ) => {
+    setNiftiPreviewStates((currentStates) => {
+      const current = getNiftiPreviewState(asset, currentStates[asset.assetId]);
+      const axis = next.axis ?? current.axis;
+      const sliceCount = Math.max(asset.previewSlices[axis] ?? 1, 1);
+      const nextSlice = next.axis && next.axis !== current.axis && next.slice == null
+        ? Math.floor(sliceCount / 2)
+        : next.slice ?? current.slice;
+      return {
+        ...currentStates,
+        [asset.assetId]: {
+          axis,
+          slice: clamp(nextSlice, 0, sliceCount - 1),
+        },
+      };
+    });
   };
 
   const handleLogout = async () => {
@@ -382,37 +411,85 @@ export default function WorklistPage() {
               </div>
 
               <div className="mt-4 divide-y divide-slate-800 overflow-hidden rounded-xl border border-slate-800">
-                {localStudyAssets.assets.map((asset) => (
-                  <div
-                    key={asset.assetId}
-                    className="grid gap-3 bg-slate-950/40 px-3 py-3 text-sm text-slate-300 md:grid-cols-[104px_minmax(0,1fr)_92px_92px]"
-                  >
-                    <div className="flex h-20 w-24 items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-900/80">
-                      {asset.previewSupported && asset.previewUrl ? (
-                        <img
-                          src={resolveClinicalApiUrl(asset.previewUrl)}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="px-2 text-center text-xs uppercase tracking-[0.14em] text-cyan-300/70">
-                          {asset.format}
-                        </span>
-                      )}
-                    </div>
-                    <div className="min-w-0 self-center">
-                      <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
-                        {asset.format}
+                {localStudyAssets.assets.map((asset) => {
+                  const previewState = getNiftiPreviewState(
+                    asset,
+                    niftiPreviewStates[asset.assetId],
+                  );
+                  const previewPath = buildAssetPreviewPath(asset, previewState);
+                  const previewAxes = Object.keys(asset.previewSlices);
+                  const sliceCount = asset.previewSlices[previewState.axis] ?? 0;
+                  const showNiftiControls = asset.format === "nifti" && previewAxes.length > 0;
+
+                  return (
+                    <div
+                      key={asset.assetId}
+                      className="grid gap-3 bg-slate-950/40 px-3 py-3 text-sm text-slate-300 md:grid-cols-[104px_minmax(0,1fr)_92px_92px]"
+                    >
+                      <div className="flex h-20 w-24 items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-900/80">
+                        {asset.previewSupported && previewPath ? (
+                          <img
+                            src={resolveClinicalApiUrl(previewPath)}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="px-2 text-center text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                            {asset.format}
+                          </span>
+                        )}
                       </div>
-                      <div className="mt-1 break-all text-slate-100">{asset.relativePath}</div>
+                      <div className="min-w-0 self-center">
+                        <div className="text-xs uppercase tracking-[0.14em] text-cyan-300/70">
+                          {asset.format}
+                        </div>
+                        <div className="mt-1 break-all text-slate-100">{asset.relativePath}</div>
+                        {showNiftiControls && (
+                          <div className="mt-3 grid gap-2">
+                            <div className="flex flex-wrap gap-1">
+                              {previewAxes.map((axis) => (
+                                <button
+                                  key={`${asset.assetId}-${axis}`}
+                                  type="button"
+                                  onClick={() => updateNiftiPreviewState(asset, { axis })}
+                                  className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.12em] transition ${
+                                    previewState.axis === axis
+                                      ? "border-cyan-300/50 bg-cyan-300/15 text-cyan-100"
+                                      : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-400/50"
+                                  }`}
+                                >
+                                  {axis}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="grid gap-1">
+                              <div className="text-xs text-slate-500">
+                                Slice {previewState.slice + 1} / {Math.max(sliceCount, 1)}
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={Math.max(sliceCount - 1, 0)}
+                                value={previewState.slice}
+                                onChange={(event) => updateNiftiPreviewState(
+                                  asset,
+                                  { slice: Number(event.currentTarget.value) },
+                                )}
+                                className="h-2 w-full accent-cyan-300"
+                                aria-label={`${previewState.axis} slice`}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="self-center">{formatFileSize(asset.size)}</div>
+                      <div className="self-center">
+                        {asset.viewerSupported ? "Viewer" : asset.analysisSupported ? "Analysis" : "Stored"}
+                      </div>
                     </div>
-                    <div className="self-center">{formatFileSize(asset.size)}</div>
-                    <div className="self-center">
-                      {asset.viewerSupported ? "Viewer" : asset.analysisSupported ? "Analysis" : "Stored"}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {localStudyAnalysis && (
@@ -558,6 +635,47 @@ function formatFileSize(sizeBytes: number): string {
     value /= 1024;
   }
   return `${value.toFixed(1)} GB`;
+}
+
+function buildAssetPreviewPath(
+  asset: LocalImagingStudyAsset,
+  previewState: NiftiPreviewState,
+): string | null {
+  if (!asset.previewUrl) {
+    return null;
+  }
+  if (asset.format !== "nifti" || !Object.keys(asset.previewSlices).length) {
+    return asset.previewUrl;
+  }
+  const params = new URLSearchParams({
+    axis: previewState.axis,
+    slice: String(previewState.slice),
+  });
+  return `${asset.previewUrl}?${params.toString()}`;
+}
+
+function getNiftiPreviewState(
+  asset: LocalImagingStudyAsset,
+  current?: NiftiPreviewState,
+): NiftiPreviewState {
+  const previewSlices = asset.previewSlices ?? {};
+  const firstAxis = Object.keys(previewSlices)[0] ?? "axial";
+  const defaultAxis = asset.defaultPreviewAxis && previewSlices[asset.defaultPreviewAxis]
+    ? asset.defaultPreviewAxis
+    : firstAxis;
+  const axis = current?.axis && previewSlices[current.axis]
+    ? current.axis
+    : defaultAxis;
+  const sliceCount = Math.max(previewSlices[axis] ?? 1, 1);
+  const defaultSlice = asset.defaultPreviewSlice ?? Math.floor(sliceCount / 2);
+  return {
+    axis,
+    slice: clamp(current?.slice ?? defaultSlice, 0, sliceCount - 1),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function desktopPickedFileToFile(part: DesktopPickedFile): File {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """FastAPI entrypoint for RadSysX."""
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -615,12 +615,19 @@ async def get_local_imaging_asset_preview(
     study_uid: str,
     asset_id: str,
     http_request: Request,
+    axis: str = "axial",
+    slice_index: int | None = Query(default=None, alias="slice"),
 ) -> Response:
     """Return a backend-mediated local asset preview without exposing private storage paths."""
     if not settings.local_imaging_enabled:
         raise HTTPException(status_code=403, detail="Local imaging import is disabled for this runtime.")
     _require_session(http_request)
-    preview = local_imaging_importer.preview_asset(study_uid, asset_id)
+    preview = local_imaging_importer.preview_asset(
+        study_uid,
+        asset_id,
+        axis=axis,
+        slice_index=slice_index,
+    )
     return Response(
         content=preview.content,
         media_type=preview.media_type,

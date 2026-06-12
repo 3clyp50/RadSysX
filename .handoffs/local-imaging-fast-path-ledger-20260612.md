@@ -61,10 +61,10 @@ This is not merely an upload button. The desired end state is a local app that c
 - There is now a backend-owned imported-study asset summary endpoint at `GET /api/local-imaging/studies/{studyUid}/assets`.
 - There is now a backend-owned imported-asset preview endpoint at `GET /api/local-imaging/studies/{studyUid}/assets/{assetId}/preview`.
 - There is now a backend-owned imported-study technical analysis endpoint at `GET /api/local-imaging/studies/{studyUid}/analysis`.
-- The local asset endpoints read private stored files server-side and return safe technical metadata/previews/analysis, including NIFTI header dimensions/datatype, NIFTI central-slice SVG previews, DICOM/image counts, common image previews, NIFTI voxel statistics, simple uncompressed DICOM pixel statistics, and common image header dimensions, without exposing stored paths or PHI-bearing DICOM tags.
+- The local asset endpoints read private stored files server-side and return safe technical metadata/previews/analysis, including NIFTI header dimensions/datatype, axial/coronal/sagittal NIFTI SVG slice previews, DICOM/image counts, common image previews, NIFTI voxel statistics, simple uncompressed DICOM pixel statistics, and common image header dimensions, without exposing stored paths or PHI-bearing DICOM tags.
 - There is now a reproducible desktop import smoke at `npm run desktop:smoke:import`; it starts Electron on high local ports, generates PHI-free synthetic imaging files, imports them, verifies worklist rows, asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the runtime down.
 - There is now an Electron-native file/folder selection bridge at `window.radsysxDesktop.selectLocalImagingFiles`; it reads selected files in the desktop main process, preserves folder-relative paths as `radsysxRelativePath`, and then the frontend imports through the same backend local imaging contract.
-- NIFTI display still needs a dedicated volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries, central-slice previews, and deterministic voxel statistics.
+- NIFTI display still needs a dedicated full volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries, multi-axis slice previews, and deterministic voxel statistics.
 - DICOMDIR expansion needs parsing and file-path resolution rules.
 - Cross-platform file picker and directory upload behavior needs explicit testing.
 - Diagnostic AI/segmentation remains future work; the current no-Docker analyzer is deliberately technical and deterministic, not a clinical diagnosis engine.
@@ -179,7 +179,9 @@ Likely components:
 - [x] Add stable opaque local asset IDs for imported-study assets.
 - [x] Add `GET /api/local-imaging/studies/{studyUid}/assets/{assetId}/preview` for backend-mediated local previews.
 - [x] Serve common image previews through the backend without public static file exposure.
-- [x] Render NIFTI central-slice previews server-side as dependency-free SVG from private voxel bytes.
+- [x] Render initial NIFTI axial previews server-side as dependency-free SVG from private voxel bytes.
+- [x] Extend backend-mediated NIFTI previews to axial, coronal, and sagittal slice selection through `axis` and `slice` query parameters.
+- [x] Return NIFTI preview slice counts and default preview state in the imported-study asset contract.
 - [x] Keep local previews behind `RADSYSX_LOCAL_IMAGING_ENABLED` and an authenticated backend session.
 - [x] Add `GET /api/local-imaging/studies/{studyUid}/analysis` for deterministic backend-side local technical analysis.
 - [x] Analyze simple uncompressed DICOM pixel data for frame dimensions, intensity range, and mean intensity.
@@ -199,6 +201,7 @@ Likely components:
 - [x] Route imported DICOM studies to viewer/workspace launch path; backend now serves minimal local DICOMweb for imported DICOM.
 - [x] Route NIFTI/fallback images to a backend-owned inspection/analysis-summary path when OHIF is not immediately suitable.
 - [x] Show backend-mediated preview thumbnails for previewable imported NIFTI and common image assets in the worklist inspection panel.
+- [x] Add NIFTI axial/coronal/sagittal preview controls with a slice slider in the worklist inspection panel.
 - [x] Add a worklist local-analysis action that renders backend technical metrics for imported assets.
 - [x] Keep text inside buttons/cards from overflowing on mobile and desktop in the worklist controls touched by this tranche.
 - [x] Prefer the Electron native file/folder picker when available, while retaining browser input fallback.
@@ -224,10 +227,11 @@ Likely components:
 - [x] For DICOM, choose whether fast path serves a simple local DICOMweb endpoint or uses existing research DICOM viewer components first: first pass is simple local DICOMweb endpoint.
 - [x] For DICOMDIR, ensure referenced DICOM files become a series/study collection.
 - [x] For NIFTI, choose and implement the short-term metadata path: backend asset summary plus header inspection.
-- [x] For NIFTI, add a short-term backend-mediated central-slice preview path.
+- [x] For NIFTI, add a short-term backend-mediated default axial preview path.
+- [x] For NIFTI, add multi-axis slice navigation for imported local volumes in the worklist inspection panel.
 - [x] For PNG/JPEG/GIF/BMP, add backend-mediated local preview retrieval for the inspection panel.
 - [x] Add deterministic backend technical analysis for imported DICOM/NIFTI/common image assets.
-- [ ] For NIFTI, implement longer-term volume rendering, conversion, or analysis viewer path.
+- [ ] For NIFTI, implement longer-term volume rendering, conversion, or dedicated analysis viewer path beyond backend SVG slice navigation.
 - [ ] Add diagnostic/AI/segmentation analysis that consumes local stored files server-side without browser direct third-party transfer.
 - [x] Avoid claiming full OHIF image rendering until a real DICOMweb or compatible local source is verified; docs call this minimal local DICOM metadata/frame serving, not full archive parity.
 - [x] Ensure the local asset-summary path consumes private local stored files server-side without browser direct third-party transfer.
@@ -240,7 +244,8 @@ Likely components:
 - [x] Unit-test DICOMDIR reference handling for an included referenced DICOM.
 - [x] Unit-test NIFTI detection for `.nii`.
 - [x] Unit-test NIFTI detection and header summary for `.nii.gz`.
-- [x] Unit-test NIFTI central-slice preview retrieval for `.nii.gz`.
+- [x] Unit-test NIFTI default axial preview retrieval for `.nii.gz`.
+- [x] Unit-test NIFTI preview slice metadata and axial/coronal/sagittal preview retrieval.
 - [x] Unit-test NIFTI voxel statistics through the local analysis endpoint.
 - [x] Unit-test common image fallback import and asset-summary reporting with a synthetic PNG payload.
 - [x] Unit-test common image preview retrieval with a synthetic PNG payload.
@@ -259,6 +264,7 @@ Likely components:
 - [x] Perform a live no-Docker runtime upload smoke through the desktop bridge API with synthetic DICOMDIR+DICOM+`.nii.gz`+PNG files.
 - [x] Replace the one-off live no-Docker import smoke with a committed `desktop:smoke:import` command covering DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG.
 - [x] Extend `desktop:smoke:import` to verify backend-mediated NIFTI SVG preview and PNG byte preview retrieval.
+- [x] Extend `desktop:smoke:import` to verify NIFTI preview slice metadata and coronal slice retrieval through the local bridge.
 - [x] Extend `desktop:smoke:import` to verify backend local analysis for DICOM intensity range, NIFTI voxel count/mean intensity, and PNG dimensions.
 - [ ] Perform a true native UI file-picker or drag-and-drop upload smoke once browser automation can reliably exercise hydrated worklist controls and OS dialogs.
 
@@ -280,6 +286,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: `npm run desktop:smoke:import` passed after being added as a committed script.
   - Evidence: Electron now exposes a native local imaging file/folder picker through `window.radsysxDesktop.selectLocalImagingFiles`.
   - Evidence: `desktop:smoke:import` now also fetches backend-mediated NIFTI SVG and PNG previews through the local bridge.
+  - Evidence: `desktop:smoke:import` now verifies NIFTI preview slice metadata and a non-default coronal preview through the local bridge.
   - Evidence: `desktop:smoke:import` now fetches backend technical analysis results for imported DICOM, NIFTI, and PNG assets through the local bridge.
   - Remaining gap: needs manual or automation-backed native OS dialog upload smoke before final completion.
 - Upload/select local DICOM:
@@ -295,11 +302,13 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests import a synthetic `.nii` file and register a local worklist row; `npm run desktop:smoke:import` imports `.nii` and verifies analysis-supported asset summary.
   - Evidence: the shared local asset contract now exposes opaque asset IDs plus preview capability flags/URLs for NIFTI assets.
   - Evidence: backend technical analysis now computes NIFTI dimensions, voxel count, intensity range, and mean intensity from private local voxel bytes.
-  - Remaining gap: native OS dialog upload/inspection of `.nii` remains open; rich volume navigation and diagnostic/AI analysis are still future work.
+  - Evidence: NIFTI assets now expose preview slice counts and can render axial/coronal/sagittal SVG slices through authenticated backend preview URLs.
+  - Remaining gap: native OS dialog upload/inspection of `.nii` remains open; full volume rendering and diagnostic/AI analysis are still future work.
 - Upload/select NIFTI `.nii.gz`:
   - Evidence: backend endpoint tests import synthetic gzipped NIFTI, preserve relative path, and extract `2 x 3 x 4` dimensions through the asset-summary endpoint; `npm run desktop:smoke:import` imports `.nii.gz` and returns the same dimension summary.
-  - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch an authenticated backend-mediated SVG central-slice preview for `.nii.gz`.
+  - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch an authenticated backend-mediated SVG default axial preview for `.nii.gz`.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove deterministic voxel statistics for imported NIFTI assets.
+  - Evidence: backend endpoint tests now fetch axial/coronal/sagittal preview slices for `.nii.gz`, and `desktop:smoke:import` verifies non-default coronal preview retrieval.
   - Remaining gap: native OS dialog upload/inspection of `.nii.gz` remains open; full NIFTI volume rendering and diagnostic/AI analysis remain open.
 - Generic suitable medical files:
   - Evidence: backend endpoint tests import a synthetic PNG fallback and report it through the asset-summary endpoint; importer accepts PNG/JPEG/TIFF/BMP/GIF extensions; `npm run desktop:smoke:import` imports a PNG fallback and reports it as analysis-supported.
@@ -308,6 +317,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; TIFF is accepted as an analyzable local image file but does not yet have a guaranteed browser-renderable preview.
 - Files become usable in worklist/viewer/analysis:
   - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
+  - Evidence: the worklist now renders NIFTI axis buttons and a slice slider backed by authenticated backend preview URLs.
   - Evidence: the worklist now exposes a backend-owned local analysis action and renders deterministic technical metrics returned by `GET /api/local-imaging/studies/{studyUid}/analysis`.
   - Remaining gap: full OHIF pixel rendering across real-world DICOM and richer diagnostic/AI NIFTI/image analysis remain unproven.
 - No Docker required for the fast path:

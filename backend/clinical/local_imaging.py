@@ -448,13 +448,20 @@ class LocalImagingImporter:
 
         raise HTTPException(status_code=404, detail="Local imaging study was not found.")
 
-    def preview_asset(self, study_instance_uid: str, asset_id: str) -> LocalImagingPreview:
+    def preview_asset(
+        self,
+        study_instance_uid: str,
+        asset_id: str,
+        *,
+        axis: str = "axial",
+        slice_index: int | None = None,
+    ) -> LocalImagingPreview:
         _, _, file_entry = self._resolve_asset_entry(study_instance_uid, asset_id)
         file_format = str(file_entry.get("format") or "unknown")
 
         media_type = PREVIEW_IMAGE_MEDIA_TYPES.get(file_format)
         if file_format == "nifti":
-            return self._nifti_preview(file_entry)
+            return self._nifti_preview(file_entry, axis=axis, slice_index=slice_index)
         if media_type is None:
             raise HTTPException(status_code=415, detail="Local imaging asset preview is not available.")
 
@@ -591,6 +598,13 @@ class LocalImagingImporter:
         viewer_supported = bool(file_format == "dicom" and study_uid and series_uid and sop_uid)
         asset_id = self._asset_id(manifest, file_entry_index)
         preview_supported = self._preview_supported(file_format)
+        preview_slices = self._preview_slices(file_entry) if file_format == "nifti" else {}
+        default_preview_axis = "axial" if preview_slices else None
+        default_preview_slice = (
+            max(0, preview_slices["axial"] // 2)
+            if "axial" in preview_slices
+            else None
+        )
         return LocalImagingStudyAsset(
             asset_id=asset_id,
             relative_path=str(file_entry.get("relativePath") or "local-file"),
@@ -608,6 +622,9 @@ class LocalImagingImporter:
                 if preview_supported
                 else None
             ),
+            preview_slices=preview_slices,
+            default_preview_axis=default_preview_axis,
+            default_preview_slice=default_preview_slice,
         )
 
     def _resolve_asset_entry(
@@ -1113,7 +1130,31 @@ class LocalImagingImporter:
 
         return self._parse_nifti_header(header)
 
-    def _nifti_preview(self, file_entry: dict) -> LocalImagingPreview:
+    def _preview_slices(self, file_entry: dict) -> dict[str, int]:
+        header = self._read_nifti_header(file_entry)
+        if header is None:
+            return {}
+        return self._axis_slices_for_dimensions([int(value) for value in header.get("dimensions", [])])
+
+    @staticmethod
+    def _axis_slices_for_dimensions(dimensions: list[int]) -> dict[str, int]:
+        if len(dimensions) < 2 or dimensions[0] < 1 or dimensions[1] < 1:
+            return {}
+        if len(dimensions) < 3 or dimensions[2] < 1:
+            return {"axial": 1}
+        return {
+            "axial": int(dimensions[2]),
+            "coronal": int(dimensions[1]),
+            "sagittal": int(dimensions[0]),
+        }
+
+    def _nifti_preview(
+        self,
+        file_entry: dict,
+        *,
+        axis: str = "axial",
+        slice_index: int | None = None,
+    ) -> LocalImagingPreview:
         payload = self._read_nifti_file_bytes(file_entry)
         if payload is None:
             raise HTTPException(status_code=422, detail="NIFTI asset could not be read.")
@@ -1136,6 +1177,14 @@ class LocalImagingImporter:
         depth = dimensions[2] if len(dimensions) >= 3 else 1
         if width < 1 or height < 1 or depth < 1:
             raise HTTPException(status_code=422, detail="NIFTI dimensions are not previewable.")
+        axis_slices = self._axis_slices_for_dimensions(dimensions)
+        normalized_axis = axis.strip().lower() or "axial"
+        if normalized_axis not in axis_slices:
+            raise HTTPException(status_code=400, detail="NIFTI preview axis is invalid.")
+        max_slices = axis_slices[normalized_axis]
+        selected_slice = max_slices // 2 if slice_index is None else slice_index
+        if selected_slice < 0 or selected_slice >= max_slices:
+            raise HTTPException(status_code=400, detail="NIFTI preview slice is out of range.")
 
         datatype = int(header.get("datatypeCode") or 0)
         decoder = NIFTI_NUMERIC_DATATYPES.get(datatype)
@@ -1150,7 +1199,6 @@ class LocalImagingImporter:
             raise HTTPException(status_code=422, detail="NIFTI voxel data is missing.")
 
         format_code, bytes_per_voxel = decoder
-        slice_index = min(depth - 1, depth // 2)
         svg = self._nifti_slice_svg(
             payload=payload,
             data_offset=data_offset,
@@ -1159,9 +1207,44 @@ class LocalImagingImporter:
             bytes_per_voxel=bytes_per_voxel,
             width=width,
             height=height,
-            slice_index=slice_index,
+            depth=depth,
+            axis=normalized_axis,
+            slice_index=selected_slice,
         )
         return LocalImagingPreview(content=svg, media_type="image/svg+xml")
+
+    @staticmethod
+    def _nifti_plane_dimensions(
+        *,
+        width: int,
+        height: int,
+        depth: int,
+        axis: str,
+    ) -> tuple[int, int]:
+        if axis == "coronal":
+            return width, depth
+        if axis == "sagittal":
+            return height, depth
+        return width, height
+
+    @staticmethod
+    def _nifti_voxel_index(
+        *,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        axis: str,
+        slice_index: int,
+    ) -> int:
+        if axis == "coronal":
+            z = y
+            return (z * width * height) + (slice_index * width) + x
+        if axis == "sagittal":
+            z = y
+            return (z * width * height) + (x * width) + slice_index
+        z = slice_index
+        return (z * width * height) + (y * width) + x
 
     def _read_nifti_file_bytes(self, file_entry: dict) -> bytes | None:
         path = self._stored_file_path(file_entry)
@@ -1187,20 +1270,33 @@ class LocalImagingImporter:
         bytes_per_voxel: int,
         width: int,
         height: int,
+        depth: int,
+        axis: str,
         slice_index: int,
     ) -> bytes:
-        x_step = max(1, math.ceil(width / NIFTI_PREVIEW_MAX_DIMENSION))
-        y_step = max(1, math.ceil(height / NIFTI_PREVIEW_MAX_DIMENSION))
+        plane_width, plane_height = self._nifti_plane_dimensions(
+            width=width,
+            height=height,
+            depth=depth,
+            axis=axis,
+        )
+        x_step = max(1, math.ceil(plane_width / NIFTI_PREVIEW_MAX_DIMENSION))
+        y_step = max(1, math.ceil(plane_height / NIFTI_PREVIEW_MAX_DIMENSION))
         values: list[list[float]] = []
         flat_values: list[float] = []
-        row_stride = width
-        slice_offset = slice_index * width * height
         unpack_format = f"{endian}{format_code}"
 
-        for y in range(0, height, y_step):
+        for y in range(0, plane_height, y_step):
             row: list[float] = []
-            for x in range(0, width, x_step):
-                voxel_index = slice_offset + (y * row_stride) + x
+            for x in range(0, plane_width, x_step):
+                voxel_index = self._nifti_voxel_index(
+                    x=x,
+                    y=y,
+                    width=width,
+                    height=height,
+                    axis=axis,
+                    slice_index=slice_index,
+                )
                 byte_index = data_offset + (voxel_index * bytes_per_voxel)
                 if byte_index + bytes_per_voxel > len(payload):
                     raise HTTPException(status_code=422, detail="NIFTI voxel data is incomplete.")
@@ -1233,7 +1329,7 @@ class LocalImagingImporter:
         svg = (
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {sample_width} {sample_height}" '
             'shape-rendering="crispEdges" preserveAspectRatio="none">'
-            '<title>NIFTI central slice preview</title>'
+            f'<title>NIFTI {axis} slice {slice_index + 1} preview</title>'
             '<rect width="100%" height="100%" fill="#000000"/>'
             f'{"".join(rects)}</svg>'
         )

@@ -375,6 +375,9 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert nifti_asset["assetId"].startswith("import-")
     assert nifti_asset["previewSupported"] is True
     assert nifti_asset["previewUrl"].endswith(f"/assets/{nifti_asset['assetId']}/preview")
+    assert nifti_asset["previewSlices"] == {"axial": 4, "coronal": 3, "sagittal": 2}
+    assert nifti_asset["defaultPreviewAxis"] == "axial"
+    assert nifti_asset["defaultPreviewSlice"] == 2
 
     png_asset = next(asset for asset in assets if asset["format"] == "png")
     assert png_asset["previewSupported"] is True
@@ -390,7 +393,18 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_image(
     assert nifti_preview.headers["content-type"].startswith("image/svg+xml")
     assert nifti_preview.headers["cache-control"] == "no-store"
     assert b"<svg" in nifti_preview.content
-    assert b"NIFTI central slice preview" in nifti_preview.content
+    assert b"NIFTI axial slice 3 preview" in nifti_preview.content
+
+    coronal_preview = client.get(f"{nifti_asset['previewUrl']}?axis=coronal&slice=1")
+    assert coronal_preview.status_code == 200
+    assert b"NIFTI coronal slice 2 preview" in coronal_preview.content
+
+    sagittal_preview = client.get(f"{nifti_asset['previewUrl']}?axis=sagittal&slice=1")
+    assert sagittal_preview.status_code == 200
+    assert b"NIFTI sagittal slice 2 preview" in sagittal_preview.content
+
+    bad_axis_preview = client.get(f"{nifti_asset['previewUrl']}?axis=diagonal&slice=0")
+    assert bad_axis_preview.status_code == 400
 
     png_preview = client.get(png_asset["previewUrl"])
     assert png_preview.status_code == 200
