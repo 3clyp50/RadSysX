@@ -34,6 +34,7 @@ This is not merely an upload button. The desired end state is a local app that c
 - The Electron desktop path now exposes a native local imaging file/folder picker through a narrow preload bridge, while retaining browser file input and drag-and-drop fallbacks.
 - The preferred Electron native import path now keeps selected paths and file bytes in Electron main, uses file-backed blobs for multipart form data, attaches the backend-issued session cookie from the Electron cookie jar, and posts directly to `POST /api/local-imaging/import` through the one-origin desktop bridge; the renderer receives only the backend response.
 - The native picker admits extensionless non-hidden files as DICOM candidates so DICOMDIR companion files such as `SCAN1DCM` can reach backend format detection instead of being filtered out in Electron.
+- Backend DICOMDIR import now resolves directory-record `ReferencedFileID` values against included files, including paths relative to the DICOMDIR parent, and associates one DICOMDIR index with each referenced local study when imported media contains multiple studies.
 - The desktop import smoke can validate no-Docker import/use of synthetic DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files through the one-origin local bridge.
 - The desktop UI import smoke can validate a hydrated worklist UI drag/drop import path, local study inspection, NIFTI slice controls, and backend technical analysis through the Electron bridge.
 - The desktop picker import smoke can validate the hydrated worklist `Import folder` action through the Electron preload IPC/native picker bridge, main-process recursive folder collector, backend import, local study inspection, NIFTI slice controls, and backend technical analysis without automating the OS dialog itself.
@@ -87,7 +88,7 @@ This is not merely an upload button. The desired end state is a local app that c
 - The desktop live-frontend and startup-smoke commands now use Node launcher scripts rather than POSIX inline environment assignment, preserving the Linux-first docs while keeping these package scripts friendlier to Windows/macOS shells.
 - The shared clinical browser env now reads public `NEXT_PUBLIC_*` keys through guarded direct env access so Next.js can inline them consistently and avoid server/client mode hydration mismatch.
 - NIFTI display still needs a dedicated full volume-rendering path because OHIF/DICOMweb is DICOM-centric; short-term local analysis readiness is now represented by backend summaries, multi-axis slice previews, and deterministic voxel statistics.
-- Deeper DICOMDIR directory-record parsing and file-path resolution rules remain future work beyond the current included-file grouping path.
+- DICOMDIR referenced-file path resolution now covers included files, parent-relative media layouts, extensionless companions, and multi-study index association; deeper patient/study/series directory-record metadata extraction remains future work.
 - Real native OS-dialog behavior and Windows/macOS directory-picker behavior still need explicit testing beyond the smoke-only picker bridge override.
 - Diagnostic AI/segmentation remains future work; the current no-Docker analyzer is deliberately technical and deterministic, not a clinical diagnosis engine.
 
@@ -187,7 +188,7 @@ Likely components:
 - [x] Enforce file size and count limits with clear errors.
 - [x] Detect DICOM by pydicom parse and magic.
 - [x] Detect DICOMDIR by filename and DICOM media storage metadata.
-- [x] Resolve DICOMDIR referenced files safely enough for included-file warning/grouping; deeper directory-record coverage remains future work.
+- [x] Resolve DICOMDIR referenced files safely enough for included-file warning/grouping and multi-study DICOMDIR association; deeper patient/study/series directory-record metadata coverage remains future work.
 - [x] Detect `.nii` and `.nii.gz`.
 - [x] Detect common image fallbacks: PNG, JPEG, TIFF, BMP, GIF as local files.
 - [x] Return a structured ingest response with local study IDs, modality/format, count, and warnings.
@@ -285,6 +286,7 @@ Likely components:
 - [x] Unit-test file format detection through backend endpoint tests for DICOM, DICOMDIR, and NIFTI.
 - [x] Unit-test DICOM metadata extraction without PHI logging in manifest.
 - [x] Unit-test DICOMDIR reference handling for an included referenced DICOM.
+- [x] Unit-test DICOMDIR reference handling for a media-root DICOMDIR that references two different local DICOM studies.
 - [x] Unit-test NIFTI detection for `.nii`.
 - [x] Unit-test NIFTI detection and header summary for `.nii.gz`.
 - [x] Unit-test NIFTI default axial preview retrieval for `.nii.gz`.
@@ -360,6 +362,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Remaining gap: native OS dialog upload of a real local DICOM file still needs runtime smoke evidence.
 - Upload/select DICOMDIR:
   - Evidence: backend endpoint tests import synthetic DICOMDIR plus referenced DICOM and group them into one local study row; `npm run desktop:smoke:import` imports synthetic DICOMDIR plus referenced DICOM and returns `dicom`/`dicomdir` asset summary.
+  - Evidence: backend endpoint tests now import one synthetic DICOMDIR under a media root that references two sibling DICOM studies; each resulting local study row includes both the DICOM asset and the shared DICOMDIR index through manifest `localStudyInstanceUIDs`.
   - Evidence: the Electron native folder picker preserves relative paths for DICOMDIR-style folder imports.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOMDIR plus referenced DICOM through a hydrated worklist drag/drop and verifies the local DICOMDIR row can be inspected.
   - Evidence: `desktop:smoke:picker-import` exercises the hydrated `Import folder` action through the Electron picker bridge and recursive folder collector for a DICOMDIR-style folder.
@@ -430,6 +433,8 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: after the many-file picker tranche, `node --check desktop/src/main.mjs desktop/src/preload.cjs desktop/scripts/doctor.mjs desktop/scripts/import-smoke.mjs desktop/scripts/ui-import-smoke.mjs`, `npm run type-check`, `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run build --workspace viewer`, `npm run desktop:smoke:picker-many-import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:import`, `npm run desktop:smoke`, and `npm run desktop:doctor` passed before final hygiene. At that point `npm run desktop:smoke:ui-import` still printed one recoverable local Next.js dev chunk proxy parse warning while completing successfully; the later production-frontend tranche below removes that warning from the normal desktop path.
   - Evidence: after the production desktop frontend tranche, `npm run build --workspace frontend` passed after wrapping `/login` search-param usage in a Suspense boundary; `npm run desktop:smoke` launched the Node standalone frontend server; `npm run desktop:smoke:ui-import` and `npm run desktop:smoke:picker-many-import` passed through the production standalone frontend shell without the previous Next.js dev chunk proxy warning.
   - Evidence: final verification for this tranche passed `node --check` on `desktop/src/main.mjs`, `desktop/src/preload.cjs`, `desktop/scripts/dev-frontend.mjs`, `desktop/scripts/startup-smoke.mjs`, `desktop/scripts/doctor.mjs`, `desktop/scripts/import-smoke.mjs`, and `desktop/scripts/ui-import-smoke.mjs`; `npm run type-check`; `npm run build --workspace frontend`; `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`; `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`; `npm run build --workspace viewer`; `npm run desktop:doctor`; `npm run desktop:smoke`; `npm run desktop:smoke:import`; `npm run desktop:smoke:ui-import`; `npm run desktop:smoke:picker-import`; `npm run desktop:smoke:picker-large-import`; `npm run desktop:smoke:picker-many-import`; and `git diff --check`. Checked smoke ports were clear afterward. The desktop smokes launched the Node standalone frontend server in normal mode and did not reproduce the old Next.js dev chunk proxy parse warning.
+  - Evidence: after the multi-study DICOMDIR tranche, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py -k "dicomdir or local_dicomweb"` passed with 3 selected tests, including the new media-root DICOMDIR fixture that references two different study UIDs.
+  - Evidence: final verification for the multi-study DICOMDIR tranche passed `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`; `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py` with 27 tests; `npm run desktop:smoke:import`; `npm run desktop:smoke:picker-many-import`; `npm run desktop:doctor`; and `git diff --check`. Checked smoke ports were clear afterward.
   - Remaining gap: native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

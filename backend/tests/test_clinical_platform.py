@@ -80,7 +80,7 @@ def make_test_dicom_bytes(
     return output.getvalue()
 
 
-def make_test_dicomdir_bytes() -> bytes:
+def make_test_dicomdir_bytes(references: list[list[str] | str] | None = None) -> bytes:
     pytest.importorskip("pydicom")
     from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
     from pydicom.sequence import Sequence
@@ -97,10 +97,13 @@ def make_test_dicomdir_bytes() -> bytes:
     dataset.is_little_endian = True
     dataset.is_implicit_VR = False
 
-    image_record = Dataset()
-    image_record.DirectoryRecordType = "IMAGE"
-    image_record.ReferencedFileID = ["CASEA", "SCAN1DCM"]
-    dataset.DirectoryRecordSequence = Sequence([image_record])
+    directory_records = []
+    for reference in references or [["CASEA", "SCAN1DCM"]]:
+        image_record = Dataset()
+        image_record.DirectoryRecordType = "IMAGE"
+        image_record.ReferencedFileID = reference
+        directory_records.append(image_record)
+    dataset.DirectoryRecordSequence = Sequence(directory_records)
 
     output = BytesIO()
     dataset.save_as(output, enforce_file_format=True)
@@ -462,6 +465,95 @@ def test_local_imaging_import_groups_dicomdir_with_referenced_dicom(
     assert imported["studyInstanceUID"] == study_uid
     assert imported["formats"] == ["dicom", "dicomdir"]
     assert imported["warnings"] == []
+
+
+def test_local_imaging_import_links_multistudy_dicomdir_records(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    login()
+    monkeypatch.setattr(server_module.settings, "local_imaging_enabled", True)
+    monkeypatch.setattr(server_module.settings, "local_imaging_storage_dir", str(tmp_path))
+    study_uid_a = "1.2.826.0.1.3680043.10.54321.210"
+    study_uid_b = "1.2.826.0.1.3680043.10.54321.220"
+
+    response = client.post(
+        "/api/local-imaging/import",
+        data={
+            "relativePaths": json.dumps(
+                [
+                    "MEDIA/DICOMDIR",
+                    "MEDIA/CASEA/SCAN1DCM",
+                    "MEDIA/CASEB/SCAN2DCM",
+                ],
+            ),
+        },
+        files=[
+            (
+                "files",
+                (
+                    "DICOMDIR",
+                    make_test_dicomdir_bytes(
+                        references=[
+                            ["CASEA", "SCAN1DCM"],
+                            ["CASEB", "SCAN2DCM"],
+                        ],
+                    ),
+                    "application/dicom",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "SCAN1DCM",
+                    make_test_dicom_bytes(study_uid=study_uid_a),
+                    "application/dicom",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "SCAN2DCM",
+                    make_test_dicom_bytes(study_uid=study_uid_b),
+                    "application/dicom",
+                ),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acceptedFiles"] == 3
+    assert payload["rejectedFiles"] == 0
+    assert payload["warnings"] == []
+    assert len(payload["importedStudies"]) == 2
+
+    imports_by_uid = {
+        study["studyInstanceUID"]: study
+        for study in payload["importedStudies"]
+    }
+    assert set(imports_by_uid) == {study_uid_a, study_uid_b}
+    for study_uid in (study_uid_a, study_uid_b):
+        imported = imports_by_uid[study_uid]
+        assert imported["formats"] == ["dicom", "dicomdir"]
+        assert imported["fileCount"] == 2
+        assert imported["warnings"] == []
+
+        assets_response = client.get(f"/api/local-imaging/studies/{study_uid}/assets")
+        assert assets_response.status_code == 200
+        assets = assets_response.json()["assets"]
+        formats = [asset["format"] for asset in assets]
+        assert formats.count("dicomdir") == 1
+        assert formats.count("dicom") == 1
+        dicomdir_asset = next(asset for asset in assets if asset["format"] == "dicomdir")
+        assert dicomdir_asset["studyInstanceUID"] == study_uid
+
+    manifests = list(tmp_path.glob("import-*/manifest.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    dicomdir_entry = next(file for file in manifest["files"] if file["format"] == "dicomdir")
+    assert sorted(dicomdir_entry["localStudyInstanceUIDs"]) == sorted([study_uid_a, study_uid_b])
+    assert dicomdir_entry["localStudyInstanceUID"] in {study_uid_a, study_uid_b}
 
 
 def test_local_dicomweb_serves_imported_dicom_metadata_and_frame(

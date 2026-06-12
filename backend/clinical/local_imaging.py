@@ -118,8 +118,13 @@ class LocalImagingImporter:
 
                 detected_files.append(detected)
 
-            warnings.extend(self._dicomdir_warnings(detected_files))
-            studies, file_study_uids = self._register_studies(import_id, detected_files, warnings)
+            dicomdir_study_uids = self._dicomdir_referenced_study_uids(detected_files, warnings)
+            studies, file_study_uids = self._register_studies(
+                import_id,
+                detected_files,
+                warnings,
+                dicomdir_study_uids,
+            )
             self._write_manifest(import_root, import_id, detected_files, studies, file_study_uids, warnings)
         except Exception:
             shutil.rmtree(import_root, ignore_errors=True)
@@ -215,12 +220,13 @@ class LocalImagingImporter:
         import_id: str,
         detected_files: list[_DetectedFile],
         warnings: list[str],
-    ) -> tuple[list[LocalImagingImportedStudy], dict[str, str]]:
+        dicomdir_study_uids: dict[str, set[str]],
+    ) -> tuple[list[LocalImagingImportedStudy], dict[str, list[str]]]:
         if not detected_files:
             return [], {}
 
         grouped: dict[str, list[_DetectedFile]] = defaultdict(list)
-        file_study_uids: dict[str, str] = {}
+        file_study_uids: dict[str, list[str]] = {}
         generated_study_uid = self._generated_uid()
         primary_dicom_study_uid = next(
             (
@@ -233,13 +239,20 @@ class LocalImagingImporter:
 
         for detected in detected_files:
             if detected.format == "dicom" and detected.study_instance_uid:
-                study_uid = detected.study_instance_uid
-            elif detected.format == "dicomdir" and primary_dicom_study_uid:
-                study_uid = primary_dicom_study_uid
+                study_uids = [detected.study_instance_uid]
+            elif detected.format == "dicomdir":
+                referenced_study_uids = sorted(dicomdir_study_uids.get(detected.stored_path, set()))
+                if referenced_study_uids:
+                    study_uids = referenced_study_uids
+                elif primary_dicom_study_uid:
+                    study_uids = [primary_dicom_study_uid]
+                else:
+                    study_uids = [generated_study_uid]
             else:
-                study_uid = generated_study_uid
-            grouped[study_uid].append(detected)
-            file_study_uids[detected.stored_path] = study_uid
+                study_uids = [generated_study_uid]
+            file_study_uids[detected.stored_path] = study_uids
+            for study_uid in study_uids:
+                grouped[study_uid].append(detected)
 
         studies: list[LocalImagingImportedStudy] = []
         for study_uid, files in grouped.items():
@@ -270,27 +283,32 @@ class LocalImagingImporter:
         import_id: str,
         detected_files: list[_DetectedFile],
         studies: list[LocalImagingImportedStudy],
-        file_study_uids: dict[str, str],
+        file_study_uids: dict[str, list[str]],
         warnings: list[str],
     ) -> None:
-        manifest = {
-            "importId": import_id,
-            "acceptedFiles": len(detected_files),
-            "studies": [study.model_dump(by_alias=True) for study in studies],
-            "files": [
+        file_entries = []
+        for file in detected_files:
+            local_study_uids = file_study_uids.get(file.stored_path, [])
+            file_entries.append(
                 {
                     "relativePath": file.relative_path,
                     "storedPath": file.stored_path,
                     "size": file.size,
                     "format": file.format,
                     "studyInstanceUID": file.study_instance_uid,
-                    "localStudyInstanceUID": file_study_uids.get(file.stored_path),
+                    "localStudyInstanceUID": local_study_uids[0] if local_study_uids else None,
+                    "localStudyInstanceUIDs": local_study_uids,
                     "seriesInstanceUID": file.series_instance_uid,
                     "sopInstanceUID": file.sop_instance_uid,
                     "modality": file.modality,
                 }
-                for file in detected_files
-            ],
+            )
+
+        manifest = {
+            "importId": import_id,
+            "acceptedFiles": len(detected_files),
+            "studies": [study.model_dump(by_alias=True) for study in studies],
+            "files": file_entries,
             "warnings": warnings,
         }
         (import_root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -513,14 +531,22 @@ class LocalImagingImporter:
 
         raise HTTPException(status_code=404, detail="Local imaging study was not found.")
 
-    def _dicomdir_warnings(self, detected_files: list[_DetectedFile]) -> list[str]:
-        warnings: list[str] = []
+    def _dicomdir_referenced_study_uids(
+        self,
+        detected_files: list[_DetectedFile],
+        warnings: list[str],
+    ) -> dict[str, set[str]]:
+        dicomdir_study_uids: dict[str, set[str]] = {}
         dicomdir_files = [file for file in detected_files if file.format == "dicomdir"]
         if not dicomdir_files:
-            return warnings
+            return dicomdir_study_uids
 
-        available_paths = {file.relative_path.upper() for file in detected_files}
-        available_names = {Path(file.relative_path).name.upper() for file in detected_files}
+        dicom_files_by_alias: dict[str, list[_DetectedFile]] = defaultdict(list)
+        for file in detected_files:
+            if file.format != "dicom" or not file.study_instance_uid:
+                continue
+            for alias in self._dicom_path_aliases(file.relative_path):
+                dicom_files_by_alias[alias].append(file)
 
         for dicomdir_file in dicomdir_files:
             try:
@@ -530,17 +556,32 @@ class LocalImagingImporter:
                 continue
 
             referenced = self._dicomdir_referenced_paths(dataset)
-            missing = [
-                path
-                for path in referenced
-                if path.upper() not in available_paths and Path(path).name.upper() not in available_names
-            ]
-            if missing:
-                warnings.append(
-                    f"DICOMDIR references {len(missing)} file(s) that were not included in the import.",
+            missing_count = 0
+            matched_study_uids: set[str] = set()
+            for referenced_path in referenced:
+                matched_files: dict[str, _DetectedFile] = {}
+                for candidate in self._dicomdir_reference_candidates(
+                    dicomdir_file.relative_path,
+                    referenced_path,
+                ):
+                    for file in dicom_files_by_alias.get(candidate, []):
+                        matched_files[file.stored_path] = file
+                if not matched_files:
+                    missing_count += 1
+                    continue
+                matched_study_uids.update(
+                    file.study_instance_uid
+                    for file in matched_files.values()
+                    if file.study_instance_uid
                 )
+            if missing_count:
+                warnings.append(
+                    f"DICOMDIR references {missing_count} file(s) that were not included in the import.",
+                )
+            if matched_study_uids:
+                dicomdir_study_uids[dicomdir_file.stored_path] = matched_study_uids
 
-        return warnings
+        return dicomdir_study_uids
 
     def _iter_manifests(self):
         storage_root = Path(self._settings.local_imaging_storage_dir)
@@ -560,11 +601,24 @@ class LocalImagingImporter:
         return None
 
     @staticmethod
+    def _local_study_uids(file_entry: dict) -> set[str]:
+        return {
+            str(study_uid)
+            for study_uid in file_entry.get("localStudyInstanceUIDs", []) or []
+            if study_uid
+        }
+
+    @staticmethod
     def _manifest_file_belongs_to_study(file_entry: dict, study: dict, manifest: dict) -> bool:
         target_uid = str(study.get("studyInstanceUID") or "")
         local_study_uid = str(file_entry.get("localStudyInstanceUID") or "")
+        local_study_uids = LocalImagingImporter._local_study_uids(file_entry)
         source_study_uid = str(file_entry.get("studyInstanceUID") or "")
-        if local_study_uid == target_uid or source_study_uid == target_uid:
+        if (
+            local_study_uid == target_uid
+            or target_uid in local_study_uids
+            or source_study_uid == target_uid
+        ):
             return True
 
         file_format = str(file_entry.get("format") or "")
@@ -588,11 +642,13 @@ class LocalImagingImporter:
         study_instance_uid: str,
     ) -> LocalImagingStudyAsset:
         file_format = str(file_entry.get("format") or "unknown")
-        study_uid = str(
-            file_entry.get("studyInstanceUID")
-            or file_entry.get("localStudyInstanceUID")
-            or "",
-        ) or None
+        local_study_uids = self._local_study_uids(file_entry)
+        asset_study_uid = file_entry.get("studyInstanceUID")
+        if not asset_study_uid and study_instance_uid in local_study_uids:
+            asset_study_uid = study_instance_uid
+        if not asset_study_uid:
+            asset_study_uid = file_entry.get("localStudyInstanceUID")
+        study_uid = str(asset_study_uid or "") or None
         series_uid = str(file_entry.get("seriesInstanceUID") or "") or None
         sop_uid = str(file_entry.get("sopInstanceUID") or "") or None
         viewer_supported = bool(file_format == "dicom" and study_uid and series_uid and sop_uid)
@@ -1408,6 +1464,24 @@ class LocalImagingImporter:
             else:
                 referenced.append("/".join(str(part) for part in value))
         return referenced
+
+    @classmethod
+    def _dicom_path_aliases(cls, relative_path: str) -> set[str]:
+        safe_path = cls._safe_relative_path(relative_path)
+        return {safe_path.upper(), PurePosixPath(safe_path).name.upper()}
+
+    @classmethod
+    def _dicomdir_reference_candidates(
+        cls,
+        dicomdir_relative_path: str,
+        referenced_path: str,
+    ) -> set[str]:
+        referenced = cls._safe_relative_path(referenced_path)
+        candidates = {referenced, PurePosixPath(referenced).name}
+        dicomdir_parent = PurePosixPath(cls._safe_relative_path(dicomdir_relative_path)).parent
+        if str(dicomdir_parent) not in {"", "."}:
+            candidates.add(cls._safe_relative_path(f"{dicomdir_parent.as_posix()}/{referenced}"))
+        return {candidate.upper() for candidate in candidates if candidate}
 
     @staticmethod
     def _asset_id(manifest: dict, file_entry_index: int) -> str:
