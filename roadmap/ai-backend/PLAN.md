@@ -1,8 +1,8 @@
 # RadSysX AI Backend And Agentic Imaging Roadmap
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 Status: planning artifact; no runtime implementation is completed by this file.
-Primary next environment: GPU machine to be provided in the next run.
+Primary experiment environment: Ubuntu 24.04 NVIDIA L40S VM, documented in `roadmap/ai-backend/GPU_EVAL_LOG.md`.
 
 ## Read This First
 
@@ -11,7 +11,7 @@ This file is the durable brain-extension plan for turning the current frontend-o
 Related research:
 
 - `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` distills an external GPT 5.5 Pro research pass on the realtime voice/chat architecture. Treat it as the source of record for the current transport split: HTTP POST for durable writes, SSE for ordinary chat/job/tool events, WebSocket for local ASR audio, provider-native WebRTC for OpenAI Realtime, and provider/stateful WSS for Gemini Live.
-- `roadmap/ai-backend/GPU_EVAL_LOG.md` records the first GPU VM bring-up, CUDA/PyTorch validation, RadSysX desktop build checks, Hugging Face access probe, and Nemotron 3.5 ASR smoke test on an NVIDIA L40S.
+- `roadmap/ai-backend/GPU_EVAL_LOG.md` records the GPU VM bring-up, CUDA/PyTorch validation, RadSysX desktop build checks, Hugging Face access probes, Nemotron ASR smokes, MedGemma 1.5 4B BF16 smokes, and Sybil-1.5/Pillar0-ChestCT example inference on an NVIDIA L40S.
 
 Current baseline:
 
@@ -39,6 +39,8 @@ Do not forget:
 - RAVE is attractive because it is purpose-built to turn DICOM and NIfTI into ML-ready representations.
 - Cross-platform hardware matters: NVIDIA/Linux is only one validation lane. Apple Silicon/Metal, Windows CUDA/DirectML, CPU/no-GPU fallback, and governed API deployment should all stay visible in the architecture.
 - Nemotron 3.5 ASR loaded and transcribed on the L40S. The current NeMo convenience `transcribe()` path needed `RNNTPromptTranscribeConfig(use_lhotse=False, target_lang="en-US")` to avoid a prompt-language dataloader failure; NeMo's cache-aware streaming example also ran successfully through a manifest with `target_lang=en-US`.
+- MedGemma 1.5 4B is the preferred first local image/text model lane after authenticated access. It loaded in BF16 and completed text plus synthetic-image smokes at about 8.1 GiB peak VRAM on the L40S.
+- Sybil-1.5 and its Pillar0-ChestCT base model loaded through the official `pillar-finetune` example after gated access was fixed. The included one-row RVE example ran with `test_loss: 0.6579`; this remains a lung cancer risk-model experiment only.
 
 ## Source Snapshot
 
@@ -1031,14 +1033,15 @@ Do not create all of these prematurely. Let the first implementation tranche pro
 - [x] Create `.venv-ai` or equivalent isolated model environment.
 - [x] Smoke Nemotron ASR on a non-PHI WAV.
 - [x] Run NeMo cache-aware streaming simulation on Linux/NVIDIA with a non-PHI manifest.
+- [x] Verify Hugging Face login and terms for MedGemma/Pillar/BiomedParse after user-provided temporary token.
+- [x] Smoke MedGemma 1.5 4B text and synthetic-image paths on the L40S.
+- [x] Smoke Pillar0-Sybil-1.5 with the official one-row RVE example after base-model gating was fixed.
 - [x] Write `roadmap/ai-backend/GPU_EVAL_LOG.md` with hard numbers.
 - [ ] Re-read `roadmap/ai-backend/REALTIME_VOICE_RESEARCH.md` before implementing voice/chat contracts.
-- [ ] Verify Hugging Face login and terms for MedGemma/Pillar/BiomedParse if needed.
-- [ ] Smoke MedGemma on a non-PHI image.
+- [x] Remove the temporary Hugging Face token from the VM cache after the experiment; external token rotation remains user-owned.
 - [ ] Clone and inspect RAVE outside the repo or in a temp dir.
 - [ ] Clone and inspect BiomedParse v2 outside the repo or in a temp dir.
 - [ ] Attempt one tiny BiomedParse v2 inference.
-- [ ] Attempt one Pillar-0 checkpoint inference if access works.
 - [ ] Validate resident local ASR streaming on Linux/NVIDIA, then plan Electron audio parity checks for Windows and macOS.
 - [ ] Add explicit Apple Silicon/Metal and Windows workstation feasibility tasks before choosing a "default local" inference story.
 - [ ] Decide which API-backed realtime path deserves a governed prototype, informed by ambient-scribe production patterns rather than assuming API is undesirable.
