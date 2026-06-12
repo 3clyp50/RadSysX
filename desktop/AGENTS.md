@@ -40,6 +40,7 @@
 - `npm run desktop:smoke:picker-many-import` should keep proving the same direct native picker import path with a nested folder of 32 additional extensionless DICOM instances, including recursive folder collection, backend import of 37 files, DICOM asset summary, and technical analysis checks.
 - `npm run desktop:smoke:viewer-launch` should keep proving the hydrated worklist can import a local DICOM/DICOMDIR study, launch it through the governed viewer path, resolve the opaque launch in `/viewer/`, strip the launch token from the browser URL, bind OHIF runtime configuration to same-origin local DICOMweb roots, and query the imported study from the viewer origin.
 - Desktop UI smokes force-refresh the frontend production shell by default so smoke assertions always exercise the current source tree, not a stale stamped build.
+- `npm run desktop:bootstrap` is a Node-based cross-platform bootstrap helper, not a POSIX shell activation chain; it creates/uses `.venv`, installs clinical Python requirements with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. `npm run desktop:bootstrap -- --check` verifies an existing bootstrap without reinstalling dependencies.
 - Run desktop UI smoke commands sequentially unless their ports are explicitly overridden; by default they share fixed high ports for Electron, the bridge, Next.js, and FastAPI.
 
 ## Work Guidance
@@ -59,6 +60,7 @@
 - `npm run desktop:smoke:picker-import`
 - `npm run desktop:smoke:ui-import`
 - `npm run desktop:smoke:viewer-launch`
+- `node --check desktop/scripts/bootstrap.mjs`
 - `node --check desktop/src/main.mjs`
 - `node --check desktop/scripts/dev-frontend.mjs`
 - `node --check desktop/scripts/doctor.mjs`

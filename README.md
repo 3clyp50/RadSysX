@@ -259,7 +259,7 @@ npm run desktop:doctor
 npm run desktop
 ```
 
-`desktop:bootstrap` creates `.venv`, installs the clinical Python dependency set, and installs workspace Node dependencies from the root lockfile. `desktop` opens Electron and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
+`desktop:bootstrap` is a Node-based cross-platform bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, installs workspace Node dependencies from the root lockfile, and runs the desktop doctor. For an existing install, `npm run desktop:bootstrap -- --check` verifies the bootstrap without reinstalling dependencies. `desktop` opens Electron and supervises FastAPI, a production Next.js standalone shell, and the generated OHIF viewer bridge behind one local origin, usually `http://127.0.0.1:3000`.
 
 This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews, deterministic technical analysis, opaque launch/session resolution, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 

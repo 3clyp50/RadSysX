@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/main.mjs",
   "scripts": {
+    "bootstrap": "node ./scripts/bootstrap.mjs",
     "dev": "electron --no-sandbox .",
     "dev:frontend": "node ./scripts/dev-frontend.mjs",
     "doctor": "node ./scripts/doctor.mjs",

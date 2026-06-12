@@ -119,6 +119,7 @@ Last updated: 2026-06-12
   - `desktop/package.json`
   - `desktop/src/main.mjs`
   - `desktop/src/preload.cjs`
+  - `desktop/scripts/bootstrap.mjs`
   - `desktop/scripts/doctor.mjs`
 - Local clinical stack:
   - `docker-compose.yml`
@@ -187,6 +188,7 @@ Last updated: 2026-06-12
 
 - Backend dev server: `. .venv/bin/activate && python3 backend/server.py`
 - Desktop bootstrap: `npm run desktop:bootstrap`
+- Desktop bootstrap check: `npm run desktop:bootstrap -- --check`
 - Desktop preflight: `npm run desktop:doctor`
 - Desktop app: `npm run desktop`
 - Desktop app with live Next.js dev frontend: `npm run desktop:dev-frontend`
@@ -211,6 +213,7 @@ Last updated: 2026-06-12
 
 - Fast local desktop path:
   - Run `npm run desktop:bootstrap` once on a fresh clone.
+  - `npm run desktop:bootstrap` is a cross-platform Node helper that creates/uses `.venv`, installs clinical Python requirements, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
   - Run `npm run desktop` for the Electron app.
   - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, a stamped production Next.js standalone shell, and the generated OHIF viewer bridge.
   - The desktop launcher builds or refreshes the frontend production shell when the expected desktop build stamp is missing or mismatched; use `npm run desktop:dev-frontend` or `RADSYSX_DESKTOP_FRONTEND_MODE=development npm run desktop` only when intentionally doing live Next.js UI development.

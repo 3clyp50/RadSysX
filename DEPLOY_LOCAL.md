@@ -20,6 +20,8 @@ This starts the local clinical FastAPI backend, a production Next.js standalone 
 
 The desktop launcher builds and stamps the frontend production shell for its selected bridge URL when needed. Use `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop` to force a rebuild, or `npm run desktop:dev-frontend` when intentionally developing against the Next.js dev server.
 
+`npm run desktop:bootstrap` is a cross-platform Node bootstrap helper. It creates or reuses `.venv`, installs the clinical Python dependency set with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor. Use `npm run desktop:bootstrap -- --check` to verify an existing bootstrap without reinstalling dependencies.
+
 `npm run desktop:smoke:import` starts the desktop runtime on high local ports, creates PHI-free synthetic DICOMDIR/DICOM/NIFTI/image files, imports them through the local bridge, verifies worklist, local DICOMweb, asset-summary, preview, analysis, and launch behavior, and shuts the runtime down.
 
 `npm run desktop:smoke:ui-import` drives the hydrated Electron worklist UI, drops the same class of synthetic local imaging files onto the local import panel, verifies inspection, NIFTI slice preview controls, and backend technical analysis, and shuts the runtime down.

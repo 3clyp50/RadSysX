@@ -123,6 +123,7 @@ function checkDesktopFiles() {
   const required = [
     "desktop/src/main.mjs",
     "desktop/src/preload.cjs",
+    "desktop/scripts/bootstrap.mjs",
     "desktop/scripts/dev-frontend.mjs",
     "desktop/scripts/startup-smoke.mjs",
     "frontend/package.json",

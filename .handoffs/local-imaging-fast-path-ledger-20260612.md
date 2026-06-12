@@ -29,6 +29,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - Production Next.js standalone frontend shell on an internal loopback port by default.
   - A local one-origin bridge, usually `http://127.0.0.1:3000`.
   - Generated OHIF viewer assets from `viewer/dist/`.
+- `npm run desktop:bootstrap` is now a Node-based cross-platform helper that creates or reuses `.venv`, installs clinical Python requirements with the venv Python, runs workspace `npm install --legacy-peer-deps`, and then runs desktop doctor; `npm run desktop:bootstrap -- --check` verifies an existing install without reinstalling dependencies.
 - The desktop launcher builds and stamps the frontend production shell for the selected bridge URL, then serves it with the generated standalone server; `RADSYSX_DESKTOP_FRONTEND_MODE=development` remains available for intentional live Next.js UI development.
 - Desktop runtime defaults to local `pilot` mode with local seeded auth and development secrets.
 - The current desktop fast path can validate seeded login, worklist, launch/session resolution, workspace/report/AI/audit contracts.
@@ -260,6 +261,7 @@ Likely components:
 - [x] Add a large-payload synthetic desktop picker smoke to prove bridge/proxy behavior beyond focused smoke fixtures.
 - [x] Add a high-volume many-file synthetic desktop picker smoke to prove folder traversal and upload behavior with many DICOM instances.
 - [x] Replace the normal desktop frontend path with a production standalone Next.js shell so hydrated UI smokes no longer rely on the noisy Next.js dev chunk proxy path.
+- [x] Replace the POSIX-only root `desktop:bootstrap` shell chain with a cross-platform Node bootstrap helper and check mode.
 - [x] Keep `RADSYSX_DESKTOP_FRONTEND_MODE=development` / `npm run desktop:dev-frontend` as an explicit live Next.js development escape hatch.
 - [x] Keep `desktop:dev-frontend` and `desktop:smoke` launcher scripts platform-neutral by setting runtime environment through Node launchers instead of POSIX inline shell assignment.
 - [x] Force-refresh the frontend production shell during desktop UI smokes so smoke assertions exercise current source, not a stale desktop build stamp.
@@ -419,6 +421,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: `npm run desktop:smoke:picker-many-import` passed while compose/Orthanc were not running and exercised direct native picker upload of 37 synthetic local files, including nested extensionless DICOM instances.
   - Remaining gap: final native OS dialog smoke should be repeated with real or realistic local files.
 - Cross-platform design:
+  - Evidence: `npm run desktop:bootstrap` now runs a Node helper instead of a POSIX `. .venv/bin/activate` shell chain; it picks `python3`/`python` on Unix-like hosts, `py -3`/`python` on Windows, resolves the venv Python path per OS, and exposes `--check` for non-mutating bootstrap verification.
   - Evidence: browser file inputs preserve `webkitRelativePath` when available; browser drag-and-drop preserves Chromium directory-entry relative paths as `radsysxRelativePath`; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
   - Evidence: desktop UI smoke uses Electron/Chromium APIs and repo-local temp storage/database, avoiding Linux-only paths inside the app/runtime path.
   - Evidence: picker bridge smoke uses JSON-encoded fixture paths and Electron IPC, avoiding Linux-only renderer file APIs while still preserving POSIX-style relative paths for backend manifests.
@@ -446,6 +449,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: after the multi-study DICOMDIR tranche, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py -k "dicomdir or local_dicomweb"` passed with 3 selected tests, including the new media-root DICOMDIR fixture that references two different study UIDs.
   - Evidence: final verification for the multi-study DICOMDIR tranche passed `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`; `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py` with 27 tests; `npm run desktop:smoke:import`; `npm run desktop:smoke:picker-many-import`; `npm run desktop:doctor`; and `git diff --check`. Checked smoke ports were clear afterward.
   - Evidence: after the viewer-launch smoke tranche, individual `node --check` invocations for `desktop/src/main.mjs` and `desktop/scripts/ui-import-smoke.mjs`, `npm run type-check --workspace frontend`, `npm run desktop:smoke:viewer-launch`, `npm run desktop:doctor`, `npm run desktop:smoke:ui-import`, and `git diff --check` passed before final hygiene. The viewer-launch smoke imported 5 local files into 2 local studies, opened `/viewer/`, resolved the launch to the imported DICOM study, verified local DICOMweb roots, queried `/dicom-web/studies` and `/api/studies/{studyUid}/workspace` from the viewer origin, and observed no backend access-log query string output after disabling Electron-supervised uvicorn access logs.
+  - Evidence: after the cross-platform bootstrap tranche, `node --check desktop/scripts/bootstrap.mjs`, `node --check desktop/scripts/doctor.mjs`, `npm run desktop:bootstrap -- --check`, `npm run bootstrap --workspace @radsysx/desktop -- --check`, `npm run desktop:doctor`, `npm run desktop:smoke`, and `git diff --check` passed before final hygiene.
   - Remaining gap: native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

@@ -10,7 +10,7 @@
   "scripts": {
     "build": "npm run build --workspace viewer && npm run build --workspace frontend",
     "desktop": "npm run dev --workspace @radsysx/desktop",
-    "desktop:bootstrap": "python3 -m venv .venv && . .venv/bin/activate && python3 -m pip install --upgrade pip && python3 -m pip install -r backend/requirements-clinical.txt && npm install --legacy-peer-deps",
+    "desktop:bootstrap": "node ./desktop/scripts/bootstrap.mjs",
     "desktop:dev-frontend": "npm run dev:frontend --workspace @radsysx/desktop",
     "desktop:doctor": "npm run doctor --workspace @radsysx/desktop",
     "desktop:smoke:import": "npm run smoke:import --workspace @radsysx/desktop",
