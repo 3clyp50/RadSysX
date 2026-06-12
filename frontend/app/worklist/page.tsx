@@ -13,6 +13,33 @@ import type {
   WorklistRow,
 } from "@/lib/clinical/contracts";
 
+type DesktopPickedFile = {
+  data: ArrayBuffer | ArrayBufferView;
+  lastModified?: number;
+  name: string;
+  relativePath: string;
+  size: number;
+  type?: string;
+};
+
+type DesktopPickerMode = "files" | "folder";
+
+declare global {
+  interface Window {
+    radsysxDesktop?: {
+      selectLocalImagingFiles?: (options?: { mode?: DesktopPickerMode }) => Promise<{
+        cancelled: boolean;
+        files: DesktopPickedFile[];
+      }>;
+      versions?: {
+        chrome?: string;
+        electron?: string;
+        node?: string;
+      };
+    };
+  }
+}
+
 export default function WorklistPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -103,8 +130,7 @@ export default function WorklistPage() {
     }
   };
 
-  const handleLocalImport = async (fileList: FileList | null) => {
-    const files = Array.from(fileList ?? []);
+  const importLocalFiles = async (files: File[]) => {
     if (!files.length) {
       return;
     }
@@ -134,6 +160,33 @@ export default function WorklistPage() {
       if (folderInputRef.current) {
         folderInputRef.current.value = "";
       }
+    }
+  };
+
+  const handleLocalImport = async (fileList: FileList | null) => {
+    await importLocalFiles(Array.from(fileList ?? []));
+  };
+
+  const handleDesktopLocalImport = async (mode: DesktopPickerMode) => {
+    const picker = window.radsysxDesktop?.selectLocalImagingFiles;
+    if (!picker) {
+      if (mode === "folder") {
+        folderInputRef.current?.click();
+      } else {
+        fileInputRef.current?.click();
+      }
+      return;
+    }
+
+    setError(null);
+    try {
+      const result = await picker({ mode });
+      if (result.cancelled) {
+        return;
+      }
+      await importLocalFiles(result.files.map(desktopPickedFileToFile));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to choose local imaging files.");
     }
   };
 
@@ -230,7 +283,7 @@ export default function WorklistPage() {
                 <button
                   type="button"
                   disabled={importing}
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => void handleDesktopLocalImport("files")}
                   className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-wait disabled:opacity-70"
                 >
                   {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
@@ -239,7 +292,7 @@ export default function WorklistPage() {
                 <button
                   type="button"
                   disabled={importing}
-                  onClick={() => folderInputRef.current?.click()}
+                  onClick={() => void handleDesktopLocalImport("folder")}
                   className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/50 hover:text-white disabled:cursor-wait disabled:opacity-70"
                 >
                   <FolderOpen className="h-4 w-4" />
@@ -395,4 +448,26 @@ function formatFileSize(sizeBytes: number): string {
     value /= 1024;
   }
   return `${value.toFixed(1)} GB`;
+}
+
+function desktopPickedFileToFile(part: DesktopPickedFile): File {
+  const file = new File([toBlobPart(part.data)], part.name, {
+    lastModified: part.lastModified,
+    type: part.type || "application/octet-stream",
+  }) as File & { radsysxRelativePath?: string };
+  Object.defineProperty(file, "radsysxRelativePath", {
+    configurable: true,
+    value: part.relativePath || part.name,
+  });
+  return file;
+}
+
+function toBlobPart(data: ArrayBuffer | ArrayBufferView): BlobPart {
+  if (data instanceof ArrayBuffer) {
+    return data;
+  }
+  const source = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  const copy = new Uint8Array(source.byteLength);
+  copy.set(source);
+  return copy.buffer;
 }

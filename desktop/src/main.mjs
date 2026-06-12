@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -18,6 +18,23 @@ const viewerDist = path.join(workspaceRoot, "viewer", "dist");
 const DEFAULT_APP_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_PORT ?? "3000", 10);
 const DEFAULT_FRONTEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "3010", 10);
 const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "8000", 10);
+const DESKTOP_PICKER_MAX_FILES = Number.parseInt(process.env.RADSYSX_DESKTOP_PICKER_MAX_FILES ?? "500", 10);
+const DESKTOP_PICKER_MAX_BYTES = Number.parseInt(
+  process.env.RADSYSX_DESKTOP_PICKER_MAX_BYTES ?? String(1024 * 1024 * 1024),
+  10,
+);
+const LOCAL_IMAGING_EXTENSIONS = new Set([
+  ".bmp",
+  ".dcm",
+  ".dicom",
+  ".gif",
+  ".jpg",
+  ".jpeg",
+  ".nii",
+  ".png",
+  ".tif",
+  ".tiff",
+]);
 
 const children = new Set();
 const logLines = [];
@@ -50,6 +67,111 @@ function recentLogs() {
 
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function isLocalImagingFile(filePath) {
+  const fileName = path.basename(filePath);
+  if (fileName.toUpperCase() === "DICOMDIR") {
+    return true;
+  }
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith(".nii.gz")) {
+    return true;
+  }
+  return LOCAL_IMAGING_EXTENSIONS.has(path.extname(lowerName));
+}
+
+function guessContentType(filePath) {
+  const fileName = path.basename(filePath).toLowerCase();
+  if (fileName.endsWith(".nii") || fileName.endsWith(".nii.gz")) {
+    return "application/octet-stream";
+  }
+  if (fileName.endsWith(".png")) {
+    return "image/png";
+  }
+  if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (fileName.endsWith(".tif") || fileName.endsWith(".tiff")) {
+    return "image/tiff";
+  }
+  if (fileName.endsWith(".bmp")) {
+    return "image/bmp";
+  }
+  if (fileName.endsWith(".gif")) {
+    return "image/gif";
+  }
+  return "application/dicom";
+}
+
+async function collectPickedFiles(pathsToImport) {
+  const selectedFiles = [];
+  let totalBytes = 0;
+
+  for (const selectedPath of pathsToImport) {
+    const stats = await fs.promises.stat(selectedPath);
+    if (stats.isDirectory()) {
+      for await (const filePath of walkDirectory(selectedPath)) {
+        if (!isLocalImagingFile(filePath)) {
+          continue;
+        }
+        const fileStats = await fs.promises.stat(filePath);
+        totalBytes += fileStats.size;
+        enforcePickerLimits(selectedFiles.length + 1, totalBytes);
+        selectedFiles.push(
+          await readPickedFile(
+            filePath,
+            path.join(path.basename(selectedPath), path.relative(selectedPath, filePath)),
+            fileStats,
+          ),
+        );
+      }
+      continue;
+    }
+
+    if (!stats.isFile() || !isLocalImagingFile(selectedPath)) {
+      continue;
+    }
+    totalBytes += stats.size;
+    enforcePickerLimits(selectedFiles.length + 1, totalBytes);
+    selectedFiles.push(await readPickedFile(selectedPath, path.basename(selectedPath), stats));
+  }
+
+  return selectedFiles;
+}
+
+async function* walkDirectory(root) {
+  const entries = await fs.promises.readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const filePath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      yield* walkDirectory(filePath);
+    } else if (entry.isFile()) {
+      yield filePath;
+    }
+  }
+}
+
+function enforcePickerLimits(fileCount, totalBytes) {
+  if (fileCount > DESKTOP_PICKER_MAX_FILES) {
+    throw new Error(`The desktop picker limit is ${DESKTOP_PICKER_MAX_FILES} files.`);
+  }
+  if (totalBytes > DESKTOP_PICKER_MAX_BYTES) {
+    throw new Error(`The desktop picker limit is ${Math.round(DESKTOP_PICKER_MAX_BYTES / 1024 / 1024)} MB.`);
+  }
+}
+
+async function readPickedFile(filePath, relativePath, stats) {
+  const data = await fs.promises.readFile(filePath);
+  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return {
+    name: path.basename(filePath),
+    relativePath: relativePath.split(path.sep).join("/"),
+    type: guessContentType(filePath),
+    size: stats.size,
+    lastModified: stats.mtimeMs,
+    data: buffer,
+  };
 }
 
 function pythonCommand() {
@@ -541,6 +663,49 @@ function createMainWindow() {
   return window;
 }
 
+function registerDesktopIpc() {
+  ipcMain.handle("radsysx:select-local-imaging", async (event, options = {}) => {
+    const mode = options?.mode === "folder" ? "folder" : "files";
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const dialogOptions = {
+      title: mode === "folder" ? "Import local imaging folder" : "Import local imaging files",
+      properties:
+        mode === "folder"
+          ? ["openDirectory", "multiSelections"]
+          : ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "Medical imaging files",
+          extensions: [
+            "bmp",
+            "dcm",
+            "dicom",
+            "gif",
+            "jpg",
+            "jpeg",
+            "nii",
+            "gz",
+            "png",
+            "tif",
+            "tiff",
+          ],
+        },
+        { name: "All files", extensions: ["*"] },
+      ],
+    };
+    const result = parentWindow
+      ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { cancelled: true, files: [] };
+    }
+
+    const files = await collectPickedFiles(result.filePaths);
+    return { cancelled: false, files };
+  });
+}
+
 function loadingHtml() {
   return htmlDocument({
     title: "Starting RadSysX",
@@ -671,6 +836,7 @@ async function shutdown() {
 }
 
 app.setName("RadSysX");
+registerDesktopIpc();
 
 app.whenReady().then(async () => {
   mainWindow = createMainWindow();

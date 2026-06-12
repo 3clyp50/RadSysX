@@ -1,4 +1,4 @@
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("radsysxDesktop", {
   versions: {
@@ -6,4 +6,8 @@ contextBridge.exposeInMainWorld("radsysxDesktop", {
     electron: process.versions.electron,
     node: process.versions.node,
   },
+  selectLocalImagingFiles: (options = {}) =>
+    ipcRenderer.invoke("radsysx:select-local-imaging", {
+      mode: options.mode === "folder" ? "folder" : "files",
+    }),
 });

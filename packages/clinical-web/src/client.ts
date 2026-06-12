@@ -180,7 +180,12 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
 }
 
 function readBrowserRelativePath(file: File): string {
-  const maybeRelative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  const maybeRelative = (
+    file as File & {
+      radsysxRelativePath?: string;
+      webkitRelativePath?: string;
+    }
+  ).radsysxRelativePath ?? (file as File & { webkitRelativePath?: string }).webkitRelativePath;
   return maybeRelative && maybeRelative.trim() ? maybeRelative : file.name;
 }
 

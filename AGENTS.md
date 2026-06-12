@@ -200,7 +200,7 @@ Last updated: 2026-06-12
   - Run `npm run desktop:bootstrap` once on a fresh clone.
   - Run `npm run desktop` for the Electron app.
   - Electron exposes one local origin, usually `http://127.0.0.1:3000`, and internally supervises FastAPI, Next.js, and the generated OHIF viewer bridge.
-  - This path validates local login, local imaging import, imported-study asset summaries, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
+  - This path validates local login, native local file/folder selection, local imaging import, imported-study asset summaries, worklist, launch, workspace, report, AI job, and audit contracts without Docker.
   - Run `npm run desktop:smoke:import` to start the desktop runtime, import synthetic DICOMDIR/DICOM/NIFTI/image files, verify worklist/asset-summary/DICOMweb/launch behavior, and cleanly shut down.
   - Local imaging import is controlled by `RADSYSX_LOCAL_IMAGING_ENABLED`; the Electron desktop runtime enables it by default for the fast path.
   - Full Orthanc-backed DICOMweb retrieval and durable STOW validation still require the compose stack or an explicitly configured local DICOMweb target.
