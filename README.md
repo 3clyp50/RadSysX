@@ -293,6 +293,14 @@ npm run desktop:smoke:picker-import
 
 That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. Electron main uploads the selected files directly to the backend import endpoint with the existing session cookie, so the renderer receives only the backend import response. It proves the picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
 
+For a larger native picker import check:
+
+```bash
+npm run desktop:smoke:picker-large-import
+```
+
+That variant adds an 8 MiB synthetic NIFTI volume to the picker fixture folder and verifies import, preview, and technical analysis through the same direct Electron-main upload path.
+
 ### Install the full backend/runtime dependency set
 
 If you want one local Python environment that can exercise both the governed clinical backend and the broader research/agent surface, use Python `3.12` and then install the full backend set:
@@ -369,20 +377,21 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 8. `npm run desktop:smoke:import`
 9. `npm run desktop:smoke:ui-import`
 10. `npm run desktop:smoke:picker-import`
-11. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-12. `python3 -m pytest backend/tests/test_clinical_platform.py`
-13. `npm run type-check --workspace frontend`
-14. `npm run type-check --workspace viewer`
-15. `npm run build --workspace viewer`
-16. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-17. Separately validate the governed clinical surface with `docker compose up --build`
+11. `npm run desktop:smoke:picker-large-import`
+12. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+13. `python3 -m pytest backend/tests/test_clinical_platform.py`
+14. `npm run type-check --workspace frontend`
+15. `npm run type-check --workspace viewer`
+16. `npm run build --workspace viewer`
+17. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+18. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, and `npm run desktop:smoke:picker-import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-import`, and `npm run desktop:smoke:picker-large-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

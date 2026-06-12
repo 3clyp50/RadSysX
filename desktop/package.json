@@ -8,6 +8,7 @@
     "dev": "electron --no-sandbox .",
     "doctor": "node ./scripts/doctor.mjs",
     "smoke:import": "node ./scripts/import-smoke.mjs",
+    "smoke:picker-large-import": "node ./scripts/ui-import-smoke.mjs --picker-large-folder",
     "smoke:picker-import": "node ./scripts/ui-import-smoke.mjs --picker-folder",
     "smoke:ui-import": "node ./scripts/ui-import-smoke.mjs",
     "smoke": "RADSYSX_DESKTOP_EXIT_AFTER_READY_MS=1500 electron --no-sandbox ."

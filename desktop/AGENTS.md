@@ -32,6 +32,8 @@
 - `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/image import, asset summaries, local previews including NIFTI slice navigation, backend technical analysis, DICOMweb discovery, and opaque launch without Docker.
 - `npm run desktop:smoke:ui-import` should keep proving the hydrated worklist UI can import dropped local imaging files, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker.
 - `npm run desktop:smoke:picker-import` should keep proving the hydrated worklist UI can invoke the Electron native picker bridge through `preload.cjs`, read a selected folder through the main-process recursive collector, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker. This does not replace a human or OS-automation smoke of the actual native dialog.
+- `npm run desktop:smoke:picker-large-import` should keep proving the same direct native picker import path with an additional 8 MiB synthetic NIFTI volume, including backend asset summary, preview, and technical analysis checks.
+- Run desktop UI smoke commands sequentially unless their ports are explicitly overridden; by default they share fixed high ports for Electron, the bridge, Next.js, and FastAPI.
 
 ## Work Guidance
 
@@ -45,6 +47,7 @@
 - `npm run desktop:doctor`
 - `npm run desktop:smoke`
 - `npm run desktop:smoke:import`
+- `npm run desktop:smoke:picker-large-import`
 - `npm run desktop:smoke:picker-import`
 - `npm run desktop:smoke:ui-import`
 - `node --check desktop/src/main.mjs`

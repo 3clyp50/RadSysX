@@ -15,7 +15,12 @@ const fixtureRoot = path.join(tmpRoot, "fixtures");
 const storageRoot = path.join(tmpRoot, "local-imaging-data");
 const dbPath = path.join(tmpRoot, "clinical.db");
 const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP_MS ?? "120000", 10);
-const smokeMode = process.argv.includes("--picker-folder") ? "picker-folder" : "drag-drop";
+const smokeMode = process.argv.includes("--picker-large-folder")
+  ? "picker-large-folder"
+  : process.argv.includes("--picker-folder")
+    ? "picker-folder"
+    : "drag-drop";
+const pickerSmokeModes = new Set(["picker-folder", "picker-large-folder"]);
 
 let desktopProcess = null;
 let desktopPublicBaseUrl = null;
@@ -25,7 +30,7 @@ async function main() {
     fs.mkdirSync(fixtureRoot, { recursive: true });
     fs.mkdirSync(storageRoot, { recursive: true });
 
-    generateFixtures(fixtureRoot);
+    generateFixtures(fixtureRoot, { largePayload: smokeMode === "picker-large-folder" });
     const runtime = await startDesktopRuntime();
     const result = await runUiImportSmoke(runtime.publicBaseUrl, runtime.debugPort);
     console.log(JSON.stringify(result, null, 2));
@@ -85,7 +90,7 @@ function canListen(port) {
   });
 }
 
-function generateFixtures(outputDir) {
+function generateFixtures(outputDir, { largePayload = false } = {}) {
   const python = spawnSync(
     pythonCommand(),
     [
@@ -102,6 +107,7 @@ from pydicom.sequence import Sequence
 from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, MediaStorageDirectoryStorage, generate_uid
 
 root = Path(sys.argv[1])
+large_payload = sys.argv[2] == "large"
 root.mkdir(parents=True, exist_ok=True)
 
 study_uid = "1.2.826.0.1.3680043.10.54321.910"
@@ -159,6 +165,22 @@ header[344:348] = b"n+1\\0"
 voxels = bytes(range(24))
 (root / "volume.nii").write_bytes(bytes(header) + voxels)
 (root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header) + voxels))
+if large_payload:
+    large_header = bytearray(352)
+    large_header[0:4] = (348).to_bytes(4, "little")
+    large_header[40:56] = struct.pack("<8h", 3, 256, 256, 128, 1, 1, 1, 1)
+    large_header[70:72] = (2).to_bytes(2, "little", signed=True)
+    large_header[72:74] = (8).to_bytes(2, "little", signed=True)
+    large_header[108:112] = struct.pack("<f", 352.0)
+    large_header[344:348] = b"n+1\\0"
+    pattern = bytes(range(256))
+    remaining = 256 * 256 * 128
+    with (root / "large-volume.nii").open("wb") as handle:
+        handle.write(bytes(large_header))
+        while remaining > 0:
+            chunk = pattern[: min(len(pattern), remaining)]
+            handle.write(chunk)
+            remaining -= len(chunk)
 (root / "slice.png").write_bytes(
     b"\\x89PNG\\r\\n\\x1a\\n"
     b"\\x00\\x00\\x00\\rIHDR"
@@ -170,6 +192,7 @@ voxels = bytes(range(24))
 )
 `,
       outputDir,
+      largePayload ? "large" : "standard",
     ],
     {
       cwd: workspaceRoot,
@@ -219,7 +242,7 @@ async function startDesktopRuntime() {
     RADSYSX_CLINICAL_DATABASE_URL: `sqlite:///${asFileUrlPath(dbPath)}`,
     RADSYSX_SESSION_COOKIE_SECURE: "false",
     RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN: "1",
-    ...(smokeMode === "picker-folder"
+    ...(pickerSmokeModes.has(smokeMode)
       ? { RADSYSX_DESKTOP_PICKER_TEST_PATHS: JSON.stringify([fixtureRoot]) }
       : {}),
   };
@@ -469,6 +492,9 @@ function formatCdpException(exceptionDetails) {
 function uiSmokeInRenderer(fixtures, smokeMode) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
+  const isPickerMode = smokeMode === "picker-folder" || smokeMode === "picker-large-folder";
+  const isLargePickerMode = smokeMode === "picker-large-folder";
+  const expectedAcceptedFiles = isLargePickerMode ? 6 : 5;
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
     const startedAt = Date.now();
@@ -582,7 +608,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
 
     const importPanel = document.querySelector('[data-testid="local-import-panel"]');
 
-    if (smokeMode === "picker-folder") {
+    if (isPickerMode) {
       await clickPickerFolderImport(importPanel);
     } else {
       dispatchDragDropImport(importPanel);
@@ -591,7 +617,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     const importMessage = await waitFor(
       () => {
         const message = document.querySelector('[data-testid="local-import-message"]')?.textContent ?? "";
-        return message.includes("Imported 5 files into 2 local studies") ? message : null;
+        return message.includes(`Imported ${expectedAcceptedFiles} files into 2 local studies`) ? message : null;
       },
       "local import success message",
     );
@@ -613,6 +639,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     await waitFor(
       () => textMatches(niftiPanel.innerText, "NIFTI volume") &&
         textMatches(niftiPanel.innerText, "2 x 3 x 4") &&
+        (!isLargePickerMode || textMatches(niftiPanel.innerText, "256 x 256 x 128")) &&
         textMatches(niftiPanel.innerText, "Image files"),
       "NIFTI and image asset summary",
     );
@@ -634,7 +661,15 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "NIFTI coronal preview image URL",
     );
 
-    await clickAnalyzeAndWaitFor(["Voxel count", "24", "Mean intensity", "11.5", "Image dimensions", "1 x 1"]);
+    await clickAnalyzeAndWaitFor([
+      "Voxel count",
+      "24",
+      ...(isLargePickerMode ? ["8388608"] : []),
+      "Mean intensity",
+      "11.5",
+      "Image dimensions",
+      "1 x 1",
+    ]);
 
     return {
       currentUrl: window.location.href,
