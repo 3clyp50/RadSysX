@@ -318,6 +318,17 @@ function handleBridgeRequest(request, response, runtime) {
     return;
   }
 
+  if (pathname === "/_radsysx/desktop/shutdown") {
+    if (process.env.RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN !== "1") {
+      writeJson(response, 404, { ok: false });
+      return;
+    }
+    writeJson(response, 200, { ok: true });
+    shuttingDown = true;
+    setTimeout(() => app.quit(), 25).unref();
+    return;
+  }
+
   if (pathname === "/viewer" || pathname.startsWith("/viewer/")) {
     serveViewer(requestUrl, response);
     return;
@@ -670,6 +681,9 @@ app.whenReady().then(async () => {
     await mainWindow.loadURL(runtime.publicBaseUrl);
     scheduleSmokeExit();
   } catch (error) {
+    if (shuttingDown) {
+      return;
+    }
     appendLog("desktop", error instanceof Error ? error.stack ?? error.message : String(error));
     showRuntimeFailure("RadSysX startup failed", recentLogs());
   }

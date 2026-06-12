@@ -267,6 +267,14 @@ For a quick startup and cleanup check:
 npm run desktop:smoke
 ```
 
+For a stronger no-Docker import/use check:
+
+```bash
+npm run desktop:smoke:import
+```
+
+That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, and PNG files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
+
 ### Install the full backend/runtime dependency set
 
 If you want one local Python environment that can exercise both the governed clinical backend and the broader research/agent surface, use Python `3.12` and then install the full backend set:
@@ -340,20 +348,21 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 5. `npm install --legacy-peer-deps`
 6. `npm run desktop:doctor`
 7. `npm run desktop:smoke`
-8. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-9. `python3 -m pytest backend/tests/test_clinical_platform.py`
-10. `npm run type-check --workspace frontend`
-11. `npm run type-check --workspace viewer`
-12. `npm run build --workspace viewer`
-13. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-14. Separately validate the governed clinical surface with `docker compose up --build`
+8. `npm run desktop:smoke:import`
+9. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+10. `python3 -m pytest backend/tests/test_clinical_platform.py`
+11. `npm run type-check --workspace frontend`
+12. `npm run type-check --workspace viewer`
+13. `npm run build --workspace viewer`
+14. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+15. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor` and `npm run desktop:smoke`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, and `npm run desktop:smoke:import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

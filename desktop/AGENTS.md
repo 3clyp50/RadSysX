@@ -21,6 +21,7 @@
 - A missing local DICOMweb archive should degrade honestly. Full Orthanc-backed image retrieval remains the compose-stack path until a local archive bundle is added.
 - Desktop sets `RADSYSX_LOCAL_IMAGING_ENABLED=true` and stores local imports in an ignored repo-local backend data directory unless overridden.
 - When `RADSYSX_DESKTOP_DICOMWEB_TARGET` is unset, the desktop bridge routes `/dicom-web` to the backend's local DICOMweb endpoints for imported DICOM studies.
+- `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` enables the local `/_radsysx/desktop/shutdown` endpoint for smoke tests only; do not enable it for normal desktop runs.
 
 ## Work Guidance
 
@@ -33,7 +34,9 @@
 
 - `npm run desktop:doctor`
 - `npm run desktop:smoke`
+- `npm run desktop:smoke:import`
 - `node --check desktop/src/main.mjs`
 - `node --check desktop/scripts/doctor.mjs`
+- `node --check desktop/scripts/import-smoke.mjs`
 
 ## Child DOX Index

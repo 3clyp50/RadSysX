@@ -1,0 +1,419 @@
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const desktopRoot = path.resolve(path.dirname(__filename), "..");
+const workspaceRoot = path.resolve(desktopRoot, "..");
+
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "radsysx-desktop-import-smoke-"));
+const fixtureRoot = path.join(tmpRoot, "fixtures");
+const storageRoot = path.join(tmpRoot, "local-imaging-data");
+const dbPath = path.join(tmpRoot, "clinical.db");
+const maxStartupMs = Number.parseInt(process.env.RADSYSX_IMPORT_SMOKE_STARTUP_MS ?? "120000", 10);
+
+let desktopProcess = null;
+let desktopPublicBaseUrl = null;
+
+try {
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  fs.mkdirSync(storageRoot, { recursive: true });
+
+  generateFixtures(fixtureRoot);
+  const publicBaseUrl = await startDesktopRuntime();
+  const result = await runImportSmoke(publicBaseUrl);
+  console.log(JSON.stringify(result, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  process.exitCode = 1;
+} finally {
+  await stopDesktopRuntime();
+  if (process.env.RADSYSX_KEEP_IMPORT_SMOKE_TMP === "1") {
+    console.log(`Kept smoke workspace at ${tmpRoot}`);
+  } else {
+    fs.rmSync(tmpRoot, { force: true, recursive: true });
+  }
+}
+
+function npmCommand() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function pythonCommand() {
+  const venvPython = path.join(workspaceRoot, ".venv", "bin", "python");
+  return fs.existsSync(venvPython) ? venvPython : "python3";
+}
+
+function asFileUrlPath(filePath) {
+  return filePath.replaceAll("\\", "/");
+}
+
+function generateFixtures(outputDir) {
+  const python = spawnSync(
+    pythonCommand(),
+    [
+      "-c",
+      `
+import gzip
+import struct
+import sys
+from pathlib import Path
+
+import pydicom
+from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+from pydicom.sequence import Sequence
+from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, MediaStorageDirectoryStorage, generate_uid
+
+root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=True)
+
+study_uid = "1.2.826.0.1.3680043.10.54321.910"
+series_uid = "1.2.826.0.1.3680043.10.54321.911"
+sop_uid = "1.2.826.0.1.3680043.10.54321.912"
+
+file_meta = FileMetaDataset()
+file_meta.MediaStorageSOPClassUID = CTImageStorage
+file_meta.MediaStorageSOPInstanceUID = sop_uid
+file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+dataset = FileDataset(None, {}, file_meta=file_meta, preamble=b"\\0" * 128)
+dataset.SOPClassUID = CTImageStorage
+dataset.SOPInstanceUID = sop_uid
+dataset.StudyInstanceUID = study_uid
+dataset.SeriesInstanceUID = series_uid
+dataset.Modality = "CT"
+dataset.PatientID = "SMOKE-DO-NOT-LOG"
+dataset.Rows = 2
+dataset.Columns = 2
+dataset.SamplesPerPixel = 1
+dataset.PhotometricInterpretation = "MONOCHROME2"
+dataset.BitsAllocated = 8
+dataset.BitsStored = 8
+dataset.HighBit = 7
+dataset.PixelRepresentation = 0
+dataset.PixelData = bytes([0, 1, 2, 3])
+dataset.is_little_endian = True
+dataset.is_implicit_VR = False
+dataset.save_as(root / "SCAN1DCM", enforce_file_format=True)
+
+directory_meta = FileMetaDataset()
+directory_meta.MediaStorageSOPClassUID = MediaStorageDirectoryStorage
+directory_meta.MediaStorageSOPInstanceUID = generate_uid()
+directory_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+dicomdir = FileDataset(None, {}, file_meta=directory_meta, preamble=b"\\0" * 128)
+dicomdir.SOPClassUID = MediaStorageDirectoryStorage
+dicomdir.SOPInstanceUID = directory_meta.MediaStorageSOPInstanceUID
+dicomdir.is_little_endian = True
+dicomdir.is_implicit_VR = False
+record = Dataset()
+record.DirectoryRecordType = "IMAGE"
+record.ReferencedFileID = ["SCAN1DCM"]
+dicomdir.DirectoryRecordSequence = Sequence([record])
+dicomdir.save_as(root / "DICOMDIR", enforce_file_format=True)
+
+header = bytearray(352)
+header[0:4] = (348).to_bytes(4, "little")
+header[40:56] = struct.pack("<8h", 3, 2, 3, 4, 1, 1, 1, 1)
+header[70:72] = (2).to_bytes(2, "little", signed=True)
+header[72:74] = (8).to_bytes(2, "little", signed=True)
+header[108:112] = struct.pack("<f", 352.0)
+header[344:348] = b"n+1\\0"
+(root / "volume.nii").write_bytes(bytes(header))
+(root / "volume.nii.gz").write_bytes(gzip.compress(bytes(header)))
+(root / "slice.png").write_bytes(b"\\x89PNG\\r\\n\\x1a\\nsmoke")
+`,
+      outputDir,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf-8",
+    },
+  );
+
+  if (python.status !== 0) {
+    throw new Error(
+      [
+        "Unable to generate local imaging smoke fixtures.",
+        python.stdout,
+        python.stderr,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+}
+
+function startDesktopRuntime() {
+  return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      RADSYSX_DESKTOP_PORT: process.env.RADSYSX_DESKTOP_PORT ?? "37000",
+      RADSYSX_DESKTOP_FRONTEND_PORT: process.env.RADSYSX_DESKTOP_FRONTEND_PORT ?? "37010",
+      RADSYSX_DESKTOP_BACKEND_PORT: process.env.RADSYSX_DESKTOP_BACKEND_PORT ?? "37080",
+      RADSYSX_LOCAL_IMAGING_ENABLED: "true",
+      RADSYSX_LOCAL_IMAGING_STORAGE_DIR: storageRoot,
+      RADSYSX_CLINICAL_DATABASE_URL: `sqlite:///${asFileUrlPath(dbPath)}`,
+      RADSYSX_SESSION_COOKIE_SECURE: "false",
+      RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN: "1",
+    };
+
+    desktopProcess = spawn(npmCommand(), ["run", "dev", "--workspace", "@radsysx/desktop"], {
+      cwd: workspaceRoot,
+      detached: process.platform !== "win32",
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const startedAt = Date.now();
+    let settled = false;
+    const logs = [];
+    const timeout = setInterval(() => {
+      if (settled) {
+        return;
+      }
+      if (Date.now() - startedAt > maxStartupMs) {
+        settled = true;
+        clearInterval(timeout);
+        reject(new Error(`Desktop runtime did not become ready.\n${logs.slice(-80).join("\n")}`));
+      }
+    }, 500);
+    timeout.unref();
+
+    const handleOutput = (scope, chunk) => {
+      const lines = String(chunk).split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        const entry = `[${scope}] ${line}`;
+        logs.push(entry);
+        console.log(entry);
+        const match = line.match(/RadSysX desktop is ready at (http:\/\/127\.0\.0\.1:\d+)/);
+        if (match && !settled) {
+          settled = true;
+          desktopPublicBaseUrl = match[1];
+          clearInterval(timeout);
+          resolve(match[1]);
+        }
+      }
+    };
+
+    desktopProcess.stdout?.on("data", (chunk) => handleOutput("desktop", chunk));
+    desktopProcess.stderr?.on("data", (chunk) => handleOutput("desktop", chunk));
+    desktopProcess.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearInterval(timeout);
+        reject(error);
+      }
+    });
+    desktopProcess.once("exit", (code, signal) => {
+      if (!settled) {
+        settled = true;
+        clearInterval(timeout);
+        reject(new Error(`Desktop runtime exited early with ${signal ?? code ?? "unknown"}.`));
+      }
+    });
+  });
+}
+
+async function runImportSmoke(publicBaseUrl) {
+  const cookie = await login(publicBaseUrl);
+  const importPayload = await importLocalFiles(publicBaseUrl, cookie);
+  assert(importPayload.acceptedFiles === 5, `Expected 5 accepted files, got ${importPayload.acceptedFiles}.`);
+  assert(importPayload.rejectedFiles === 0, `Expected 0 rejected files, got ${importPayload.rejectedFiles}.`);
+
+  const worklist = await getJson(`${publicBaseUrl}/api/worklist`, cookie);
+  for (const study of importPayload.importedStudies) {
+    assert(
+      worklist.rows.some((row) => row.studyInstanceUID === study.studyInstanceUID),
+      `Imported study ${study.studyInstanceUID} was not present in the worklist.`,
+    );
+  }
+
+  const summaries = [];
+  for (const study of importPayload.importedStudies) {
+    summaries.push(await getJson(
+      `${publicBaseUrl}/api/local-imaging/studies/${encodeURIComponent(study.studyInstanceUID)}/assets`,
+      cookie,
+    ));
+  }
+
+  const dicomSummary = summaries.find((summary) => summary.formats.includes("dicom"));
+  assert(dicomSummary, "DICOM summary was not returned.");
+  assert(
+    dicomSummary.assets.some((asset) => asset.format === "dicom" && asset.viewerSupported),
+    "DICOM asset was not marked viewer-supported.",
+  );
+  const dicomSearch = await getJson(
+    `${publicBaseUrl}/dicom-web/studies?StudyInstanceUID=${encodeURIComponent(dicomSummary.studyInstanceUID)}`,
+    cookie,
+  );
+  assert(Array.isArray(dicomSearch) && dicomSearch.length > 0, "Local DICOMweb search did not return imported DICOM.");
+
+  const niftiSummary = summaries.find((summary) => summary.formats.includes("nifti"));
+  assert(niftiSummary, "NIFTI summary was not returned.");
+  assert(
+    niftiSummary.assets.some((asset) => asset.relativePath.endsWith("volume.nii") && asset.analysisSupported),
+    "Plain .nii asset was not analysis-supported.",
+  );
+  assert(
+    niftiSummary.assets.some((asset) => asset.relativePath.endsWith("volume.nii.gz") && asset.analysisSupported),
+    "Gzipped .nii asset was not analysis-supported.",
+  );
+  assert(
+    niftiSummary.findings.some((finding) => finding.label === "NIFTI volume" && finding.value.includes("2 x 3 x 4")),
+    "NIFTI dimensions were not reported.",
+  );
+  assert(
+    niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "1"),
+    "Fallback image count was not reported.",
+  );
+
+  const launch = await postJson(
+    `${publicBaseUrl}/api/imaging/launch`,
+    cookie,
+    { studyInstanceUID: dicomSummary.studyInstanceUID },
+  );
+  assert(
+    typeof launch.viewerUrl === "string" && launch.viewerUrl.includes("/viewer/?launch="),
+    "DICOM study launch did not return an opaque viewer URL.",
+  );
+
+  return {
+    ok: true,
+    publicBaseUrl,
+    importedStudies: importPayload.importedStudies.map((study) => ({
+      studyInstanceUID: study.studyInstanceUID,
+      formats: study.formats,
+      fileCount: study.fileCount,
+    })),
+    summaries: summaries.map((summary) => ({
+      studyInstanceUID: summary.studyInstanceUID,
+      formats: summary.formats,
+      assetCount: summary.assets.length,
+      findings: summary.findings,
+    })),
+  };
+}
+
+async function login(publicBaseUrl) {
+  const response = await fetch(`${publicBaseUrl}/api/auth/local-login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "demo-radiologist" }),
+  });
+  const text = await response.text();
+  assert(response.ok, `Login failed: ${response.status} ${text}`);
+  const cookie = response.headers.get("set-cookie")?.split(";")[0];
+  assert(cookie, "Login did not return a session cookie.");
+  return cookie;
+}
+
+async function importLocalFiles(publicBaseUrl, cookie) {
+  const uploads = [
+    ["DICOMDIR", "smoke/DICOMDIR", "application/dicom"],
+    ["SCAN1DCM", "smoke/SCAN1DCM", "application/dicom"],
+    ["volume.nii", "smoke/volume.nii", "application/octet-stream"],
+    ["volume.nii.gz", "smoke/volume.nii.gz", "application/gzip"],
+    ["slice.png", "smoke/slice.png", "image/png"],
+  ];
+
+  const form = new FormData();
+  form.set("relativePaths", JSON.stringify(uploads.map(([, relativePath]) => relativePath)));
+  for (const [filename, relativePath, contentType] of uploads) {
+    const payload = fs.readFileSync(path.join(fixtureRoot, filename));
+    form.append("files", new File([payload], filename, { type: contentType }), relativePath);
+  }
+
+  const response = await fetch(`${publicBaseUrl}/api/local-imaging/import`, {
+    method: "POST",
+    headers: { cookie },
+    body: form,
+  });
+  const text = await response.text();
+  assert(response.ok, `Import failed: ${response.status} ${text}`);
+  return JSON.parse(text);
+}
+
+async function getJson(url, cookie) {
+  const response = await fetch(url, { headers: { cookie } });
+  const text = await response.text();
+  assert(response.ok, `GET ${url} failed: ${response.status} ${text}`);
+  return JSON.parse(text);
+}
+
+async function postJson(url, cookie, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie,
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  assert(response.ok, `POST ${url} failed: ${response.status} ${text}`);
+  return JSON.parse(text);
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+async function stopDesktopRuntime() {
+  if (!desktopProcess || desktopProcess.killed) {
+    return;
+  }
+
+  const child = desktopProcess;
+  if (desktopPublicBaseUrl) {
+    try {
+      await fetch(`${desktopPublicBaseUrl}/_radsysx/desktop/shutdown`, { method: "POST" });
+      await waitForExit(child, 10000);
+      return;
+    } catch {
+      // Fall back to external process termination below.
+    }
+  }
+
+  terminateProcessGroup(child, "SIGTERM");
+  await waitForExit(child, 6000);
+  if (!child.killed && child.exitCode == null) {
+    terminateProcessGroup(child, "SIGKILL");
+    await waitForExit(child, 2000);
+  }
+}
+
+async function waitForExit(child, timeoutMs) {
+  await new Promise((resolve) => {
+    if (child.exitCode != null || child.signalCode != null) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(resolve, timeoutMs);
+    timeout.unref();
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+function terminateProcessGroup(child, signal) {
+  if (!child.pid || child.killed) {
+    return;
+  }
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch {
+    // Process already exited.
+  }
+}
