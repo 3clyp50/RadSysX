@@ -367,13 +367,122 @@ Interpretation:
 - The synthetic `espeak-ng` voice is not a good accuracy benchmark; `RadSysX` and `lung` were misrecognized.
 - We need a small human-recorded voice fixture with consent for a fair command-language test.
 - For batch/offline smoke with the current package, use `RNNTPromptTranscribeConfig(use_lhotse=False, target_lang="en-US")`.
-- For the actual RadSysX voice sidebar, the more relevant next step is NeMo's cache-aware streaming inference path, not the convenience `transcribe()` path.
+- For the actual RadSysX voice sidebar, NeMo's cache-aware streaming inference path is more relevant than the convenience `transcribe()` path.
+
+### Cache-Aware Streaming Example
+
+Cloned NeMo to `/tmp/NeMo` on the VM for example-script inspection only:
+
+```bash
+git clone --depth 1 --filter=blob:none https://github.com/NVIDIA/NeMo /tmp/NeMo
+cd /tmp/NeMo
+git rev-parse --short HEAD
+```
+
+Observed NeMo example commit:
+
+```text
+95f9273
+```
+
+That matches the installed `nemo_toolkit` source version prefix: `3.1.0+95f92737c`.
+
+The cache-aware streaming script exists at:
+
+```text
+/tmp/NeMo/examples/asr/asr_cache_aware_streaming/speech_to_text_cache_aware_streaming_infer.py
+```
+
+Help/config confirmed support for:
+
+- `pretrained_name`
+- `audio_file`
+- `dataset_manifest`
+- `chunk_size`
+- `shift_size`
+- `left_chunks`
+- `att_context_size`
+- `cuda`
+- `target_lang`
+- `strip_lang_tags`
+- `compare_vs_offline`
+
+Single-file run:
+
+```bash
+cd /tmp/NeMo
+/usr/bin/time -f "wall_seconds %e" \
+  /home/eclypso/a0/RadSysX/.venv-ai/bin/python \
+  examples/asr/asr_cache_aware_streaming/speech_to_text_cache_aware_streaming_infer.py \
+  pretrained_name=nvidia/nemotron-3.5-asr-streaming-0.6b \
+  audio_file=/home/eclypso/a0/RadSysX/tmp/ai-audio/radsysx_voice_test_16k.wav \
+  cuda=0 \
+  target_lang=en-US \
+  strip_lang_tags=true
+```
+
+Result:
+
+- The streaming model path itself worked and produced a final transcript.
+- The script then exited non-zero because the single-`audio_file` branch references manifest-only variables after streaming completes.
+
+Observed failure tail:
+
+```text
+Final streaming transcriptions: ['This is a rock Sim X radiology voice X please switch the long window.']
+UnboundLocalError: cannot access local variable 'all_refs_text' where it is not associated with a value
+wall_seconds 59.56
+```
+
+Clean manifest workaround:
+
+```bash
+cd /home/eclypso/a0/RadSysX
+mkdir -p tmp/ai-audio/asr-out
+printf "%s\n" \
+  "{\"audio_filepath\": \"/home/eclypso/a0/RadSysX/tmp/ai-audio/radsysx_voice_test_16k.wav\", \"text\": \"This is a RadSysX radiology voice test. Please switch to lung window.\"}" \
+  > tmp/ai-audio/nemotron_manifest.json
+
+cd /tmp/NeMo
+export HF_HOME="$HOME/.cache/radsysx/models/huggingface"
+/usr/bin/time -f "wall_seconds %e" \
+  /home/eclypso/a0/RadSysX/.venv-ai/bin/python \
+  examples/asr/asr_cache_aware_streaming/speech_to_text_cache_aware_streaming_infer.py \
+  pretrained_name=nvidia/nemotron-3.5-asr-streaming-0.6b \
+  dataset_manifest=/home/eclypso/a0/RadSysX/tmp/ai-audio/nemotron_manifest.json \
+  batch_size=1 \
+  output_path=/home/eclypso/a0/RadSysX/tmp/ai-audio/asr-out \
+  cuda=0 \
+  target_lang=en-US \
+  strip_lang_tags=true
+```
+
+Observed clean result:
+
+```text
+CacheAwareStreamingConfig(chunk_size=[25, 32], shift_size=[25, 32], cache_drop_size=0, last_channel_cache_size=56, valid_out_len=4, pre_encode_cache_size=[0, 9], drop_extra_pre_encoded=2, last_channel_num=0, last_time_num=0)
+Inference prompt set to 'en-US' (index 0)
+Setting strip_lang_tags to True with lang_tag_pattern='\\s*<[a-z]{2}-[A-Z]{2}>'
+Final streaming transcriptions: ['This is a rock Sim X radiology voice X please switch the long window.']
+WER% of streaming mode: 58.33
+The whole streaming process took: 0.72s
+wall_seconds 47.65
+```
+
+Interpretation:
+
+- The official cache-aware streaming path runs on the L40S with `target_lang=en-US`.
+- The script's streaming compute over the 4.35 second synthetic utterance reported `0.72s`, but the full CLI wall time was `47.65s` because each invocation loads the model. A RadSysX ASR worker should be a resident process that keeps the model warm.
+- The single-file CLI branch has a small upstream example-script bug after successful transcription. Use a manifest for clean smoke runs or patch locally if a direct single-file smoke becomes important.
+- The first streaming run without `HF_HOME` exported used the default `~/.cache/huggingface` path. Future worker/runbooks should always set `HF_HOME` or the model cache path before invoking example scripts.
+- Accuracy remains a poor benchmark on synthetic `espeak-ng` audio. Human voice fixtures are needed before judging model quality.
 
 ## Current Conclusions
 
 - The NVIDIA/Linux worker lane is viable for the first local realtime ASR experiments.
 - Nemotron 3.5 ASR is public and loaded successfully without a Hugging Face token.
 - The L40S has ample headroom for the 0.6B ASR model; observed peak was about 4.82 GiB VRAM.
+- NeMo's official cache-aware streaming simulation ran successfully through a manifest with `target_lang=en-US`.
 - A local ASR worker should be isolated from the clinical app process and communicate through a narrow backend contract.
 - API realtime remains a legitimate lane for machines without GPUs, Apple Silicon/Metal users, Windows workstations, and governed hospital deployments.
 - The Electron app itself should stay cross-platform. Only the heavy local model runner should be hardware-specific.
@@ -382,7 +491,8 @@ Interpretation:
 
 - Need Hugging Face login/token and model-term acceptance before testing MedGemma, Pillar0-Sybil-1.5, or BiomedParse.
 - Need to verify each model/checkpoint license and clinical/research restrictions separately before distribution.
-- Need to clone or vendor-reference the exact NeMo streaming example used by the model card, then test low-latency chunked streaming with `target_lang=en-US` and `target_lang=auto`.
+- Need to turn the NeMo streaming smoke into a resident worker and test low-latency chunked microphone streaming with `target_lang=en-US` and `target_lang=auto`.
+- Need to decide whether to patch around the upstream single-`audio_file` example-script post-processing bug or simply keep using manifests for CLI smoke tests.
 - Need to replace deprecated `HF_HUB_ENABLE_HF_TRANSFER` with `HF_XET_HIGH_PERFORMANCE` in future remote setup docs.
 - Need real microphone/audio capture tests from Electron on Linux, macOS, and Windows.
 - Need decide whether the first ASR transport between Electron and backend should be WebSocket PCM, WebRTC local loopback, or a provider-shaped abstraction with interchangeable adapters.
@@ -399,8 +509,9 @@ Interpretation:
    - "Measure this lesion."
    - "Attach the current ROI to the chat."
    - "Draft an impression."
-5. Run the cache-aware streaming inference path from the NeMo example linked in the model card.
-6. Measure:
+5. Run the cache-aware streaming inference path with `target_lang=auto` and compare it with `target_lang=en-US`.
+6. Build a tiny resident ASR worker instead of a one-shot CLI invocation.
+7. Measure:
    - model load time,
    - first-token or first-partial latency,
    - final transcript latency,
@@ -408,18 +519,18 @@ Interpretation:
    - peak VRAM,
    - CPU/RAM use,
    - transcript quality on radiology command phrases.
-7. Prototype a local ASR worker contract:
+8. Prototype a local ASR worker contract:
    - `POST /api/ai/audio/sessions`,
    - WebSocket stream for PCM chunks,
    - transcript delta events,
    - final transcript event,
    - clean close,
    - capability state.
-8. Keep the first worker research-only or pilot-gated until consent, audit, and retention rules are explicit.
-9. Evaluate MedGemma image/text-to-text on a non-PHI sample once access is available.
-10. Evaluate RAVE on local DICOM/NIfTI samples as the imaging preparation layer.
-11. Evaluate BiomedParse only after its license/model terms are fully separated and recorded.
-12. Evaluate Pillar0-Sybil-1.5 only as a lung cancer risk experiment, not as a general lesion detector.
+9. Keep the first worker research-only or pilot-gated until consent, audit, and retention rules are explicit.
+10. Evaluate MedGemma image/text-to-text on a non-PHI sample once access is available.
+11. Evaluate RAVE on local DICOM/NIfTI samples as the imaging preparation layer.
+12. Evaluate BiomedParse only after its license/model terms are fully separated and recorded.
+13. Evaluate Pillar0-Sybil-1.5 only as a lung cancer risk experiment, not as a general lesion detector.
 
 ## Source Links
 
