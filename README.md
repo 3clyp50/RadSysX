@@ -291,13 +291,21 @@ npm run desktop:smoke:ui-import
 
 That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI/PNG/TIFF files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
 
-For a native picker bridge check:
+For a native file picker bridge check:
+
+```bash
+npm run desktop:smoke:picker-files-import
+```
+
+That smoke drives the hydrated worklist `Import files` action through the Electron preload IPC bridge with smoke-injected individual fixture file paths. Electron main uploads those selected files directly to the backend import endpoint with the existing session cookie, so the renderer receives only the backend import response. It proves the file picker button, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
+
+For a native folder picker bridge check:
 
 ```bash
 npm run desktop:smoke:picker-import
 ```
 
-That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. Electron main uploads the selected files directly to the backend import endpoint with the existing session cookie, so the renderer receives only the backend import response. It proves the picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
+That smoke drives the hydrated worklist `Import folder` action through the Electron preload IPC bridge and main-process recursive file collector with smoke-injected test paths. Electron main uploads the selected files directly to the backend import endpoint with the existing session cookie, so the renderer receives only the backend import response. It proves the folder picker bridge, backend import, local inspection, NIFTI preview controls, and technical analysis path without automating the actual operating-system file dialog.
 
 For a larger native picker import check:
 
@@ -398,24 +406,25 @@ If you need to test both RadSysX surfaces on the same Linux host, use Python `3.
 7. `npm run desktop:smoke`
 8. `npm run desktop:smoke:import`
 9. `npm run desktop:smoke:ui-import`
-10. `npm run desktop:smoke:picker-import`
-11. `npm run desktop:smoke:picker-large-import`
-12. `npm run desktop:smoke:picker-many-import`
-13. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
-14. `python3 -m pytest backend/tests/test_clinical_platform.py`
-15. `npm run type-check --workspace frontend`
-16. `npm run build --workspace frontend`
-17. `npm run type-check --workspace viewer`
-18. `npm run build --workspace viewer`
-19. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
-20. Separately validate the governed clinical surface with `docker compose up --build`
+10. `npm run desktop:smoke:picker-files-import`
+11. `npm run desktop:smoke:picker-import`
+12. `npm run desktop:smoke:picker-large-import`
+13. `npm run desktop:smoke:picker-many-import`
+14. `python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`
+15. `python3 -m pytest backend/tests/test_clinical_platform.py`
+16. `npm run type-check --workspace frontend`
+17. `npm run build --workspace frontend`
+18. `npm run type-check --workspace viewer`
+19. `npm run build --workspace viewer`
+20. Start the research surface directly with `RADSYSX_APP_MODE=research python3 backend/server.py` plus `NEXT_PUBLIC_RADSYSX_APP_MODE=research npm run dev --workspace frontend`
+21. Separately validate the governed clinical surface with `docker compose up --build`
 
 ### First Linux Validation Pass
 
 On the new Linux host, the first useful runtime checkpoint is:
 
 1. install dependencies with the `.venv` + `npm install` flow above
-2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
+2. run `npm run desktop:doctor`, `npm run desktop:smoke`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:picker-large-import`, and `npm run desktop:smoke:picker-many-import`
 3. run the focused backend and viewer checks
 4. attempt the actual app flow on Linux
 5. report what happened before widening the code-change scope

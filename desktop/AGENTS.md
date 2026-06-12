@@ -35,7 +35,8 @@
 - `RADSYSX_DESKTOP_EXIT_AFTER_READY_MS` should schedule smoke shutdown immediately after internal services report ready, before waiting on the final app URL load, so startup smokes cannot hang behind slow dev-shell navigation; scheduled startup-smoke teardown may suppress transient loopback Next.js dev asset parse noise.
 - `npm run desktop:smoke:import` should keep proving local DICOMDIR/DICOM/NIFTI/PNG/TIFF import, asset summaries, local previews including NIFTI slice navigation and TIFF SVG header preview, backend technical analysis, DICOMweb discovery, and opaque launch without Docker.
 - `npm run desktop:smoke:ui-import` should keep proving the hydrated worklist UI can import dropped local imaging files, inspect imported assets including PNG/TIFF fallback images, change NIFTI preview slices, and run backend technical analysis without Docker.
-- `npm run desktop:smoke:picker-import` should keep proving the hydrated worklist UI can invoke the Electron native picker bridge through `preload.cjs`, read a selected folder through the main-process recursive collector, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker. This does not replace a human or OS-automation smoke of the actual native dialog.
+- `npm run desktop:smoke:picker-files-import` should keep proving the hydrated worklist UI can invoke the `Import files` action through the Electron native picker bridge, pass smoke-injected individual file paths through `preload.cjs`, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker.
+- `npm run desktop:smoke:picker-import` should keep proving the hydrated worklist UI can invoke the Electron native folder picker bridge through `preload.cjs`, read a selected folder through the main-process recursive collector, upload selected files from Electron main to the backend import endpoint, inspect imported assets, change NIFTI preview slices, and run backend technical analysis without Docker. This does not replace a human or OS-automation smoke of the actual native dialog.
 - `npm run desktop:smoke:picker-large-import` should keep proving the same direct native picker import path with an additional 8 MiB synthetic NIFTI volume, including backend asset summary, preview, and technical analysis checks.
 - `npm run desktop:smoke:picker-many-import` should keep proving the same direct native picker import path with a nested folder of 32 additional extensionless DICOM instances, including recursive folder collection, backend import of 38 files, DICOM asset summary, and technical analysis checks.
 - `npm run desktop:smoke:viewer-launch` should keep proving the hydrated worklist can import a local DICOM/DICOMDIR study, launch it through the governed viewer path, resolve the opaque launch in `/viewer/`, strip the launch token from the browser URL, bind OHIF runtime configuration to same-origin local DICOMweb roots, query the imported study from the viewer origin, and paint a nonblank OHIF canvas for the synthetic imported DICOM.
@@ -55,6 +56,7 @@
 - `npm run desktop:doctor`
 - `npm run desktop:smoke`
 - `npm run desktop:smoke:import`
+- `npm run desktop:smoke:picker-files-import`
 - `npm run desktop:smoke:picker-large-import`
 - `npm run desktop:smoke:picker-many-import`
 - `npm run desktop:smoke:picker-import`

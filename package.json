@@ -14,6 +14,7 @@
     "desktop:dev-frontend": "npm run dev:frontend --workspace @radsysx/desktop",
     "desktop:doctor": "npm run doctor --workspace @radsysx/desktop",
     "desktop:smoke:import": "npm run smoke:import --workspace @radsysx/desktop",
+    "desktop:smoke:picker-files-import": "npm run smoke:picker-files-import --workspace @radsysx/desktop",
     "desktop:smoke:picker-large-import": "npm run smoke:picker-large-import --workspace @radsysx/desktop",
     "desktop:smoke:picker-many-import": "npm run smoke:picker-many-import --workspace @radsysx/desktop",
     "desktop:smoke:picker-import": "npm run smoke:picker-import --workspace @radsysx/desktop",

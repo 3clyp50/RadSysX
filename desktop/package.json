@@ -10,6 +10,7 @@
     "dev:frontend": "node ./scripts/dev-frontend.mjs",
     "doctor": "node ./scripts/doctor.mjs",
     "smoke:import": "node ./scripts/import-smoke.mjs",
+    "smoke:picker-files-import": "node ./scripts/ui-import-smoke.mjs --picker-files",
     "smoke:picker-large-import": "node ./scripts/ui-import-smoke.mjs --picker-large-folder",
     "smoke:picker-many-import": "node ./scripts/ui-import-smoke.mjs --picker-many-folder",
     "smoke:picker-import": "node ./scripts/ui-import-smoke.mjs --picker-folder",

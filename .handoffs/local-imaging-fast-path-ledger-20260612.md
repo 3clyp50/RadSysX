@@ -20,6 +20,7 @@ This is not merely an upload button. The desired end state is a local app that c
   - `npm run desktop:smoke`
   - `npm run desktop:smoke:import`
   - `npm run desktop:smoke:ui-import`
+  - `npm run desktop:smoke:picker-files-import`
   - `npm run desktop:smoke:picker-import`
   - `npm run desktop:smoke:picker-large-import`
   - `npm run desktop:smoke:picker-many-import`
@@ -79,7 +80,8 @@ This is not merely an upload button. The desired end state is a local app that c
 - The local asset endpoints read private stored files server-side and return safe technical metadata/previews/analysis, including NIFTI header dimensions/datatype, axial/coronal/sagittal NIFTI SVG slice previews, DICOM/image counts, common image previews including TIFF SVG header previews, NIFTI voxel statistics, simple uncompressed DICOM pixel statistics, and common image header dimensions, without exposing stored paths or PHI-bearing DICOM tags.
 - There is now a reproducible desktop import smoke at `npm run desktop:smoke:import`; it starts Electron on high local ports, generates PHI-free synthetic imaging files, imports them, verifies worklist rows, asset summaries, local DICOMweb discovery, and opaque viewer launch, then shuts the runtime down.
 - There is now a reproducible hydrated desktop UI import smoke at `npm run desktop:smoke:ui-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, dispatches a DOM drag/drop with PHI-free synthetic DICOMDIR/DICOM/NIFTI/PNG/TIFF files, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
-- There is now a reproducible hydrated desktop native picker bridge smoke at `npm run desktop:smoke:picker-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, clicks the real `Import folder` button, routes through `window.radsysxDesktop.importLocalImaging`, uses a smoke-only main-process test-path override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1`, recursively collects the PHI-free fixture folder, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
+- There is now a reproducible hydrated desktop native file-picker bridge smoke at `npm run desktop:smoke:picker-files-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, clicks the real `Import files` button, routes through `window.radsysxDesktop.importLocalImaging`, uses a smoke-only main-process test-path override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1`, passes individual PHI-free fixture file paths, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
+- There is now a reproducible hydrated desktop native folder-picker bridge smoke at `npm run desktop:smoke:picker-import`; it drives Electron through the local bridge, signs in with a backend-issued cookie, clicks into `/worklist`, clicks the real `Import folder` button, routes through `window.radsysxDesktop.importLocalImaging`, uses a smoke-only main-process test-path override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1`, recursively collects the PHI-free fixture folder, verifies imported rows, inspects local assets, switches a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts the runtime down.
 - Desktop UI smoke commands share default high ports for Electron, the bridge, Next.js, and FastAPI; run them sequentially unless ports are explicitly overridden.
 - The hydrated native picker bridge smoke now proves the preferred `window.radsysxDesktop.importLocalImaging` path: selected files stay in Electron main and are uploaded to backend import with the existing session cookie instead of being copied through renderer IPC as ArrayBuffers.
 - The large native picker bridge smoke at `npm run desktop:smoke:picker-large-import` adds `large-volume.nii`, an 8 MiB `256 x 256 x 128` uint8 NIFTI, and verifies import of 7 files into 2 studies, preview loading, coronal slice switching, and backend technical analysis including the `8388608` voxel count.
@@ -248,6 +250,7 @@ Likely components:
 - [x] Add a hydrated Electron UI smoke for drag/drop local imaging import through the worklist.
 - [x] Add a smoke-only picker bridge override guarded by `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN=1` and `RADSYSX_DESKTOP_PICKER_TEST_PATHS`, so automation can exercise the native picker IPC path without OS-dialog control.
 - [x] Add `desktop:smoke:picker-import` to exercise the real hydrated worklist `Import folder` button, preload IPC bridge, main-process recursive file/folder collector, direct backend import, local inspection, NIFTI preview controls, and technical analysis.
+- [x] Add `desktop:smoke:picker-files-import` to exercise the real hydrated worklist `Import files` button, preload IPC bridge, direct backend import of individual selected files, local inspection, NIFTI preview controls, and technical analysis.
 - [x] Keep `RADSYSX_DESKTOP_PICKER_TEST_PATHS` out of normal runtime behavior when `RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN` is not set.
 - [x] Allow extensionless non-hidden picked files to pass through as DICOM candidates so DICOMDIR companion files are not silently dropped before backend detection.
 - [x] Add preferred `window.radsysxDesktop.importLocalImaging` IPC that keeps selected file paths and bytes inside Electron main and uploads them to the backend import endpoint with the existing session cookie.
@@ -326,6 +329,7 @@ Likely components:
 - [x] Extend `desktop:smoke:import` to verify backend local analysis for DICOM intensity range, NIFTI voxel count/mean intensity, PNG dimensions, and TIFF dimensions.
 - [x] Add `desktop:smoke:ui-import` to exercise hydrated Electron worklist controls, local drag/drop import, inspection, NIFTI preview controls, and backend technical analysis.
 - [x] Perform a true UI drag-and-drop upload smoke through the hydrated Electron worklist controls with synthetic PHI-free files.
+- [x] Perform the committed individual-file picker bridge smoke through `npm run desktop:smoke:picker-files-import`.
 - [x] Perform the committed picker bridge smoke through `npm run desktop:smoke:picker-import`.
 - [x] Perform the committed large picker payload smoke through `npm run desktop:smoke:picker-large-import`.
 - [x] Perform the committed many-file picker smoke through `npm run desktop:smoke:picker-many-import`.
@@ -350,8 +354,9 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: Electron now exposes a native local imaging file/folder picker through `window.radsysxDesktop.selectLocalImagingFiles`.
   - Evidence: the worklist local import panel now accepts browser drag-and-drop files and Chromium-exposed folders, preserving folder-relative paths as `radsysxRelativePath` before submitting to the backend import endpoint.
   - Evidence: `npm run desktop:smoke:ui-import` now proves the Electron shell hydrates through the one-origin bridge, clicks from the desktop root to `/worklist`, imports synthetic local files through a DOM drag/drop on the real worklist panel, inspects imported studies, switches a NIFTI preview to coronal, and runs backend technical analysis.
-  - Evidence: `npm run desktop:smoke:picker-import` is now a committed hydrated Electron picker-bridge smoke; it clicks the real worklist `Import folder` button and proves renderer button, preload IPC, main-process recursive folder collection, backend import, inspection, NIFTI preview controls, and backend technical analysis using PHI-free synthetic files.
-  - Evidence: `npm run desktop:smoke:picker-import` passed after fixing Electron-side extensionless DICOM candidate filtering, and the current fixture set imports 6 files into 2 local studies.
+  - Evidence: `npm run desktop:smoke:picker-files-import` is now a committed hydrated Electron file-picker bridge smoke; it clicks the real worklist `Import files` button and proves renderer button, preload IPC, smoke-injected individual file selection, backend import, inspection, NIFTI preview controls, and backend technical analysis using PHI-free synthetic files.
+  - Evidence: `npm run desktop:smoke:picker-import` is now a committed hydrated Electron folder-picker bridge smoke; it clicks the real worklist `Import folder` button and proves renderer button, preload IPC, main-process recursive folder collection, backend import, inspection, NIFTI preview controls, and backend technical analysis using PHI-free synthetic files.
+  - Evidence: `npm run desktop:smoke:picker-import` passed after fixing Electron-side extensionless DICOM candidate filtering, and both current standard picker fixture sets import 6 files into 2 local studies.
   - Evidence: the preferred native picker import now uses `window.radsysxDesktop.importLocalImaging`, keeps selected file paths and bytes in Electron main, attaches the existing session cookie from the Electron cookie jar, and sends file-backed multipart data to `POST /api/local-imaging/import`; the renderer receives only the small backend import response.
   - Evidence: `npm run desktop:smoke:picker-large-import` passed with an additional 8 MiB `large-volume.nii`, and the current fixture set imports 7 files into 2 local studies.
   - Evidence: `npm run desktop:smoke:picker-many-import` passed with a nested folder of 32 additional extensionless CT instances, and the current fixture set imports 38 files into 2 local studies.
@@ -366,7 +371,8 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove simple uncompressed DICOM pixel technical analysis, including frame dimensions, intensity range, and mean intensity.
   - Evidence: the Electron native picker can select local imaging files and preserve them for the existing backend import flow.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOM plus DICOMDIR through the hydrated worklist drag/drop UI and verifies DICOMDIR asset inspection plus DICOM intensity analysis.
-  - Evidence: `desktop:smoke:picker-import` exercises the Electron picker bridge over a fixture folder containing DICOMDIR plus a DICOM instance, then verifies DICOMDIR inspection and DICOM intensity analysis.
+  - Evidence: `desktop:smoke:picker-files-import` exercises the Electron file picker bridge over individual fixture paths containing DICOMDIR plus a DICOM instance, then verifies DICOMDIR inspection and DICOM intensity analysis.
+  - Evidence: `desktop:smoke:picker-import` exercises the Electron folder picker bridge over a fixture folder containing DICOMDIR plus a DICOM instance, then verifies DICOMDIR inspection and DICOM intensity analysis.
   - Evidence: the picker now passes extensionless DICOM candidates such as `SCAN1DCM` through to backend detection, matching common DICOMDIR folder layouts.
   - Evidence: `desktop:smoke:picker-many-import` exercises the same direct native picker bridge over a nested folder of 32 additional extensionless CT instances, then verifies the imported DICOM study has 33 DICOM instances and still runs DICOM technical analysis.
   - Remaining gap: native OS dialog upload of a real local DICOM file still needs runtime smoke evidence.
@@ -375,6 +381,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests now import one synthetic DICOMDIR under a media root that references two sibling DICOM studies; each resulting local study row includes both the DICOM asset and the shared DICOMDIR index through manifest `localStudyInstanceUIDs`.
   - Evidence: the Electron native folder picker preserves relative paths for DICOMDIR-style folder imports.
   - Evidence: `desktop:smoke:ui-import` imports synthetic DICOMDIR plus referenced DICOM through a hydrated worklist drag/drop and verifies the local DICOMDIR row can be inspected.
+  - Evidence: `desktop:smoke:picker-files-import` exercises the hydrated `Import files` action through the Electron picker bridge with individual DICOMDIR/DICOM paths.
   - Evidence: `desktop:smoke:picker-import` exercises the hydrated `Import folder` action through the Electron picker bridge and recursive folder collector for a DICOMDIR-style folder.
   - Evidence: `desktop:smoke:picker-many-import` preserves the DICOMDIR-style folder import while adding nested extensionless companion DICOM instances under the same study, yielding a 34-file DICOM/DICOMDIR row.
   - Remaining gap: native OS directory-picker runtime smoke with a realistic DICOMDIR folder remains open.
@@ -384,6 +391,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend technical analysis now computes NIFTI dimensions, voxel count, intensity range, and mean intensity from private local voxel bytes.
   - Evidence: NIFTI assets now expose preview slice counts and can render axial/coronal/sagittal SVG slices through authenticated backend preview URLs.
   - Evidence: `desktop:smoke:ui-import` imports `.nii` and `.nii.gz` through the hydrated worklist drag/drop UI, verifies the NIFTI row, loaded previews, coronal preview control, and voxel technical analysis.
+  - Evidence: `desktop:smoke:picker-files-import` imports `.nii` through the hydrated `Import files` picker bridge path and verifies NIFTI inspection, preview loading, coronal preview control, and voxel technical analysis.
   - Evidence: `desktop:smoke:picker-import` imports `.nii` through the hydrated `Import folder` picker bridge path and verifies NIFTI inspection, preview loading, coronal preview control, and voxel technical analysis.
   - Evidence: `desktop:smoke:picker-large-import` imports an 8 MiB `.nii` volume through the direct native picker path and verifies `256 x 256 x 128` dimensions plus `8388608` voxel technical analysis.
   - Remaining gap: native OS dialog upload/inspection of `.nii` remains open; full volume rendering and diagnostic/AI analysis are still future work.
@@ -393,6 +401,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove deterministic voxel statistics for imported NIFTI assets.
   - Evidence: backend endpoint tests now fetch axial/coronal/sagittal preview slices for `.nii.gz`, and `desktop:smoke:import` verifies non-default coronal preview retrieval.
   - Evidence: `desktop:smoke:ui-import` verifies a NIFTI preview image loads in the UI and that selecting the coronal control changes the preview URL to a coronal slice.
+  - Evidence: `desktop:smoke:picker-files-import` imports `.nii.gz` through the hydrated `Import files` picker bridge path and verifies loaded preview plus coronal preview URL transition.
   - Evidence: `desktop:smoke:picker-import` imports `.nii.gz` through the hydrated `Import folder` picker bridge path and verifies loaded preview plus coronal preview URL transition.
   - Remaining gap: native OS dialog upload/inspection of `.nii.gz` remains open; full NIFTI volume rendering and diagnostic/AI analysis remain open.
 - Generic suitable medical files:
@@ -400,7 +409,8 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: backend endpoint tests and `desktop:smoke:import` now fetch authenticated PNG preview bytes plus TIFF SVG header preview bytes through the backend preview endpoint.
   - Evidence: backend endpoint tests and `desktop:smoke:import` now prove local PNG and TIFF header analysis, including image dimensions.
   - Evidence: `desktop:smoke:ui-import` imports PNG/TIFF through the hydrated worklist drag/drop UI, verifies a preview image loads, and verifies local image dimension analysis.
-  - Evidence: `desktop:smoke:picker-import` imports PNG/TIFF through the hydrated picker bridge path, verifies preview loading, and verifies local image dimension analysis.
+  - Evidence: `desktop:smoke:picker-files-import` imports PNG/TIFF through the hydrated file picker bridge path, verifies preview loading, and verifies local image dimension analysis.
+  - Evidence: `desktop:smoke:picker-import` imports PNG/TIFF through the hydrated folder picker bridge path, verifies preview loading, and verifies local image dimension analysis.
   - Remaining gap: native OS dialog upload/inspection of real image fallback files remains open; full pixel-decoded TIFF rendering remains future work if needed.
 - Files become usable in worklist/viewer/analysis:
   - Evidence: imported rows are registered in the clinical worklist; DICOM rows are viewer-eligible through local DICOMweb metadata/frame/instance endpoints; NIFTI/image rows are inspectable through backend-owned asset summaries and preview thumbnails in the worklist UI.
@@ -408,7 +418,8 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: the worklist now renders NIFTI axis buttons and a slice slider backed by authenticated backend preview URLs.
   - Evidence: the worklist now exposes a backend-owned local analysis action and renders deterministic technical metrics returned by `GET /api/local-imaging/studies/{studyUid}/analysis`.
   - Evidence: `desktop:smoke:ui-import` proves those controls work in a hydrated Electron renderer rather than only through API-level smoke calls.
-  - Evidence: `desktop:smoke:picker-import` proves those controls also work after files arrive from the Electron native picker bridge rather than synthetic DOM drag/drop.
+  - Evidence: `desktop:smoke:picker-files-import` proves those controls also work after files arrive from the Electron native file picker bridge rather than synthetic DOM drag/drop.
+  - Evidence: `desktop:smoke:picker-import` proves those controls also work after files arrive from the Electron native folder picker bridge rather than synthetic DOM drag/drop.
   - Evidence: the native picker path no longer requires selected file contents to be marshalled through renderer IPC before backend import, reducing the fragility of larger local DICOM/NIFTI folders.
   - Evidence: `desktop:smoke:picker-large-import` verifies backend summary text for the `256 x 256 x 128` larger NIFTI, preview loading, coronal slice switching, and backend analysis text including the `8388608` voxel count.
   - Evidence: `desktop:smoke:picker-many-import` verifies the hydrated worklist can inspect and analyze a local import containing 38 accepted files, including a 34-file DICOM/DICOMDIR study row and the usual NIFTI/image study row.
@@ -417,6 +428,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: Electron supervises FastAPI, Next.js, and the local viewer bridge; local import, worklist, asset summaries/previews/analysis, and local DICOMweb are backend filesystem/database contracts, not Docker/Orthanc-only contracts; `npm run desktop:smoke:import` passed while compose/Orthanc were not running.
   - Evidence: `npm run desktop:smoke:ui-import` passed while compose/Orthanc were not running and exercised the hydrated Electron worklist drag/drop surface.
   - Evidence: `npm run desktop:smoke:viewer-launch` passed while compose/Orthanc were not running and exercised imported-DICOM viewer handoff plus viewer-origin local DICOMweb/workspace access.
+  - Evidence: `npm run desktop:smoke:picker-files-import` passed while compose/Orthanc were not running and exercised direct native file picker upload of individual synthetic local files.
   - Evidence: `npm run desktop:smoke:picker-import` passed while compose/Orthanc were not running and exercised the native picker bridge path.
   - Evidence: `npm run desktop:smoke:picker-large-import` passed while compose/Orthanc were not running and exercised direct native picker upload of an 8 MiB NIFTI payload.
   - Evidence: `npm run desktop:smoke:picker-many-import` passed while compose/Orthanc were not running and exercised direct native picker upload of 38 synthetic local files, including nested extensionless DICOM instances.
@@ -425,7 +437,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: `npm run desktop:bootstrap` now runs a Node helper instead of a POSIX `. .venv/bin/activate` shell chain; it picks `python3`/`python` on Unix-like hosts, `py -3`/`python` on Windows, resolves the venv Python path per OS, and exposes `--check` for non-mutating bootstrap verification.
   - Evidence: browser file inputs preserve `webkitRelativePath` when available; browser drag-and-drop preserves Chromium directory-entry relative paths as `radsysxRelativePath`; Electron picks preserve `radsysxRelativePath`; backend sanitizes POSIX-style relative paths and stores private files under configured local storage; docs use Linux commands while Electron path avoids Docker-specific assumptions.
   - Evidence: desktop UI smoke uses Electron/Chromium APIs and repo-local temp storage/database, avoiding Linux-only paths inside the app/runtime path.
-  - Evidence: picker bridge smoke uses JSON-encoded fixture paths and Electron IPC, avoiding Linux-only renderer file APIs while still preserving POSIX-style relative paths for backend manifests.
+  - Evidence: picker bridge smokes use JSON-encoded fixture paths and Electron IPC, avoiding Linux-only renderer file APIs while still preserving POSIX-style relative paths for backend manifests when folders are selected.
   - Evidence: direct native import relies on Electron IPC, the Electron cookie jar, Node file-backed blobs, and backend multipart upload rather than Linux-specific renderer file APIs or absolute-path exposure.
   - Evidence: the large picker payload smoke uses the same Electron-main direct upload path and avoids renderer `File`/`ArrayBuffer` construction for the 8 MiB NIFTI.
   - Evidence: the many-file picker smoke uses the same Electron-main direct upload path and preserves nested POSIX-style relative paths for the synthetic DICOM folder manifest.
@@ -454,6 +466,7 @@ Before marking this goal complete, fill in evidence for each explicit requiremen
   - Evidence: after the cross-platform bootstrap tranche, `node --check desktop/scripts/bootstrap.mjs`, `node --check desktop/scripts/doctor.mjs`, `npm run desktop:bootstrap -- --check`, `npm run bootstrap --workspace @radsysx/desktop -- --check`, `npm run desktop:doctor`, `npm run desktop:smoke`, and `git diff --check` passed before final hygiene.
   - Evidence: after the TIFF preview tranche, `node --check desktop/scripts/import-smoke.mjs`, `node --check desktop/scripts/ui-import-smoke.mjs`, `. .venv/bin/activate && python3 -m compileall backend/clinical backend/server.py backend/radsysx.py`, `. .venv/bin/activate && python3 -m pytest backend/tests/test_clinical_platform.py`, `npm run desktop:smoke:import`, `npm run desktop:smoke:ui-import`, `npm run desktop:smoke:picker-import`, `npm run desktop:smoke:viewer-launch`, `npm run desktop:doctor`, and `git diff --check` passed. The desktop import/UI/picker/viewer smokes imported 6 local files into 2 local studies and the NIFTI/image study contained 4 assets with PNG and TIFF fallbacks.
   - Evidence: continuation verification after the TIFF preview commit also passed `npm run desktop:smoke:picker-large-import` with `Imported 7 files into 2 local studies` and `previewCount: 5`, then `npm run desktop:smoke:picker-many-import` with `Imported 38 files into 2 local studies`, a 34-file DICOM/DICOMDIR row, a 4-file NIFTI/PNG/TIFF row, and `previewCount: 4`.
+  - Evidence: after the native file-picker smoke tranche, `node --check desktop/scripts/ui-import-smoke.mjs`, `node --check desktop/src/main.mjs`, `npm run desktop:smoke:picker-files-import`, `npm run desktop:smoke:picker-import`, and `git diff --check` passed before final hygiene. The new file-picker smoke clicked the hydrated `Import files` button, used smoke-injected individual file paths, imported 6 files into 2 local studies, and reported `previewCount: 4`; the folder-picker regression smoke still imported 6 files into 2 local studies and reported `previewCount: 4`.
   - Remaining gap: native OS dialog upload smoke and full real-world viewer rendering remain open before marking complete.
 
 If any evidence slot is missing, weak, indirect, or only proves a narrower behavior, keep the goal active.

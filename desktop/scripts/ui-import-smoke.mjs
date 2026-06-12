@@ -17,7 +17,12 @@ const dbPath = path.join(tmpRoot, "clinical.db");
 const maxStartupMs = Number.parseInt(process.env.RADSYSX_UI_IMPORT_SMOKE_STARTUP_MS ?? "120000", 10);
 const manyDicomCount = 32;
 const smokeMode = resolveSmokeMode();
-const pickerSmokeModes = new Set(["picker-folder", "picker-large-folder", "picker-many-folder"]);
+const pickerSmokeModes = new Set([
+  "picker-files",
+  "picker-folder",
+  "picker-large-folder",
+  "picker-many-folder",
+]);
 
 let desktopProcess = null;
 let desktopPublicBaseUrl = null;
@@ -31,6 +36,9 @@ function resolveSmokeMode() {
   }
   if (process.argv.includes("--picker-large-folder")) {
     return "picker-large-folder";
+  }
+  if (process.argv.includes("--picker-files")) {
+    return "picker-files";
   }
   if (process.argv.includes("--picker-folder")) {
     return "picker-folder";
@@ -306,7 +314,7 @@ async function startDesktopRuntime() {
     RADSYSX_DESKTOP_ALLOW_TEST_SHUTDOWN: "1",
     RADSYSX_DESKTOP_REBUILD_FRONTEND: process.env.RADSYSX_DESKTOP_REBUILD_FRONTEND ?? "1",
     ...(pickerSmokeModes.has(smokeMode)
-      ? { RADSYSX_DESKTOP_PICKER_TEST_PATHS: JSON.stringify([fixtureRoot]) }
+      ? { RADSYSX_DESKTOP_PICKER_TEST_PATHS: JSON.stringify(pickerTestPathsForSmokeMode()) }
       : {}),
   };
 
@@ -677,6 +685,21 @@ function viewerRenderProbeInRenderer() {
   };
 }
 
+function pickerTestPathsForSmokeMode() {
+  if (smokeMode !== "picker-files") {
+    return [fixtureRoot];
+  }
+
+  return [
+    "DICOMDIR",
+    "SCAN1DCM",
+    "volume.nii",
+    "volume.nii.gz",
+    "slice.png",
+    "slice.tiff",
+  ].map((name) => path.join(fixtureRoot, name));
+}
+
 function readFixturePayloads() {
   return [
     ["DICOMDIR", "ui-smoke/DICOMDIR", "application/dicom"],
@@ -784,9 +807,11 @@ function formatCdpException(exceptionDetails) {
 function uiSmokeInRenderer(fixtures, smokeMode) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const textMatches = (value, needle) => value.toLowerCase().includes(needle.toLowerCase());
-  const isPickerMode = smokeMode === "picker-folder" ||
+  const isPickerMode = smokeMode === "picker-files" ||
+    smokeMode === "picker-folder" ||
     smokeMode === "picker-large-folder" ||
     smokeMode === "picker-many-folder";
+  const isFilePickerMode = smokeMode === "picker-files";
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
@@ -884,14 +909,15 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     }));
   };
 
-  const clickPickerFolderImport = async (importPanel) => {
+  const clickPickerImport = async (importPanel) => {
     if (!window.radsysxDesktop?.importLocalImaging) {
       throw new Error("Desktop direct local imaging import bridge was not exposed to the renderer.");
     }
 
+    const label = isFilePickerMode ? "Import files" : "Import folder";
     const button = await waitFor(
-      () => findButton(importPanel, "Import folder"),
-      "desktop Import folder button",
+      () => findButton(importPanel, label),
+      `desktop ${label} button`,
     );
     button.click();
   };
@@ -906,7 +932,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
     const importPanel = document.querySelector('[data-testid="local-import-panel"]');
 
     if (isPickerMode) {
-      await clickPickerFolderImport(importPanel);
+      await clickPickerImport(importPanel);
     } else {
       dispatchDragDropImport(importPanel);
     }

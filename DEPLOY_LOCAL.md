@@ -9,6 +9,7 @@ npm run desktop:bootstrap
 npm run desktop:doctor
 npm run desktop:smoke:import
 npm run desktop:smoke:ui-import
+npm run desktop:smoke:picker-files-import
 npm run desktop:smoke:picker-import
 npm run desktop:smoke:picker-large-import
 npm run desktop:smoke:picker-many-import
@@ -26,7 +27,9 @@ The desktop launcher builds and stamps the frontend production shell for its sel
 
 `npm run desktop:smoke:ui-import` drives the hydrated Electron worklist UI, drops the same class of synthetic local imaging files onto the local import panel, verifies inspection, NIFTI slice preview controls, and backend technical analysis, and shuts the runtime down.
 
-`npm run desktop:smoke:picker-import` drives the hydrated Electron worklist `Import folder` action through the preload IPC/native picker bridge with smoke-injected fixture paths, uploads selected files from Electron main to the backend import endpoint with the existing session cookie, verifies the same import, inspection, preview, and analysis behavior, and shuts the runtime down. It proves the bridge path without replacing a real native OS-dialog smoke.
+`npm run desktop:smoke:picker-files-import` drives the hydrated Electron worklist `Import files` action through the preload IPC/native picker bridge with smoke-injected individual fixture file paths, uploads selected files from Electron main to the backend import endpoint with the existing session cookie, verifies the same import, inspection, preview, and analysis behavior, and shuts the runtime down. It proves the file picker bridge path without replacing a real native OS-dialog smoke.
+
+`npm run desktop:smoke:picker-import` drives the hydrated Electron worklist `Import folder` action through the preload IPC/native picker bridge with smoke-injected fixture paths, uploads selected files from Electron main to the backend import endpoint with the existing session cookie, verifies the same import, inspection, preview, and analysis behavior, and shuts the runtime down. It proves the folder picker bridge path without replacing a real native OS-dialog smoke.
 
 `npm run desktop:smoke:picker-large-import` repeats that direct native picker path with an additional 8 MiB synthetic NIFTI volume and verifies backend asset summary, preview, and technical analysis for the larger payload.
 
