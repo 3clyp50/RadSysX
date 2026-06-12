@@ -56,8 +56,9 @@
 }
 
 .radsysx-local-start-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 0.75rem;
   margin-top: 1.25rem;
 }
@@ -74,6 +75,26 @@
   padding: 0.75rem 1rem;
 }
 
+.radsysx-local-start-actions button:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.78);
+  outline-offset: 2px;
+}
+
+.radsysx-local-start-actions .radsysx-local-start-primary {
+  width: 100%;
+  min-height: 3rem;
+  border-color: rgba(103, 232, 249, 0.62);
+  background: rgba(34, 211, 238, 0.2);
+  font-size: 0.95rem;
+}
+
+.radsysx-local-start-actions .radsysx-local-start-secondary {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: transparent;
+  color: #bae6fd;
+  font-weight: 600;
+}
+
 .radsysx-local-start-actions button:hover {
   background: rgba(103, 232, 249, 0.22);
 }
@@ -88,6 +109,12 @@
   margin-top: 0.9rem;
   color: #bae6fd;
   font-size: 0.86rem;
+}
+
+@media (max-width: 520px) {
+  .radsysx-local-start-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .radsysx-panel-root {

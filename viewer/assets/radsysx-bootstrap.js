@@ -144,13 +144,13 @@
     loader.innerHTML = `
       <div class="radsysx-loader-card radsysx-local-start-card">
         <div class="radsysx-loader-kicker">RadSysX Local Viewer</div>
-        <div class="radsysx-loader-title" data-role="title">Open local images</div>
+        <div class="radsysx-loader-title" data-role="title">Open a local study</div>
         <div class="radsysx-loader-body" data-role="body">
-          Choose a DICOM, DICOMDIR, NIFTI, image, or ZIP bundle. DICOM studies open here in OHIF as soon as import finishes.
+          Select a local DICOM, DICOMDIR, NIFTI, NRRD, image, or ZIP. DICOM opens here in OHIF immediately after import.
         </div>
         <div class="radsysx-local-start-actions">
-          <button type="button" data-testid="radsysx-local-import-files" data-mode="files">Import files</button>
-          <button type="button" data-testid="radsysx-local-import-folder" data-mode="folder">Import folder</button>
+          <button class="radsysx-local-start-primary" type="button" data-testid="radsysx-local-import-files" data-mode="files">Open local study</button>
+          <button class="radsysx-local-start-secondary" type="button" data-testid="radsysx-local-import-folder" data-mode="folder">Choose folder</button>
         </div>
         <div class="radsysx-local-start-status" data-testid="radsysx-local-import-status" aria-live="polite"></div>
       </div>
@@ -162,6 +162,11 @@
         const mode = button.getAttribute("data-mode") === "folder" ? "folder" : "files";
         void importLocalImagingFromDesktop(mode);
       });
+    }
+
+    const primaryButton = loader.querySelector("[data-testid='radsysx-local-import-files']");
+    if (primaryButton instanceof HTMLButtonElement) {
+      primaryButton.focus({ preventScroll: true });
     }
   }
 

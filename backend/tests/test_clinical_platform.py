@@ -134,6 +134,19 @@ def make_test_paired_nifti_bytes() -> tuple[bytes, bytes]:
     return bytes(header), bytes(range(24))
 
 
+def make_test_nrrd_bytes() -> bytes:
+    header = (
+        b"NRRD0005\n"
+        b"# synthetic PHI-free local imaging test volume\n"
+        b"type: uint8\n"
+        b"dimension: 3\n"
+        b"sizes: 2 3 4\n"
+        b"encoding: raw\n"
+        b"endian: little\n\n"
+    )
+    return header + bytes(range(24))
+
+
 def make_test_png_bytes() -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -376,7 +389,7 @@ def test_local_imaging_import_registers_dicom_and_nifti_worklist_row(
     assert "DO-NOT-LOG" not in manifest_text
 
 
-def test_local_imaging_study_assets_describe_nifti_gz_and_images(
+def test_local_imaging_study_assets_describe_nifti_gz_nrrd_and_images(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -390,6 +403,7 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
             "relativePaths": json.dumps(
                 [
                     "case-b/volume.nii.gz",
+                    "case-b/segmentation.nrrd",
                     "case-b/slice.png",
                     "case-b/slice.jpeg",
                     "case-b/slice.tiff",
@@ -398,6 +412,7 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
         },
         files=[
             ("files", ("volume.nii.gz", gzip.compress(make_test_nifti_bytes()), "application/gzip")),
+            ("files", ("segmentation.nrrd", make_test_nrrd_bytes(), "application/octet-stream")),
             ("files", ("slice.png", make_test_png_bytes(), "image/png")),
             ("files", ("slice.jpeg", make_test_jpeg_bytes(), "image/jpeg")),
             ("files", ("slice.tiff", make_test_tiff_bytes(), "image/tiff")),
@@ -406,9 +421,9 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["acceptedFiles"] == 4
+    assert payload["acceptedFiles"] == 5
     imported = payload["importedStudies"][0]
-    assert imported["formats"] == ["jpeg", "nifti", "png", "tiff"]
+    assert imported["formats"] == ["jpeg", "nifti", "nrrd", "png", "tiff"]
 
     assets_response = client.get(
         f"/api/local-imaging/studies/{imported['studyInstanceUID']}/assets",
@@ -417,12 +432,12 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
     assets_payload = assets_response.json()
     assert assets_payload["studyInstanceUID"] == imported["studyInstanceUID"]
     assert assets_payload["archiveRef"].startswith("local://")
-    assert assets_payload["formats"] == ["jpeg", "nifti", "png", "tiff"]
-    assert assets_payload["fileCount"] == 4
+    assert assets_payload["formats"] == ["jpeg", "nifti", "nrrd", "png", "tiff"]
+    assert assets_payload["fileCount"] == 5
     assert "backend-side analysis" in assets_payload["summary"]
 
     assets = assets_payload["assets"]
-    assert {asset["format"] for asset in assets} == {"jpeg", "nifti", "png", "tiff"}
+    assert {asset["format"] for asset in assets} == {"jpeg", "nifti", "nrrd", "png", "tiff"}
     nifti_asset = next(asset for asset in assets if asset["format"] == "nifti")
     assert nifti_asset["relativePath"] == "case-b/volume.nii.gz"
     assert nifti_asset["analysisSupported"] is True
@@ -446,9 +461,17 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
     assert tiff_asset["previewSupported"] is True
     assert tiff_asset["previewUrl"].endswith(f"/assets/{tiff_asset['assetId']}/preview")
 
+    nrrd_asset = next(asset for asset in assets if asset["format"] == "nrrd")
+    assert nrrd_asset["relativePath"] == "case-b/segmentation.nrrd"
+    assert nrrd_asset["analysisSupported"] is True
+    assert nrrd_asset["viewerSupported"] is False
+    assert nrrd_asset["previewSupported"] is False
+    assert nrrd_asset["previewUrl"] is None
+
     findings = {finding["label"]: finding["value"] for finding in assets_payload["findings"]}
-    assert findings["Files"] == "4"
+    assert findings["Files"] == "5"
     assert "2 x 3 x 4 voxels" in findings["NIFTI volume"]
+    assert findings["NRRD volume"] == "2 x 3 x 4 voxels; type uint8; encoding raw"
     assert findings["Image files"] == "3"
 
     nifti_preview = client.get(nifti_asset["previewUrl"])
@@ -514,6 +537,15 @@ def test_local_imaging_study_assets_describe_nifti_gz_and_images(
     tiff_metrics = {metric["label"]: metric["value"] for metric in tiff_analysis["metrics"]}
     assert tiff_metrics["Image dimensions"] == "2 x 3"
     assert tiff_metrics["Bits per sample"] == "8"
+
+    nrrd_analysis = next(item for item in analysis_payload["analyses"] if item["format"] == "nrrd")
+    nrrd_metrics = {metric["label"]: metric["value"] for metric in nrrd_analysis["metrics"]}
+    assert nrrd_metrics["Volume dimensions"] == "2 x 3 x 4"
+    assert nrrd_metrics["NRRD type"] == "uint8"
+    assert nrrd_metrics["Encoding"] == "raw"
+    assert nrrd_metrics["Voxel count"] == "24"
+    assert nrrd_metrics["Intensity range"] == "0 to 23"
+    assert nrrd_metrics["Mean intensity"] == "11.5"
 
 
 def test_local_imaging_import_supports_paired_nifti_hdr_img(

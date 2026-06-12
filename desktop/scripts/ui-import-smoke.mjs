@@ -250,6 +250,17 @@ paired_header[108:112] = struct.pack("<f", 0.0)
 paired_header[344:348] = b"ni1\\0"
 (root / "paired.hdr").write_bytes(bytes(paired_header))
 (root / "paired.img").write_bytes(voxels)
+nrrd_bytes = (
+    b"NRRD0005\\n"
+    b"# synthetic PHI-free local imaging UI smoke volume\\n"
+    b"type: uint8\\n"
+    b"dimension: 3\\n"
+    b"sizes: 2 3 4\\n"
+    b"encoding: raw\\n"
+    b"endian: little\\n\\n"
+    + voxels
+)
+(root / "segmentation.nrrd").write_bytes(nrrd_bytes)
 if large_payload:
     large_header = bytearray(352)
     large_header[0:4] = (348).to_bytes(4, "little")
@@ -568,7 +579,10 @@ async function waitForLocalStartScreen(cdp, publicBaseUrl) {
       title: document.querySelector("[data-role='title']")?.textContent ?? null,
       body: document.querySelector("[data-role='body']")?.textContent ?? null,
       filesButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-files"]')),
-      folderButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-folder"]'))
+      folderButtonPresent: Boolean(document.querySelector('[data-testid="radsysx-local-import-folder"]')),
+      primaryLabel: document.querySelector('[data-testid="radsysx-local-import-files"]')?.textContent?.trim() ?? null,
+      secondaryLabel: document.querySelector('[data-testid="radsysx-local-import-folder"]')?.textContent?.trim() ?? null,
+      primaryFocused: document.activeElement === document.querySelector('[data-testid="radsysx-local-import-files"]')
     }))()`,
     30000,
   );
@@ -579,6 +593,11 @@ async function waitForLocalStartScreen(cdp, publicBaseUrl) {
   if (localStartState.loaderState !== "local-start") {
     throw new Error(`Desktop local start did not settle into the import-ready state: ${localStartState.loaderState}`);
   }
+  if (localStartState.title !== "Open a local study" || localStartState.primaryLabel !== "Open local study") {
+    throw new Error(
+      `Desktop local start did not present the single primary local path: ${JSON.stringify(localStartState)}`,
+    );
+  }
   return localStartState;
 }
 
@@ -588,7 +607,7 @@ async function clickLocalStartImportFiles(cdp) {
     `(() => {
       const button = document.querySelector('[data-testid="radsysx-local-import-files"]');
       if (!button) {
-        throw new Error("Desktop OHIF local start Import files button was missing.");
+        throw new Error("Desktop OHIF local start primary local-study button was missing.");
       }
       button.click();
       return true;
@@ -877,6 +896,7 @@ function localStartNonDicomInspectionInRenderer() {
       () => textMatches(panel.innerText, "NIFTI volume") &&
         textMatches(panel.innerText, "2 x 3 x 4") &&
         textMatches(panel.innerText, "Paired NIFTI data files") &&
+        textMatches(panel.innerText, "NRRD volume") &&
         textMatches(panel.innerText, "Image files"),
       "local-start non-DICOM asset summary",
     );
@@ -918,6 +938,9 @@ function localStartNonDicomInspectionInRenderer() {
           "11.5",
           "paired.hdr",
           "matching .hdr",
+          "segmentation.nrrd",
+          "NRRD type",
+          "uint8",
           "zipped-volume.nii",
           "Image dimensions",
           "1 x 1",
@@ -963,6 +986,7 @@ function pickerTestPathsForSmokeMode() {
       "volume.nii.gz",
       "paired.hdr",
       "paired.img",
+      "segmentation.nrrd",
       "slice.png",
       "slice.jpeg",
       "slice.tiff",
@@ -981,6 +1005,7 @@ function pickerTestPathsForSmokeMode() {
     "volume.nii.gz",
     "paired.hdr",
     "paired.img",
+    "segmentation.nrrd",
     "slice.png",
     "slice.jpeg",
     "slice.tiff",
@@ -996,6 +1021,7 @@ function readFixturePayloads() {
     ["volume.nii.gz", "ui-smoke/volume.nii.gz", "application/gzip"],
     ["paired.hdr", "ui-smoke/paired.hdr", "application/octet-stream"],
     ["paired.img", "ui-smoke/paired.img", "application/octet-stream"],
+    ["segmentation.nrrd", "ui-smoke/segmentation.nrrd", "application/octet-stream"],
     ["slice.png", "ui-smoke/slice.png", "image/png"],
     ["slice.jpeg", "ui-smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "ui-smoke/slice.tiff", "image/tiff"],
@@ -1107,7 +1133,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
   const isLargePickerMode = smokeMode === "picker-large-folder";
   const isManyPickerMode = smokeMode === "picker-many-folder";
   const manyDicomCount = 32;
-  const expectedAcceptedFiles = 11 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
+  const expectedAcceptedFiles = 12 + (isLargePickerMode ? 1 : 0) + (isManyPickerMode ? manyDicomCount : 0);
   const expectedDicomInstances = 1 + (isManyPickerMode ? manyDicomCount : 0);
 
   const waitFor = async (predicate, label, timeoutMs = 60000) => {
@@ -1264,6 +1290,7 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
         textMatches(niftiPanel.innerText, "2 x 3 x 4") &&
         (!isLargePickerMode || textMatches(niftiPanel.innerText, "256 x 256 x 128")) &&
         textMatches(niftiPanel.innerText, "Paired NIFTI data files") &&
+        textMatches(niftiPanel.innerText, "NRRD volume") &&
         textMatches(niftiPanel.innerText, "Image files"),
       "NIFTI and image asset summary",
     );
@@ -1294,6 +1321,9 @@ function uiSmokeInRenderer(fixtures, smokeMode) {
       "11.5",
       "paired.hdr",
       "matching .hdr",
+      "segmentation.nrrd",
+      "NRRD type",
+      "uint8",
       "zipped-volume.nii",
       "Image dimensions",
       "1 x 1",

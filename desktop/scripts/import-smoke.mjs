@@ -145,6 +145,17 @@ paired_header[108:112] = struct.pack("<f", 0.0)
 paired_header[344:348] = b"ni1\\0"
 (root / "paired.hdr").write_bytes(bytes(paired_header))
 (root / "paired.img").write_bytes(voxels)
+nrrd_bytes = (
+    b"NRRD0005\\n"
+    b"# synthetic PHI-free local imaging smoke volume\\n"
+    b"type: uint8\\n"
+    b"dimension: 3\\n"
+    b"sizes: 2 3 4\\n"
+    b"encoding: raw\\n"
+    b"endian: little\\n\\n"
+    + voxels
+)
+(root / "segmentation.nrrd").write_bytes(nrrd_bytes)
 png_bytes = (
     b"\\x89PNG\\r\\n\\x1a\\n"
     b"\\x00\\x00\\x00\\rIHDR"
@@ -272,7 +283,7 @@ function startDesktopRuntime() {
 async function runImportSmoke(publicBaseUrl) {
   const cookie = await login(publicBaseUrl);
   const importPayload = await importLocalFiles(publicBaseUrl, cookie);
-  assert(importPayload.acceptedFiles === 11, `Expected 11 accepted files, got ${importPayload.acceptedFiles}.`);
+  assert(importPayload.acceptedFiles === 12, `Expected 12 accepted files, got ${importPayload.acceptedFiles}.`);
   assert(importPayload.rejectedFiles === 0, `Expected 0 rejected files, got ${importPayload.rejectedFiles}.`);
   assert(
     importPayload.warnings.some((warning) => warning === "Expanded archive archive.zip into 2 file(s)."),
@@ -326,6 +337,10 @@ async function runImportSmoke(publicBaseUrl) {
     "Paired NIFTI data count was not reported.",
   );
   assert(
+    niftiSummary.findings.some((finding) => finding.label === "NRRD volume" && finding.value.includes("2 x 3 x 4")),
+    "NRRD dimensions were not reported.",
+  );
+  assert(
     niftiSummary.findings.some((finding) => finding.label === "Image files" && finding.value === "4"),
     "Fallback image count was not reported.",
   );
@@ -375,6 +390,9 @@ async function runImportSmoke(publicBaseUrl) {
   const pairedNiftiDataAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("paired.img"));
   assert(pairedNiftiDataAsset, "Paired NIFTI .img asset was not returned.");
   assert(!pairedNiftiDataAsset.previewSupported, "Paired NIFTI .img asset should not be preview-supported directly.");
+  const nrrdAsset = niftiSummary.assets.find((asset) => asset.relativePath.endsWith("segmentation.nrrd"));
+  assert(nrrdAsset?.analysisSupported, "NRRD asset was not analysis-supported.");
+  assert(!nrrdAsset.previewSupported, "NRRD asset should not be preview-supported yet.");
 
   const imagePreviewAsset = niftiSummary.assets.find((asset) => asset.format === "png");
   assert(imagePreviewAsset?.previewSupported, "PNG asset was not marked preview-supported.");
@@ -453,6 +471,16 @@ async function runImportSmoke(publicBaseUrl) {
     archiveNiftiAssetAnalysis.metrics.some((metric) => metric.label === "Voxel count" && metric.value === "24"),
     "ZIP-expanded NIFTI voxel count was not analyzed.",
   );
+  const nrrdAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "nrrd");
+  assert(nrrdAssetAnalysis, "NRRD technical analysis was not returned.");
+  assert(
+    nrrdAssetAnalysis.metrics.some((metric) => metric.label === "NRRD type" && metric.value === "uint8"),
+    "NRRD type was not analyzed.",
+  );
+  assert(
+    nrrdAssetAnalysis.metrics.some((metric) => metric.label === "Mean intensity" && metric.value === "11.5"),
+    "NRRD mean intensity was not analyzed.",
+  );
   const imageAssetAnalysis = niftiAnalysis.analyses.find((analysis) => analysis.format === "png");
   assert(imageAssetAnalysis, "PNG technical analysis was not returned.");
   assert(
@@ -529,6 +557,7 @@ async function importLocalFiles(publicBaseUrl, cookie) {
     ["volume.nii.gz", "smoke/volume.nii.gz", "application/gzip"],
     ["paired.hdr", "smoke/paired.hdr", "application/octet-stream"],
     ["paired.img", "smoke/paired.img", "application/octet-stream"],
+    ["segmentation.nrrd", "smoke/segmentation.nrrd", "application/octet-stream"],
     ["slice.png", "smoke/slice.png", "image/png"],
     ["slice.jpeg", "smoke/slice.jpeg", "image/jpeg"],
     ["slice.tiff", "smoke/slice.tiff", "image/tiff"],

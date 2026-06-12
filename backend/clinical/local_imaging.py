@@ -32,6 +32,7 @@ from .repositories import ClinicalRepository
 
 DICOMDIR_SOP_CLASS_UID = "1.2.840.10008.1.3.10"
 COMMON_IMAGE_EXTENSIONS = {"bmp", "gif", "jpg", "jpeg", "png", "tif", "tiff"}
+NRRD_EXTENSIONS = {"nrrd"}
 PREVIEW_IMAGE_MEDIA_TYPES = {
     "bmp": "image/bmp",
     "gif": "image/gif",
@@ -50,6 +51,36 @@ NIFTI_NUMERIC_DATATYPES: dict[int, tuple[str, int]] = {
     256: ("b", 1),
     512: ("H", 2),
     768: ("I", 4),
+}
+NRRD_NUMERIC_TYPES: dict[str, tuple[str, int]] = {
+    "signed char": ("b", 1),
+    "int8": ("b", 1),
+    "int8_t": ("b", 1),
+    "uchar": ("B", 1),
+    "unsigned char": ("B", 1),
+    "uint8": ("B", 1),
+    "uint8_t": ("B", 1),
+    "short": ("h", 2),
+    "short int": ("h", 2),
+    "signed short": ("h", 2),
+    "signed short int": ("h", 2),
+    "int16": ("h", 2),
+    "int16_t": ("h", 2),
+    "ushort": ("H", 2),
+    "unsigned short": ("H", 2),
+    "unsigned short int": ("H", 2),
+    "uint16": ("H", 2),
+    "uint16_t": ("H", 2),
+    "int": ("i", 4),
+    "signed int": ("i", 4),
+    "int32": ("i", 4),
+    "int32_t": ("i", 4),
+    "uint": ("I", 4),
+    "unsigned int": ("I", 4),
+    "uint32": ("I", 4),
+    "uint32_t": ("I", 4),
+    "float": ("f", 4),
+    "double": ("d", 8),
 }
 LOCAL_ANALYSIS_MAX_VALUES = 250_000
 
@@ -214,6 +245,16 @@ class LocalImagingImporter:
                 size=len(upload.data),
                 format="nifti",
                 modality="NIFTI",
+            )
+
+        if self._is_nrrd(upload.data, lower_name):
+            return _DetectedFile(
+                original_name=file_name,
+                relative_path=relative_path,
+                stored_path=stored_path,
+                size=len(upload.data),
+                format="nrrd",
+                modality="NRRD",
             )
 
         if extension in COMMON_IMAGE_EXTENSIONS:
@@ -825,7 +866,7 @@ class LocalImagingImporter:
             study_instance_uid=study_uid,
             series_instance_uid=series_uid,
             sop_instance_uid=sop_uid,
-            analysis_supported=file_format in {"dicom", "dicomdir", "nifti", *COMMON_IMAGE_EXTENSIONS},
+            analysis_supported=file_format in {"dicom", "dicomdir", "nifti", "nrrd", *COMMON_IMAGE_EXTENSIONS},
             viewer_supported=viewer_supported,
             preview_supported=preview_supported,
             preview_url=(
@@ -894,6 +935,8 @@ class LocalImagingImporter:
             summary, metrics, warnings = self._analyze_nifti_asset(file_entry)
         elif file_format == "nifti-data":
             summary = "Paired NIFTI voxel data stored; analyzed through the matching .hdr asset when present."
+        elif file_format == "nrrd":
+            summary, metrics, warnings = self._analyze_nrrd_asset(path)
         elif file_format in COMMON_IMAGE_EXTENSIONS:
             summary, metrics, warnings = self._analyze_common_image_asset(file_format, path)
         elif file_format == "dicomdir":
@@ -1005,6 +1048,68 @@ class LocalImagingImporter:
 
         metrics.extend(self._numeric_metrics(values, voxel_count))
         return "NIFTI header and voxel intensity sample analyzed locally.", metrics, []
+
+    def _analyze_nrrd_asset(
+        self,
+        path: Path,
+    ) -> tuple[str, list[LocalImagingStudyFinding], list[str]]:
+        try:
+            payload = path.read_bytes()
+        except OSError:
+            return "NRRD asset could not be read.", [], ["NRRD asset could not be read."]
+
+        parsed = self._parse_nrrd(payload)
+        if parsed is None:
+            return "NRRD header could not be read.", [], ["NRRD header could not be read."]
+
+        header, data_offset = parsed
+        metrics = self._nrrd_header_metrics(header)
+        warnings: list[str] = []
+
+        data_file = str(header.get("dataFile") or "").strip()
+        if data_file:
+            warnings.append("Detached NRRD data files are not analyzed in the local fast path yet.")
+            return "NRRD header analyzed; detached voxel data was not read.", metrics, warnings
+
+        encoding = str(header.get("encoding") or "raw").lower()
+        data_payload = payload[data_offset:]
+        if encoding in {"gzip", "gz"}:
+            try:
+                data_payload = gzip.decompress(data_payload)
+            except (OSError, EOFError, gzip.BadGzipFile):
+                warnings.append("NRRD gzip voxel data could not be decompressed.")
+                return "NRRD header analyzed; gzip voxel data could not be read.", metrics, warnings
+        elif encoding != "raw":
+            warnings.append(f"NRRD encoding {encoding} is not supported by the local technical analyzer.")
+            return "NRRD header analyzed; voxel statistics are unavailable for this encoding.", metrics, warnings
+
+        sizes = [int(size) for size in header.get("sizes", []) if int(size) > 0]
+        voxel_count = self._dimension_product(sizes)
+        if voxel_count <= 0:
+            warnings.append("NRRD sizes are missing or invalid.")
+            return "NRRD header analyzed; voxel count was unavailable.", metrics, warnings
+
+        decoder = self._nrrd_numeric_decoder(str(header.get("type") or ""))
+        if decoder is None:
+            warnings.append("NRRD type is not supported by the local technical analyzer.")
+            return "NRRD header analyzed; voxel statistics are unavailable for this type.", metrics, warnings
+
+        format_code, bytes_per_value = decoder
+        endian = "<" if str(header.get("endian") or "little").lower() != "big" else ">"
+        values = self._sample_numeric_values(
+            data_payload,
+            data_offset=0,
+            total_values=voxel_count,
+            endian=endian,
+            format_code=format_code,
+            bytes_per_value=bytes_per_value,
+        )
+        if not values:
+            warnings.append("NRRD voxel data is missing or incomplete.")
+            return "NRRD header analyzed; voxel statistics could not be computed.", metrics, warnings
+
+        metrics.extend(self._numeric_metrics(values, voxel_count))
+        return "NRRD header and voxel intensity sample analyzed locally.", metrics, warnings
 
     def _analyze_common_image_asset(
         self,
@@ -1341,6 +1446,25 @@ class LocalImagingImporter:
         if image_entries:
             findings.append(LocalImagingStudyFinding(label="Image files", value=str(len(image_entries))))
 
+        nrrd_entries = [entry for entry in file_entries if entry.get("format") == "nrrd"]
+        for nrrd_entry in nrrd_entries:
+            parsed = self._read_nrrd_header(nrrd_entry)
+            relative_path = str(nrrd_entry.get("relativePath") or "NRRD volume")
+            if parsed is None:
+                warnings.append(f"NRRD header could not be read for {Path(relative_path).name}.")
+                continue
+
+            sizes = [int(value) for value in parsed.get("sizes", [])]
+            size_text = " x ".join(str(value) for value in sizes) if sizes else "header detected"
+            nrrd_type = str(parsed.get("type") or "unknown")
+            encoding = str(parsed.get("encoding") or "raw")
+            findings.append(
+                LocalImagingStudyFinding(
+                    label="NRRD volume",
+                    value=f"{size_text} voxels; type {nrrd_type}; encoding {encoding}",
+                )
+            )
+
         return findings, warnings
 
     def _read_nifti_header(self, file_entry: dict) -> dict[str, object] | None:
@@ -1371,6 +1495,22 @@ class LocalImagingImporter:
         except OSError:
             return None
         return self._parse_nifti_header(header)
+
+    def _read_nrrd_header(self, file_entry: dict) -> dict[str, object] | None:
+        path = self._stored_file_path(file_entry)
+        if path is None:
+            return None
+
+        try:
+            payload = path.read_bytes()
+        except OSError:
+            return None
+
+        parsed = self._parse_nrrd(payload)
+        if parsed is None:
+            return None
+        header, _ = parsed
+        return header
 
     def _preview_slices(self, file_entry: dict) -> dict[str, int]:
         header = self._read_nifti_header(file_entry)
@@ -1821,6 +1961,93 @@ class LocalImagingImporter:
             return False
         return header[344:348] in {b"n+1\x00", b"ni1\x00"}
 
+    @classmethod
+    def _is_nrrd(cls, data: bytes, lower_name: str) -> bool:
+        if cls._extension(lower_name) in NRRD_EXTENSIONS:
+            return cls._parse_nrrd(data) is not None
+        return data.startswith(b"NRRD") and cls._parse_nrrd(data) is not None
+
+    @staticmethod
+    def _parse_nrrd(payload: bytes) -> tuple[dict[str, object], int] | None:
+        if not payload.startswith(b"NRRD"):
+            return None
+
+        match = re.search(br"\r?\n\r?\n", payload[:65_536])
+        if match is None:
+            return None
+
+        try:
+            header_text = payload[: match.start()].decode("ascii", errors="strict")
+        except UnicodeDecodeError:
+            return None
+
+        lines = [line.strip() for line in header_text.splitlines()]
+        if not lines or not lines[0].startswith("NRRD"):
+            return None
+
+        fields: dict[str, str] = {}
+        for line in lines[1:]:
+            if not line or line.startswith("#") or ":=" in line:
+                continue
+            key, separator, value = line.partition(":")
+            if separator != ":":
+                continue
+            fields[key.strip().lower()] = value.strip()
+
+        sizes = []
+        for item in fields.get("sizes", "").split():
+            try:
+                size = int(item)
+            except ValueError:
+                return None
+            if size <= 0:
+                return None
+            sizes.append(size)
+
+        dimension = None
+        if fields.get("dimension"):
+            try:
+                dimension = int(fields["dimension"])
+            except ValueError:
+                return None
+            if dimension <= 0:
+                return None
+        if dimension is not None and sizes and len(sizes) != dimension:
+            return None
+
+        encoding = fields.get("encoding", "raw").strip().lower() or "raw"
+        endian = fields.get("endian", "little").strip().lower() or "little"
+        return {
+            "version": lines[0],
+            "type": fields.get("type", "").strip().lower(),
+            "dimension": dimension,
+            "sizes": sizes,
+            "encoding": encoding,
+            "endian": endian,
+            "dataFile": fields.get("data file", ""),
+        }, match.end()
+
+    @staticmethod
+    def _nrrd_numeric_decoder(nrrd_type: str) -> tuple[str, int] | None:
+        normalized = " ".join(str(nrrd_type or "").strip().lower().split())
+        return NRRD_NUMERIC_TYPES.get(normalized)
+
+    @classmethod
+    def _nrrd_header_metrics(cls, header: dict[str, object]) -> list[LocalImagingStudyFinding]:
+        sizes = [int(size) for size in header.get("sizes", [])]
+        metrics = [
+            LocalImagingStudyFinding(
+                label="Volume dimensions",
+                value=" x ".join(str(size) for size in sizes) if sizes else "Unavailable",
+            ),
+            LocalImagingStudyFinding(label="NRRD type", value=str(header.get("type") or "unknown")),
+            LocalImagingStudyFinding(label="Encoding", value=str(header.get("encoding") or "raw")),
+        ]
+        voxel_count = cls._dimension_product(sizes)
+        if voxel_count > 0:
+            metrics.append(LocalImagingStudyFinding(label="Voxel count", value=str(voxel_count)))
+        return metrics
+
     @staticmethod
     def _is_zip_archive(upload: LocalImagingUploadPart) -> bool:
         lower_name = str(upload.relative_path or upload.filename or "").lower()
@@ -1913,6 +2140,8 @@ class LocalImagingImporter:
             return "DICOM"
         if "nifti" in formats or "nifti-data" in formats:
             return "NIFTI"
+        if "nrrd" in formats:
+            return "NRRD"
         return "IMG"
 
     @staticmethod
@@ -1923,6 +2152,8 @@ class LocalImagingImporter:
             label = "DICOMDIR"
         elif "nifti" in formats or "nifti-data" in formats:
             label = "NIFTI"
+        elif "nrrd" in formats:
+            label = "NRRD"
         else:
             label = "image"
         return f"Local {label} import ({file_count} file{'s' if file_count != 1 else ''})"
@@ -1944,6 +2175,8 @@ class LocalImagingImporter:
             if has_preview:
                 return "Local NIFTI assets are previewable and registered for backend-side analysis summary."
             return "Local NIFTI assets are registered for backend-side analysis summary."
+        if "nrrd" in format_set:
+            return "Local NRRD assets are registered for backend-side analysis summary."
         if format_set.intersection(COMMON_IMAGE_EXTENSIONS):
             if has_preview:
                 return "Local image assets are previewable and registered for backend-side analysis summary."

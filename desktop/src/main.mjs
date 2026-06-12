@@ -50,6 +50,7 @@ const LOCAL_IMAGING_EXTENSIONS = new Set([
   ".jpg",
   ".jpeg",
   ".nii",
+  ".nrrd",
   ".png",
   ".tif",
   ".tiff",
@@ -138,6 +139,9 @@ function isLocalImagingFile(filePath) {
 function guessContentType(filePath) {
   const fileName = path.basename(filePath).toLowerCase();
   if (fileName.endsWith(".nii") || fileName.endsWith(".nii.gz")) {
+    return "application/octet-stream";
+  }
+  if (fileName.endsWith(".nrrd")) {
     return "application/octet-stream";
   }
   if (fileName.endsWith(".png")) {

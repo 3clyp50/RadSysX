@@ -36,7 +36,7 @@ The current clinical baseline on this branch is:
 - Derived DICOM writeback stays backend-mediated through STOW.
 - The local stack is designed to run as one origin through nginx, frontend, viewer, backend, and Orthanc.
 - The desktop app starts FastAPI, Next.js, and a local OHIF viewer bridge under one localhost origin for a no-Docker local run path, opening OHIF first with local import ready.
-- The desktop app enables native local file/folder selection plus browser drag-and-drop fallback for backend-owned local imaging import of DICOM, DICOMDIR, NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP archives containing supported files, and common image files, with safe imported-study asset summaries, backend-mediated NIFTI slice previews/common-image previews including TIFF SVG header previews, and deterministic technical analysis for local analysis readiness.
+- The desktop app enables native local file/folder selection plus browser drag-and-drop fallback for backend-owned local imaging import of DICOM, DICOMDIR, NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, NRRD `.nrrd`, ZIP archives containing supported files, and common image files, with safe imported-study asset summaries, backend-mediated NIFTI slice previews/common-image previews including TIFF SVG header previews, NRRD header/voxel metrics, and deterministic technical analysis for local analysis readiness.
 
 The current research/agent baseline still includes:
 
@@ -264,9 +264,9 @@ npm run desktop
 
 The desktop runtime, bootstrap, doctor, and smoke helpers resolve the repo-local Python venv using the host OS path convention: `.venv/bin/python` on Unix-like systems and `.venv/Scripts/python.exe` on Windows. Set `RADSYSX_DESKTOP_PYTHON=/path/to/python` when you need to force a specific interpreter.
 
-This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, deterministic technical analysis, opaque launch/session resolution, OHIF rendering of imported DICOM from the first screen, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
+This path is intentionally no-Docker. It is enough for seeded login, native local file/folder selection with direct Electron-main upload to the backend, browser drag-and-drop import, local import of DICOM/DICOMDIR/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`/NRRD `.nrrd`/ZIP archives containing supported files/common image files including extensionless and multi-study DICOMDIR companion files, local worklist registration, local DICOM metadata/frame serving for imported DICOM studies, backend-mediated axial/coronal/sagittal NIFTI slice previews, common image previews including TIFF SVG header previews, NRRD header/voxel metrics, deterministic technical analysis, opaque launch/session resolution, OHIF rendering of imported DICOM from the first screen, workspace/report/AI/audit contract work, and local app use. Full Orthanc-backed DICOMweb retrieval, advanced archive behavior, and durable STOW validation still belong to the compose stack unless you set `RADSYSX_DESKTOP_DICOMWEB_TARGET` to a local archive.
 
-By default Electron starts at `/viewer/?local=1`, strips that helper query from the visible URL, and shows a compact OHIF local import screen. DICOM imports auto-open in OHIF through the governed launch contract. Non-DICOM-only imports fall back to the worklist's local asset inspection panel.
+By default Electron starts at `/viewer/?local=1`, strips that helper query from the visible URL, and shows a compact OHIF local import screen with `Open local study` as the focused primary action. DICOM imports auto-open in OHIF through the governed launch contract. Non-DICOM-only imports fall back to the worklist's local asset inspection panel.
 
 The desktop launcher builds the frontend production shell on first launch, writes a small ignored stamp under `frontend/.next/`, and reuses that build while the same-origin public API/viewer settings match. This keeps the local app from rebuilding just because it chooses a fallback localhost port. Force a rebuild with `RADSYSX_DESKTOP_REBUILD_FRONTEND=1 npm run desktop`. For live frontend UI development, use:
 
@@ -294,15 +294,15 @@ For the first-screen OHIF local import/render check:
 npm run desktop:smoke:local-start
 ```
 
-That smoke starts Electron on the OHIF local-start screen, imports synthetic local files through the primary desktop import action, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
+That smoke starts Electron on the OHIF local-start screen, verifies the `Open local study` primary action, imports synthetic local files through it, creates a governed launch for the imported DICOM study, verifies the visible viewer URL is clean, checks viewer-origin local DICOMweb/workspace access, and asserts that OHIF paints a nonblank canvas.
 
-For the first-screen NIFTI/image-only fallback check:
+For the first-screen NIFTI/NRRD/image-only fallback check:
 
 ```bash
 npm run desktop:smoke:local-start-nondicom
 ```
 
-That smoke starts from the same OHIF local-start screen, imports only NIFTI/image/ZIP fixtures, verifies the app falls back to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI slice axis, and runs backend technical analysis without exposing an OHIF viewer action for non-DICOM assets.
+That smoke starts from the same OHIF local-start screen, imports only NIFTI/NRRD/image/ZIP fixtures, verifies the app falls back to `/worklist`, auto-opens the local asset inspection panel, loads previews, switches a NIFTI slice axis, and runs backend technical analysis without exposing an OHIF viewer action for non-DICOM assets.
 
 For a stronger no-Docker import/use check:
 
@@ -310,7 +310,7 @@ For a stronger no-Docker import/use check:
 npm run desktop:smoke:import
 ```
 
-That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, paired `.hdr/.img`, ZIP with supported NIFTI/PNG members, PNG, JPEG, and TIFF files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries/previews/analysis, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
+That smoke starts the desktop runtime on high local ports, generates synthetic PHI-free DICOMDIR, DICOM, `.nii`, `.nii.gz`, paired `.hdr/.img`, `.nrrd`, ZIP with supported NIFTI/PNG members, PNG, JPEG, and TIFF files, imports them through the one-origin local bridge, verifies worklist registration, imported-study asset summaries/previews/analysis, local DICOMweb discovery, and opaque viewer launch, then shuts the desktop runtime down.
 
 For a hydrated UI-level import check:
 
@@ -318,7 +318,7 @@ For a hydrated UI-level import check:
 npm run desktop:smoke:ui-import
 ```
 
-That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, ZIP with supported NIFTI/PNG members, plus PNG/JPEG/TIFF files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
+That smoke starts the same no-Docker runtime, drives the Electron worklist UI through the local bridge, drops synthetic DICOMDIR/DICOM/NIFTI `.nii`/`.nii.gz`/paired `.hdr+.img`, NRRD `.nrrd`, ZIP with supported NIFTI/PNG members, plus PNG/JPEG/TIFF files onto the import panel, verifies imported rows, inspects local assets, changes a NIFTI preview to a coronal slice, runs backend technical analysis, and shuts down.
 
 For a native file picker bridge check:
 
@@ -350,7 +350,7 @@ For a many-file native picker import check:
 npm run desktop:smoke:picker-many-import
 ```
 
-That variant adds a nested folder of 32 additional extensionless DICOM instances to the picker fixture folder and verifies recursive collection, import of 43 accepted files after ZIP expansion into 2 local studies, DICOM asset summary, and technical analysis through the same direct Electron-main upload path.
+That variant adds a nested folder of 32 additional extensionless DICOM instances to the picker fixture folder and verifies recursive collection, import of 44 accepted files after ZIP expansion into 2 local studies, DICOM asset summary, and technical analysis through the same direct Electron-main upload path.
 
 For an imported-DICOM viewer handoff check:
 
