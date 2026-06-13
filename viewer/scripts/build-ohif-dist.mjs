@@ -97,6 +97,9 @@ function writeAppConfig() {
             style: {
               display: "flex",
               alignItems: "center",
+              paddingTop: "4px",
+              paddingLeft: "12px",
+              paddingRight: "8px",
             },
           },
           React.createElement("img", {
