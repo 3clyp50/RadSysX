@@ -648,6 +648,8 @@ async function waitForStandaloneLocalViewer(cdp, publicBaseUrl) {
       localViewer: window.__RADSYSX_LOCAL_VIEWER__ === true,
       launchPresent: Boolean(window.__RADSYSX_LAUNCH__),
       localStartCardPresent: Boolean(document.querySelector('[data-testid="radsysx-local-start-card"]')),
+      localShellBackdropPresent: Boolean(document.getElementById("radsysx-local-shell-backdrop")),
+      localUploadModalPresent: Boolean(document.querySelector('[data-radsysx-local-upload-modal="true"]')),
       loadFilesPresent: Array.from(document.querySelectorAll("button"))
         .some((button) => button.innerText.trim() === "Load files"),
       loadFoldersPresent: Array.from(document.querySelectorAll("button"))
@@ -665,6 +667,9 @@ async function waitForStandaloneLocalViewer(cdp, publicBaseUrl) {
   }
   if (localViewerState.loaderPresent || localViewerState.localStartCardPresent) {
     throw new Error(`Desktop local viewer is still blocked by an intermediate overlay: ${JSON.stringify(localViewerState)}`);
+  }
+  if (!localViewerState.localShellBackdropPresent || !localViewerState.localUploadModalPresent) {
+    throw new Error(`Desktop local viewer did not show the branded upload modal shell: ${JSON.stringify(localViewerState)}`);
   }
   if (!localViewerState.localViewerReady || !localViewerState.localViewer) {
     throw new Error(

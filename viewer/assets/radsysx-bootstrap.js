@@ -10,11 +10,13 @@
   const REQUEST_TIMEOUT_MS = 10000;
   const DROP_RELATIVE_PATH_KEY = "radsysxRelativePath";
   enforceRadSysXTitle();
-  const loader = await ensureLoader();
   const params = new URLSearchParams(window.location.search);
   const launchFromUrl = params.get("launch");
   const localStartRequested = params.get("local") === "1";
   const initialViewerBasePath = resolveViewerBasePath(window.location.pathname) ?? "/";
+  const startsInStandaloneLocalViewer =
+    !launchFromUrl && !window.__RADSYSX_LAUNCH__ && shouldUseStandaloneLocalViewer();
+  let loader = startsInStandaloneLocalViewer ? null : await ensureLoader();
 
   window.__RADSYSX_VIEWER_BASE_PATH__ = initialViewerBasePath;
   window.__RADSYSX_NORMALIZE_SAME_ORIGIN_URL__ = normalizeSameOriginUrl;
@@ -25,6 +27,9 @@
     await window.__RADSYSX_BOOTSTRAP_PROMISE__;
   } catch (error) {
     clearStoredLaunchToken();
+    if (!loader) {
+      loader = await ensureLoader();
+    }
     fail(error instanceof Error ? error.message : "Unable to bootstrap the viewer.");
   }
 
@@ -85,10 +90,12 @@
     };
     clearStoredLaunchToken();
     stripSensitiveQuery();
-    loader.dataset.state = "ready";
-    loader.querySelector("[data-role='title']").textContent = "Governed launch resolved";
-    loader.querySelector("[data-role='body']").textContent =
-      "Preparing the OHIF runtime and workspace panels.";
+    if (loader) {
+      loader.dataset.state = "ready";
+      loader.querySelector("[data-role='title']").textContent = "Governed launch resolved";
+      loader.querySelector("[data-role='body']").textContent =
+        "Preparing the OHIF runtime and workspace panels.";
+    }
   }
 
   async function enterStandaloneLocalViewer() {
@@ -129,8 +136,11 @@
     }
 
     stripLocalStartQuery();
-    loader.dataset.state = "local-viewer";
+    if (loader) {
+      loader.dataset.state = "local-viewer";
+    }
     window.__RADSYSX_LOCAL_VIEWER_READY__ = true;
+    queueStandaloneLocalChromeRefresh();
     removeBootstrapLoader();
   }
 
@@ -206,10 +216,14 @@
     const originalReplaceState = history.replaceState.bind(history);
 
     history.pushState = function pushState(state, title, url) {
-      return originalPushState(state, title, rewriteStandaloneLocalUrl(url));
+      const result = originalPushState(state, title, rewriteStandaloneLocalUrl(url));
+      queueStandaloneLocalChromeRefresh();
+      return result;
     };
     history.replaceState = function replaceState(state, title, url) {
-      return originalReplaceState(state, title, rewriteStandaloneLocalUrl(url));
+      const result = originalReplaceState(state, title, rewriteStandaloneLocalUrl(url));
+      queueStandaloneLocalChromeRefresh();
+      return result;
     };
   }
 
@@ -249,9 +263,134 @@
   }
 
   function removeBootstrapLoader() {
-    if (loader.isConnected) {
+    if (loader?.isConnected) {
       loader.remove();
     }
+  }
+
+  function queueStandaloneLocalChromeRefresh() {
+    const refresh = () => {
+      refreshStandaloneLocalChrome();
+      window.setTimeout(refreshStandaloneLocalChrome, 120);
+    };
+
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(refresh);
+      return;
+    }
+
+    window.setTimeout(refresh, 0);
+  }
+
+  function refreshStandaloneLocalChrome() {
+    if (!document.body) {
+      return;
+    }
+
+    if (!isStandaloneLocalLanding()) {
+      document.body.classList.remove("radsysx-local-viewer");
+      document.getElementById("radsysx-local-shell-backdrop")?.remove();
+      const observer = window.__RADSYSX_LOCAL_UPLOAD_OBSERVER__;
+      if (observer) {
+        observer.disconnect();
+        delete window.__RADSYSX_LOCAL_UPLOAD_OBSERVER__;
+      }
+      return;
+    }
+
+    document.body.classList.add("radsysx-local-viewer");
+    ensureStandaloneLocalBackdrop();
+    annotateStandaloneLocalUploadUi();
+    installStandaloneLocalUploadObserver();
+  }
+
+  function isStandaloneLocalLanding() {
+    return window.__RADSYSX_LOCAL_VIEWER__ === true &&
+      viewerRelativePath(window.location.pathname) === "local";
+  }
+
+  function ensureStandaloneLocalBackdrop() {
+    if (document.getElementById("radsysx-local-shell-backdrop")) {
+      return;
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "radsysx-local-shell-backdrop";
+    backdrop.setAttribute("aria-hidden", "true");
+    backdrop.innerHTML = `
+      <div class="radsysx-local-shell-frame">
+        <div class="radsysx-local-shell-topbar">
+          <div class="radsysx-local-shell-brand"></div>
+          <div class="radsysx-local-shell-pill">Local Viewer</div>
+        </div>
+        <div class="radsysx-local-shell-main">
+          <aside class="radsysx-local-shell-panel">
+            <div class="radsysx-local-shell-panel-title">Series</div>
+            <div class="radsysx-local-shell-thumb"></div>
+            <div class="radsysx-local-shell-thumb radsysx-local-shell-thumb-muted"></div>
+            <div class="radsysx-local-shell-thumb radsysx-local-shell-thumb-muted"></div>
+          </aside>
+          <section class="radsysx-local-shell-viewport">
+            <div class="radsysx-local-shell-scan"></div>
+            <div class="radsysx-local-shell-overlay radsysx-local-shell-overlay-left"></div>
+            <div class="radsysx-local-shell-overlay radsysx-local-shell-overlay-right"></div>
+          </section>
+          <aside class="radsysx-local-shell-panel radsysx-local-shell-ai">
+            <div class="radsysx-local-shell-panel-title">RadSysX AI</div>
+            <div class="radsysx-local-shell-line"></div>
+            <div class="radsysx-local-shell-line radsysx-local-shell-line-short"></div>
+            <div class="radsysx-local-shell-composer"></div>
+          </aside>
+        </div>
+      </div>
+    `;
+    document.body.prepend(backdrop);
+  }
+
+  function installStandaloneLocalUploadObserver() {
+    if (window.__RADSYSX_LOCAL_UPLOAD_OBSERVER__) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      annotateStandaloneLocalUploadUi();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.__RADSYSX_LOCAL_UPLOAD_OBSERVER__ = observer;
+  }
+
+  function annotateStandaloneLocalUploadUi() {
+    const loadButtons = Array.from(document.querySelectorAll("button"))
+      .filter((button) => ["Load files", "Load folders"].includes(button.textContent?.trim() ?? ""));
+    if (!loadButtons.length) {
+      return false;
+    }
+
+    let modal = loadButtons[0].parentElement;
+    for (let depth = 0; modal && modal !== document.body && depth < 8; depth += 1) {
+      const className = String(modal.getAttribute("class") ?? "");
+      if (modal.classList.contains("bg-muted") || className.includes("border-dashed")) {
+        break;
+      }
+      modal = modal.parentElement;
+    }
+
+    if (!modal || modal === document.body) {
+      return false;
+    }
+
+    modal.dataset.radsysxLocalUploadModal = "true";
+    const screen = modal.closest(".h-screen") ?? modal.parentElement;
+    if (screen) {
+      screen.dataset.radsysxLocalUploadScreen = "true";
+    }
+
+    const logo = modal.querySelector("svg")?.parentElement;
+    if (logo) {
+      logo.dataset.radsysxLocalUploadLogo = "true";
+    }
+
+    return true;
   }
 
   async function requestJson(path, init = {}) {

@@ -33,6 +33,7 @@ for (const assetName of runtimeAssetNames) {
   copyViewerAsset(assetName);
 }
 copyWorkspaceFile(["RadSysX-Logo.png"], "radsysx-logo.png");
+copyWorkspaceFile(["RadSysX-Logo-Light.png"], "radsysx-logo-light.png");
 copyWorkspaceAsset(["react", "umd", "react.production.min.js"], "react.production.min.js");
 writeAppConfig();
 patchIndexHtml();
@@ -99,7 +100,7 @@ function writeAppConfig() {
             },
           },
           React.createElement("img", {
-            src: (window.__RADSYSX_PUBLIC_URL__ || "./") + "radsysx-logo.png",
+            src: (window.__RADSYSX_PUBLIC_URL__ || "./") + "radsysx-logo-light.png",
             alt: "RadSysX",
             style: {
               display: "block",

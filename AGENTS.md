@@ -15,7 +15,7 @@ Last updated: 2026-06-13
 
 - Root owns project-wide posture, root manifests, root docs, root Docker Compose, top-level scripts, logo/assets, and cross-domain workflow guidance.
 - Child `AGENTS.md` files own domain-specific instructions for their subtrees. When a path has a child doc, read the full chain from this file to the nearest child before editing.
-- Root-owned files and folders include `README.md`, `CLAUDE.md`, `WARP.md`, `DEPLOY_GPU.md`, `DEPLOY_LOCAL.md`, `PHASE4_CLINICAL_EXECUTION_CHECKLIST.md`, `package.json`, `package-lock.json`, `docker-compose.yml`, `.gitignore`, `dev.sh`, `RadSysX-Logo.png`, `test-biomedparse.py`, `test-files-inventory.txt`, `.claude/`, `.cursor/`, `.handoffs/`, `roadmap/`, and `.serena/`.
+- Root-owned files and folders include `README.md`, `CLAUDE.md`, `WARP.md`, `DEPLOY_GPU.md`, `DEPLOY_LOCAL.md`, `PHASE4_CLINICAL_EXECUTION_CHECKLIST.md`, `package.json`, `package-lock.json`, `docker-compose.yml`, `.gitignore`, `dev.sh`, `RadSysX-Logo.png`, `RadSysX-Logo-Light.png`, `test-biomedparse.py`, `test-files-inventory.txt`, `.claude/`, `.cursor/`, `.handoffs/`, `roadmap/`, and `.serena/`.
 
 ## DOX Core Contract
 

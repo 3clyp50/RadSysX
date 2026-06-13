@@ -13,6 +13,7 @@ const desktopRoot = path.resolve(path.dirname(__filename), "..");
 const workspaceRoot = path.resolve(desktopRoot, "..");
 const preloadPath = path.join(desktopRoot, "src", "preload.cjs");
 const logoPath = path.join(workspaceRoot, "RadSysX-Logo.png");
+const logoLightPath = path.join(workspaceRoot, "RadSysX-Logo-Light.png");
 const viewerDist = path.join(workspaceRoot, "viewer", "dist");
 const viewerRoot = path.join(workspaceRoot, "viewer");
 const viewerAssetNames = [
@@ -1144,9 +1145,9 @@ function loadingHtml() {
   return htmlDocument({
     title: "Starting RadSysX",
     heading: "Starting RadSysX",
-    body:
-      "Preparing the local backend, clinical shell, and OHIF viewer bridge. The first run may build the viewer assets.",
+    body: "",
     details: "",
+    loading: true,
   });
 }
 
@@ -1160,8 +1161,9 @@ function failureHtml(title, details) {
   });
 }
 
-function htmlDocument({ title, heading, body, details }) {
+function htmlDocument({ title, heading, body, details, loading = false }) {
   const escapedDetails = escapeHtml(details);
+  const logoMarkup = startupLogoMarkup();
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -1178,28 +1180,66 @@ function htmlDocument({ title, heading, body, details }) {
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background: radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.16), transparent 38%), #020617;
+        background:
+          linear-gradient(135deg, rgba(12, 18, 28, 0.92), rgba(5, 8, 13, 0.98)),
+          #05080d;
         color: #e2e8f0;
       }
       main {
-        width: min(720px, calc(100vw - 48px));
-        border: 1px solid rgba(148, 163, 184, 0.24);
-        background: rgba(15, 23, 42, 0.88);
-        padding: 32px;
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+        width: min(440px, calc(100vw - 48px));
+        display: grid;
+        justify-items: center;
+        gap: 24px;
+        text-align: center;
+      }
+      .brand-logo {
+        display: block;
+        width: min(280px, 72vw);
+        height: auto;
+        filter: drop-shadow(0 18px 38px rgba(0, 0, 0, 0.42));
+      }
+      .brand-fallback {
+        border: 1px solid rgba(103, 232, 249, 0.28);
+        border-radius: 8px;
+        padding: 14px 20px;
+        color: #ecfeff;
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
       }
       h1 {
         margin: 0;
-        font-size: 28px;
+        font-size: clamp(24px, 4vw, 34px);
         font-weight: 700;
+        letter-spacing: 0;
       }
       p {
-        margin: 16px 0 0;
+        margin: 0;
         line-height: 1.6;
         color: #cbd5e1;
       }
+      .progress {
+        position: relative;
+        width: min(320px, 72vw);
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.2);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      }
+      .progress::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #67e8f9, #f87171, #67e8f9);
+        animation: radsysx-progress 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
       pre {
-        margin: 24px 0 0;
+        margin: 0;
+        width: 100%;
+        text-align: left;
         max-height: 360px;
         overflow: auto;
         white-space: pre-wrap;
@@ -1208,16 +1248,46 @@ function htmlDocument({ title, heading, body, details }) {
         padding: 16px;
         color: #bae6fd;
       }
+      @keyframes radsysx-progress {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .progress::before {
+          animation: none;
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <main>
+    <main role="${loading ? "status" : "main"}" aria-live="${loading ? "polite" : "off"}">
+      ${logoMarkup}
       <h1>${escapeHtml(heading)}</h1>
-      <p>${escapeHtml(body)}</p>
+      ${body ? `<p>${escapeHtml(body)}</p>` : ""}
+      ${loading ? '<div class="progress" aria-label="RadSysX startup progress"></div>' : ""}
       ${details ? `<pre>${escapedDetails}</pre>` : ""}
     </main>
   </body>
 </html>`;
+}
+
+function startupLogoMarkup() {
+  const preferredLogoPath = fs.existsSync(logoLightPath) ? logoLightPath : logoPath;
+  if (!fs.existsSync(preferredLogoPath)) {
+    return '<div class="brand-fallback">RadSysX</div>';
+  }
+
+  try {
+    const logoData = fs.readFileSync(preferredLogoPath).toString("base64");
+    return `<img class="brand-logo" src="data:image/png;base64,${logoData}" alt="RadSysX" />`;
+  } catch {
+    return '<div class="brand-fallback">RadSysX</div>';
+  }
 }
 
 function escapeHtml(value) {

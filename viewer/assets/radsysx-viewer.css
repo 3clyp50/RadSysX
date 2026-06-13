@@ -123,9 +123,257 @@
   font-size: 0.86rem;
 }
 
+body.radsysx-local-viewer {
+  background:
+    linear-gradient(135deg, rgba(9, 12, 18, 0.96), rgba(3, 6, 12, 0.98)),
+    #060910 !important;
+}
+
+body.radsysx-local-viewer #root {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+}
+
+#radsysx-local-shell-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  padding: 1.4rem;
+  pointer-events: none;
+  color: rgba(226, 232, 240, 0.82);
+  opacity: 0.78;
+}
+
+.radsysx-local-shell-frame {
+  display: grid;
+  grid-template-rows: 4rem minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(8, 12, 20, 0.9);
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.48);
+}
+
+.radsysx-local-shell-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(13, 18, 28, 0.96);
+  padding: 0 1.2rem;
+}
+
+.radsysx-local-shell-brand {
+  width: 11rem;
+  height: 3rem;
+  background: url("radsysx-logo-light.png") left center / contain no-repeat;
+  filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.34));
+}
+
+.radsysx-local-shell-pill {
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  border-radius: 999px;
+  background: rgba(8, 47, 73, 0.34);
+  color: rgba(236, 254, 255, 0.82);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 0.48rem 0.7rem;
+  text-transform: uppercase;
+}
+
+.radsysx-local-shell-main {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.64fr) minmax(0, 2.6fr) minmax(14rem, 0.9fr);
+  gap: 1px;
+  min-height: 0;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.radsysx-local-shell-panel,
+.radsysx-local-shell-viewport {
+  min-height: 0;
+  background: rgba(4, 8, 14, 0.94);
+}
+
+.radsysx-local-shell-panel {
+  display: grid;
+  align-content: start;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.radsysx-local-shell-panel-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(103, 232, 249, 0.72);
+}
+
+.radsysx-local-shell-thumb {
+  height: 6.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, transparent 0 48%, rgba(103, 232, 249, 0.2) 49% 51%, transparent 52%),
+    repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.12) 0 1px, transparent 1px 16px),
+    rgba(15, 23, 42, 0.8);
+}
+
+.radsysx-local-shell-thumb-muted {
+  opacity: 0.48;
+}
+
+.radsysx-local-shell-viewport {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(103, 232, 249, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 232, 249, 0.08) 1px, transparent 1px),
+    #020409;
+  background-size: 44px 44px;
+}
+
+.radsysx-local-shell-scan {
+  position: absolute;
+  inset: 15% 21%;
+  border: 1px solid rgba(103, 232, 249, 0.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, transparent 0 37%, rgba(226, 232, 240, 0.16) 37% 40%, transparent 40% 60%, rgba(34, 211, 238, 0.14) 60% 63%, transparent 63%),
+    linear-gradient(0deg, transparent 0 42%, rgba(148, 163, 184, 0.13) 42% 44%, transparent 44% 56%, rgba(148, 163, 184, 0.1) 56% 58%, transparent 58%),
+    rgba(2, 6, 23, 0.9);
+  box-shadow:
+    inset 0 0 34px rgba(103, 232, 249, 0.12),
+    0 18px 60px rgba(0, 0, 0, 0.42);
+}
+
+.radsysx-local-shell-overlay {
+  position: absolute;
+  width: 7rem;
+  height: 0.44rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.26);
+}
+
+.radsysx-local-shell-overlay-left {
+  left: 1rem;
+  top: 1rem;
+}
+
+.radsysx-local-shell-overlay-right {
+  right: 1rem;
+  bottom: 1rem;
+}
+
+.radsysx-local-shell-ai {
+  background: rgba(7, 12, 22, 0.96);
+}
+
+.radsysx-local-shell-line,
+.radsysx-local-shell-composer {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.radsysx-local-shell-line {
+  width: 100%;
+  height: 0.55rem;
+}
+
+.radsysx-local-shell-line-short {
+  width: 72%;
+}
+
+.radsysx-local-shell-composer {
+  height: 2.2rem;
+  margin-top: 1.2rem;
+  border: 1px solid rgba(103, 232, 249, 0.14);
+  background: rgba(15, 23, 42, 0.82);
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-screen="true"] {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  padding: clamp(1rem, 3vw, 2rem);
+  background: rgba(3, 6, 12, 0.52);
+  backdrop-filter: blur(7px);
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"] {
+  width: min(34rem, calc(100vw - 2rem));
+  border: 1px solid rgba(103, 232, 249, 0.28) !important;
+  border-radius: 8px !important;
+  background: rgba(8, 13, 24, 0.94) !important;
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+  padding: clamp(1.4rem, 3vw, 2rem) !important;
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"]::before {
+  content: "";
+  display: block;
+  width: min(17rem, 70vw);
+  height: 5.2rem;
+  margin: 0 auto 0.8rem;
+  background: url("radsysx-logo-light.png") center / contain no-repeat;
+  filter: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.34));
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-logo="true"] {
+  display: none !important;
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"] p {
+  letter-spacing: 0;
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"] button {
+  min-width: 7rem;
+  border: 1px solid rgba(103, 232, 249, 0.32) !important;
+  border-radius: 8px !important;
+  background: rgba(8, 47, 73, 0.72) !important;
+  color: #ecfeff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    transform 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"] button:hover {
+  border-color: rgba(248, 113, 113, 0.46) !important;
+  background: rgba(14, 60, 88, 0.88) !important;
+  transform: translateY(-1px);
+}
+
+body.radsysx-local-viewer [data-radsysx-local-upload-modal="true"] button:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.74);
+  outline-offset: 2px;
+}
+
 @media (max-width: 520px) {
   .radsysx-local-start-actions {
     grid-template-columns: 1fr;
+  }
+
+  #radsysx-local-shell-backdrop {
+    padding: 0.75rem;
+  }
+
+  .radsysx-local-shell-main {
+    grid-template-columns: 1fr;
+  }
+
+  .radsysx-local-shell-panel {
+    display: none;
   }
 }
 
