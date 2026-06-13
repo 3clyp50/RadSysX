@@ -286,7 +286,7 @@
 
 .radsysx-ai-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   height: 100%;
   min-height: 0;
@@ -306,6 +306,90 @@
   font-size: 0.72rem;
   font-weight: 700;
   padding: 0.3rem 0.55rem;
+}
+
+.radsysx-ai-state[data-state="connecting"] {
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(113, 63, 18, 0.25);
+  color: #fef3c7;
+}
+
+.radsysx-ai-state[data-state="local"] {
+  border-color: rgba(148, 163, 184, 0.26);
+  background: rgba(30, 41, 59, 0.32);
+  color: #cbd5e1;
+}
+
+.radsysx-ai-voice-card {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  border-radius: 0.85rem;
+  background: rgba(8, 47, 73, 0.48);
+  padding: 0.85rem;
+}
+
+.radsysx-ai-voice-card[data-listening="true"] {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: rgba(69, 10, 10, 0.34);
+}
+
+.radsysx-ai-voice-button {
+  display: inline-grid;
+  place-items: center;
+  width: 4.25rem;
+  height: 4.25rem;
+  border: 1px solid rgba(45, 212, 191, 0.36);
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.18);
+  color: #ccfbf1;
+  cursor: pointer;
+}
+
+.radsysx-ai-voice-button[data-active="true"] {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(185, 28, 28, 0.32);
+  color: #fecaca;
+}
+
+.radsysx-ai-voice-button:hover {
+  background: rgba(45, 212, 191, 0.24);
+}
+
+.radsysx-ai-voice-button[data-active="true"]:hover {
+  background: rgba(220, 38, 38, 0.34);
+}
+
+.radsysx-ai-voice-button svg {
+  width: 1.65rem;
+  height: 1.65rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.radsysx-ai-voice-copy {
+  min-width: 0;
+}
+
+.radsysx-ai-voice-status {
+  color: var(--radsysx-panel-text);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.radsysx-ai-transcript-preview {
+  margin-top: 0.28rem;
+  color: var(--radsysx-panel-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  max-height: 2.25rem;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .radsysx-ai-panel-tab {
@@ -453,6 +537,11 @@
   background: rgba(103, 232, 249, 0.18);
 }
 
+.radsysx-ai-send-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .radsysx-ai-icon-button svg,
 .radsysx-ai-send-button svg,
 .radsysx-ai-chip button svg {
@@ -537,8 +626,7 @@
   font-weight: 700;
 }
 
-.radsysx-ai-mention-option small,
-.radsysx-ai-voice-status {
+.radsysx-ai-mention-option small {
   color: var(--radsysx-panel-muted);
   font-size: 0.74rem;
   line-height: 1.35;

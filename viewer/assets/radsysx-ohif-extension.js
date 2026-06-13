@@ -395,7 +395,7 @@
         messages: [
           {
             role: "assistant",
-            text: "RadSysX AI is ready for local viewer context.",
+            text: "Voice-first RadSysX AI is warming up.",
             attachments: [],
           },
         ],
@@ -403,10 +403,19 @@
         attachments: [],
         mentionOpen: false,
         listening: false,
-        voiceStatus: null,
+        voiceStatus: "Ready",
+        interimTranscript: "",
+        backendStatus: "connecting",
+        backendSessionId: null,
+        backendMessage: null,
+        capabilities: null,
+        sending: false,
+        lastInputSource: "typed",
       };
       this.recognition = null;
+      this.backendInitPromise = null;
       this.render();
+      void this.initializeBackend();
     }
 
     disconnectedCallback() {
@@ -416,7 +425,7 @@
     bindActions() {
       this.querySelector("form")?.addEventListener("submit", (event) => {
         event.preventDefault();
-        this.sendMessage();
+        void this.sendMessage();
       });
       this.querySelector("textarea")?.addEventListener("input", (event) => {
         this.handleDraftInput(event);
@@ -424,7 +433,7 @@
       this.querySelector("textarea")?.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          this.sendMessage();
+          void this.sendMessage();
         }
       });
       this.querySelector("[data-action='toggle-mention']")?.addEventListener("click", () => {
@@ -446,9 +455,54 @@
       });
     }
 
+    async initializeBackend() {
+      if (this.backendInitPromise) {
+        return this.backendInitPromise;
+      }
+
+      this.backendInitPromise = (async () => {
+        try {
+          const capabilities = await requestJson("/api/ai/sidebar/capabilities");
+          const session = await requestJson("/api/ai/sidebar/sessions", {
+            method: "POST",
+            body: JSON.stringify({
+              viewerContext: this.buildViewerContext(),
+            }),
+          });
+          this.state.capabilities = capabilities;
+          this.state.backendSessionId = session.sessionId;
+          this.state.backendStatus = "ready";
+          this.state.backendMessage = session.message;
+          this.state.messages = [
+            {
+              role: "assistant",
+              text: session.message,
+              attachments: [],
+            },
+          ];
+        } catch (error) {
+          this.state.backendStatus = "local";
+          this.state.backendMessage = null;
+          this.state.messages = [
+            {
+              role: "assistant",
+              text: "Local voice draft mode is available. Backend AI session is not connected.",
+              attachments: [],
+            },
+          ];
+          console.warn("RadSysX AI backend session is unavailable.", error);
+        }
+        this.render();
+        this.scrollThreadToBottom();
+      })();
+
+      return this.backendInitPromise;
+    }
+
     handleDraftInput(event) {
       const textarea = /** @type {HTMLTextAreaElement} */ (event.target);
       this.state.draft = textarea.value;
+      this.state.lastInputSource = "typed";
       const cursor = textarea.selectionStart ?? textarea.value.length;
       const beforeCursor = textarea.value.slice(0, cursor);
       const shouldOpenMention = /(^|\s)@[\w-]*$/.test(beforeCursor);
@@ -484,7 +538,11 @@
       this.render();
     }
 
-    sendMessage() {
+    async sendMessage() {
+      if (this.state.sending) {
+        return;
+      }
+
       const textarea = /** @type {HTMLTextAreaElement | null} */ (this.querySelector("textarea"));
       const draft = (textarea?.value ?? this.state.draft).trim();
       if (!draft && this.state.attachments.length === 0) {
@@ -492,20 +550,63 @@
       }
 
       const attachments = this.state.attachments.map((item) => ({ ...item }));
+      const inputSource = this.state.lastInputSource === "voice" ? "voice" : "typed";
       this.state.messages.push({
         role: "user",
         text: draft || "Attached viewer context.",
         attachments,
       });
-      this.state.messages.push({
-        role: "assistant",
-        text: "Local draft captured. Backend AI orchestration is not connected yet.",
-        attachments: [],
-      });
       this.state.draft = "";
       this.state.attachments = [];
       this.state.mentionOpen = false;
-      this.state.voiceStatus = null;
+      this.state.interimTranscript = "";
+      this.state.voiceStatus = this.state.listening ? "Listening" : "Ready";
+      this.state.lastInputSource = "typed";
+      this.state.sending = true;
+      this.render();
+      this.scrollThreadToBottom();
+
+      if (this.state.backendStatus === "ready" && this.state.backendSessionId) {
+        try {
+          const response = await requestJson(
+            `/api/ai/sidebar/sessions/${encodeURIComponent(this.state.backendSessionId)}/messages`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                text: draft,
+                inputSource,
+                attachments: attachments.map((item) => ({
+                  id: item.id,
+                  kind: item.kind,
+                  label: item.label,
+                  metadata: {},
+                })),
+                viewerContext: this.buildViewerContext(),
+              }),
+            },
+          );
+          this.state.messages.push({
+            role: "assistant",
+            text: response.assistantMessage?.text ?? "Backend turn completed.",
+            attachments: [],
+          });
+        } catch (error) {
+          this.state.messages.push({
+            role: "assistant",
+            text: "Backend turn failed. Local draft was captured only.",
+            attachments: [],
+          });
+          console.warn("RadSysX AI backend turn failed.", error);
+        }
+      } else {
+        this.state.messages.push({
+          role: "assistant",
+          text: "Local draft captured. Backend AI orchestration is not connected yet.",
+          attachments: [],
+        });
+      }
+
+      this.state.sending = false;
       this.render();
       this.scrollThreadToBottom();
     }
@@ -514,61 +615,88 @@
       if (this.state.listening) {
         this.stopVoiceInput();
         this.state.listening = false;
-        this.state.voiceStatus = "Voice input stopped.";
+        this.state.voiceStatus = "Ready";
+        this.state.interimTranscript = "";
         this.render();
         return;
       }
 
       const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
       if (!Recognition) {
-        this.state.voiceStatus = "Voice input is unavailable in this runtime.";
+        this.state.voiceStatus = "Unavailable";
         this.render();
         return;
       }
 
       const recognition = new Recognition();
-      recognition.continuous = false;
+      recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = navigator.language || "en-US";
       recognition.onresult = (event) => {
-        const transcript = Array.from(event.results)
-          .map((result) => result?.[0]?.transcript ?? "")
-          .join(" ")
-          .trim();
-        if (!transcript) {
-          return;
+        let finalTranscript = "";
+        let interimTranscript = "";
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          const transcript = result?.[0]?.transcript ?? "";
+          if (result?.isFinal) {
+            finalTranscript = [finalTranscript, transcript].filter(Boolean).join(" ").trim();
+          } else {
+            interimTranscript = [interimTranscript, transcript].filter(Boolean).join(" ").trim();
+          }
         }
-        const textarea = /** @type {HTMLTextAreaElement | null} */ (this.querySelector("textarea"));
-        const nextDraft = [this.state.draft, transcript].filter(Boolean).join(" ").trim();
-        this.state.draft = nextDraft;
-        if (textarea) {
-          textarea.value = nextDraft;
+
+        if (finalTranscript) {
+          this.appendDraftText(finalTranscript, "voice");
         }
+        this.state.interimTranscript = interimTranscript;
+        this.updateVoicePreview();
       };
       recognition.onerror = (event) => {
         this.state.listening = false;
-        this.state.voiceStatus = `Voice input stopped: ${event.error ?? "unavailable"}.`;
+        this.state.voiceStatus = event.error ? `Stopped: ${event.error}` : "Unavailable";
+        this.state.interimTranscript = "";
         this.render();
       };
       recognition.onend = () => {
         this.state.listening = false;
-        if (!this.state.voiceStatus) {
-          this.state.voiceStatus = "Voice input ready.";
+        if (this.state.voiceStatus === "Listening") {
+          this.state.voiceStatus = "Ready";
         }
+        this.state.interimTranscript = "";
         this.render();
       };
 
       this.recognition = recognition;
       this.state.listening = true;
-      this.state.voiceStatus = "Listening.";
+      this.state.voiceStatus = "Listening";
       this.render();
       try {
         recognition.start();
       } catch (error) {
         this.state.listening = false;
         this.state.voiceStatus =
-          error instanceof Error ? error.message : "Voice input could not start.";
+          error instanceof Error ? error.message : "Could not start";
+        this.state.interimTranscript = "";
         this.render();
+      }
+    }
+
+    appendDraftText(text, source) {
+      if (!text.trim()) {
+        return;
+      }
+      this.state.draft = [this.state.draft, text.trim()].filter(Boolean).join(" ").trim();
+      this.state.lastInputSource = source;
+      const textarea = /** @type {HTMLTextAreaElement | null} */ (this.querySelector("textarea"));
+      if (textarea) {
+        textarea.value = this.state.draft;
+      }
+    }
+
+    updateVoicePreview() {
+      const preview = this.querySelector("[data-role='voice-transcript']");
+      if (preview) {
+        preview.textContent = this.state.interimTranscript || this.state.draft || "Ready";
       }
     }
 
@@ -585,6 +713,17 @@
       this.recognition = null;
     }
 
+    buildViewerContext() {
+      const launch = getLaunchContext();
+      return {
+        studyInstanceUID: launch?.studyInstanceUID ?? null,
+        seriesInstanceUID: launch?.seriesInstanceUIDs?.[0] ?? null,
+        sopInstanceUID: null,
+        route: `${window.location.pathname}${window.location.search}`,
+        privacyClass: launch?.studyInstanceUID ? "phi-bearing" : "local-only",
+      };
+    }
+
     scrollThreadToBottom() {
       const thread = this.querySelector(".radsysx-ai-thread");
       if (thread) {
@@ -593,15 +732,39 @@
     }
 
     render() {
+      const backendLabel =
+        this.state.backendStatus === "ready"
+          ? "Backend"
+          : this.state.backendStatus === "connecting"
+            ? "Connecting"
+            : "Local";
+      const voicePreview = this.state.interimTranscript || this.state.draft || "Ready";
       this.innerHTML = `
         <div class="radsysx-ai-shell">
           <div class="radsysx-panel-header radsysx-ai-header">
             <div>
               <div class="radsysx-panel-kicker">RadSysX AI</div>
-              <div class="radsysx-panel-title">Imaging chat</div>
+              <div class="radsysx-panel-title">Voice assistant</div>
             </div>
-            <div class="radsysx-ai-state">Local</div>
+            <div class="radsysx-ai-state" data-state="${escapeHtml(this.state.backendStatus)}">${backendLabel}</div>
           </div>
+
+          <section class="radsysx-ai-voice-card" data-listening="${this.state.listening ? "true" : "false"}">
+            <button
+              class="radsysx-ai-voice-button"
+              data-action="voice"
+              data-active="${this.state.listening ? "true" : "false"}"
+              type="button"
+              title="Voice input"
+              aria-label="Voice input"
+            >
+              ${renderMicIcon()}
+            </button>
+            <div class="radsysx-ai-voice-copy">
+              <div class="radsysx-ai-voice-status">${escapeHtml(this.state.voiceStatus ?? "Ready")}</div>
+              <div class="radsysx-ai-transcript-preview" data-role="voice-transcript">${escapeHtml(voicePreview)}</div>
+            </div>
+          </section>
 
           <div class="radsysx-ai-thread" role="log" aria-label="RadSysX AI chat">
             ${this.state.messages.map((message) => renderAiMessage(message)).join("")}
@@ -623,7 +786,7 @@
             <textarea
               rows="3"
               aria-label="RadSysX AI message"
-              placeholder="Ask RadSysX AI"
+              placeholder="Type or edit transcript"
             >${escapeHtml(this.state.draft)}</textarea>
 
             <div class="radsysx-ai-composer-footer">
@@ -635,27 +798,15 @@
                   title="Attach ROI or segmentation"
                   aria-label="Attach ROI or segmentation"
                 >@</button>
-                <button
-                  class="radsysx-ai-icon-button"
-                  data-action="voice"
-                  data-active="${this.state.listening ? "true" : "false"}"
-                  type="button"
-                  title="Voice input"
-                  aria-label="Voice input"
-                >${renderMicIcon()}</button>
               </div>
               <button
                 class="radsysx-ai-send-button"
                 type="submit"
                 title="Send"
                 aria-label="Send message"
+                ${this.state.sending ? "disabled" : ""}
               >${renderSendIcon()}</button>
             </div>
-            ${
-              this.state.voiceStatus
-                ? `<div class="radsysx-ai-voice-status">${escapeHtml(this.state.voiceStatus)}</div>`
-                : ""
-            }
           </form>
         </div>
       `;

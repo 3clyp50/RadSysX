@@ -19,6 +19,7 @@
 - Local DICOMDIR imports must resolve referenced file IDs against included files, including paths relative to the DICOMDIR parent, and must associate the DICOMDIR index with each referenced local study when one media folder contains multiple studies.
 - `contracts.py` must stay aligned with `packages/clinical-web/src/contracts.ts`.
 - `config.py` owns mode, auth, cookie, viewer, archive, AI, and database settings. Governed modes must not silently fall back to insecure secrets.
+- The `AISidebar*` contracts are the first backend-bound voice/composer spine for the OHIF AI sidebar. They are stub orchestration contracts only; do not present them as real ASR, MedGemma, Pillar/Sybil, BioMedParse patient-study inference, report persistence, or DICOM SEG persistence until those adapters and governance paths exist.
 
 ## Work Guidance
 

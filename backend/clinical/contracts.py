@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -374,6 +374,85 @@ class AIJobRecord(ClinicalModel):
     output_refs: list[str] = Field(default_factory=list)
     reviewer_decision: ReviewerDecision | None = None
     created_at: str
+
+
+class AISidebarModelLane(ClinicalModel):
+    lane: str
+    status: Literal["planned", "stub", "available", "disabled"]
+    role: str
+    model_id: str | None = Field(default=None, alias="modelId")
+
+
+class AISidebarCapabilities(ClinicalModel):
+    backend_bound: bool = Field(alias="backendBound")
+    voice_first: bool = Field(alias="voiceFirst")
+    text_composer: bool = Field(alias="textComposer")
+    context_attachments: bool = Field(alias="contextAttachments")
+    orchestration_mode: Literal["stub", "local", "api", "hybrid"] = Field(alias="orchestrationMode")
+    event_transport: Literal["http", "sse", "websocket"] = Field(alias="eventTransport")
+    audio_input_modes: list[str] = Field(default_factory=list, alias="audioInputModes")
+    model_lanes: list[AISidebarModelLane] = Field(default_factory=list, alias="modelLanes")
+    safety_note: str = Field(alias="safetyNote")
+
+
+class AISidebarViewerContext(ClinicalModel):
+    study_instance_uid: str | None = Field(default=None, alias="studyInstanceUID")
+    series_instance_uid: str | None = Field(default=None, alias="seriesInstanceUID")
+    sop_instance_uid: str | None = Field(default=None, alias="sopInstanceUID")
+    route: str | None = None
+    privacy_class: Literal["local-only", "deidentified", "phi-bearing", "unknown"] = Field(
+        default="unknown",
+        alias="privacyClass",
+    )
+
+
+class AISidebarSessionCreateRequest(ClinicalModel):
+    viewer_context: AISidebarViewerContext | None = Field(default=None, alias="viewerContext")
+    trace_id: str | None = None
+
+
+class AISidebarSessionResponse(ClinicalModel):
+    session_id: str = Field(alias="sessionId")
+    status: Literal["ready", "fallback"]
+    created_at: str = Field(alias="createdAt")
+    backend_bound: bool = Field(alias="backendBound")
+    voice_first: bool = Field(alias="voiceFirst")
+    orchestration_mode: Literal["stub", "local", "api", "hybrid"] = Field(alias="orchestrationMode")
+    message: str
+
+
+class AISidebarAttachment(ClinicalModel):
+    id: str
+    kind: str
+    label: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AISidebarMessageRequest(ClinicalModel):
+    text: str = Field(default="", max_length=4000)
+    input_source: Literal["typed", "voice", "context"] = Field(default="typed", alias="inputSource")
+    attachments: list[AISidebarAttachment] = Field(default_factory=list, max_length=16)
+    viewer_context: AISidebarViewerContext | None = Field(default=None, alias="viewerContext")
+    trace_id: str | None = None
+
+
+class AISidebarAssistantMessage(ClinicalModel):
+    role: Literal["assistant"] = "assistant"
+    text: str
+    created_at: str = Field(alias="createdAt")
+    model_id: str = Field(alias="modelId")
+    model_version: str = Field(alias="modelVersion")
+
+
+class AISidebarTurnResponse(ClinicalModel):
+    session_id: str = Field(alias="sessionId")
+    turn_id: str = Field(alias="turnId")
+    status: Literal["completed"]
+    assistant_message: AISidebarAssistantMessage = Field(alias="assistantMessage")
+    route: list[str] = Field(default_factory=list)
+    audit_trace_id: str = Field(alias="auditTraceId")
+    persisted: bool
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DerivedResultRecord(ClinicalModel):

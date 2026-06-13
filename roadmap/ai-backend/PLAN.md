@@ -6,7 +6,7 @@ Primary experiment environment: Ubuntu 24.04 NVIDIA L40S VM, documented in `road
 
 ## Read This First
 
-This file is the durable brain-extension plan for turning the current frontend-only RadSysX AI sidebar into a real backend-driven multimodal imaging assistant.
+This file is the durable brain-extension plan for turning the current backend-bound stub RadSysX AI sidebar into a real multimodal imaging assistant.
 
 Related research:
 
@@ -17,8 +17,9 @@ Current baseline:
 
 - The Electron fast path opens directly into OHIF local DICOM mode at `/viewer/local`.
 - The visible app name is `RadSysX`.
-- The OHIF right sidebar has a RadSysX AI panel with local chat state, text composer, voice affordance, and `@` chips for ROI, segmentation, and measurement context.
-- The AI panel is intentionally frontend-only today. It does not call backend AI endpoints, does not persist clinical chat state, and does not execute model inference.
+- The OHIF right sidebar is now voice-first: a primary microphone control sits above the thread, and the bottom composer remains available for typed input or transcript editing.
+- The AI panel creates an authenticated backend sidebar session when possible, sends voice/composer turns through `/api/ai/sidebar/*` stub contracts, audits study-bound turns as `RUN_AI`, and falls back to local draft mode when the backend session is unavailable.
+- The AI panel still does not execute real ASR, MedGemma, Pillar/Sybil, BioMedParse patient-study inference, report persistence, or DICOM SEG writeback. Current replies are deterministic orchestration stubs.
 - A first BioMedParse integration demo now exists behind `RADSYSX_BIOMEDPARSE_DEMO_ENABLED=1`: the backend exposes session-protected capability/run/artifact routes, the worklist shows an optional demo panel, and a subprocess worker runs the bundled CT AMOS sample without importing CUDA/Detectron2 into the FastAPI process. The runbook lives at `roadmap/ai-backend/BIOMEDPARSE_DEMO.md`.
 - Existing clinical rules still apply: governed workflows must use backend-issued actor context, opaque launch sessions, audit events, backend-mediated AI jobs, and backend-mediated derived DICOM writeback.
 - RadSysX is an Electron desktop app and should remain cross-platform. Linux/NVIDIA is the first validation lane for heavy local model and ASR experiments, not a product boundary.
@@ -290,7 +291,8 @@ Default model roles:
   - Evaluate whether it replaces or complements current local imaging import/preview code.
 - Nemotron ASR:
   - Local streaming ASR for voice-to-text and command dictation.
-  - Pair with a text LLM/orchestrator for action planning.
+  - In the likely steady-state desktop profile, this is resident or semi-resident while the radiologist works.
+  - Pair with MedGemma as the primary reasoning/orchestration lane, unless the ASR/realtime provider itself can safely emit structured tool intents.
 - Gemini Live API or GPT-Realtime-2:
   - API-backed realtime voice option for lower-latency speech-to-speech, interruptions, tool calls, and richer audio experience.
   - Must be behind backend token mediation, mode/consent gates, audit, and deployment policy.
@@ -312,6 +314,14 @@ Fallback order for voice:
 3. Browser Web Speech API only as a temporary local prototype if needed, labelled as non-governed and not relied on clinically.
 4. Governed Gemini Live or GPT-Realtime-2 for API-backed realtime when policy, consent, and audit allow it.
 5. Text-only composer if audio is unavailable.
+
+Expected steady-state ensemble:
+
+- Nemotron or another realtime ASR lane should usually stay resident while the radiologist is reading.
+- MedGemma should stay warm or resident where memory allows, because it is the main chat/report/tool-planning brain.
+- Pillar/Sybil should be invoked as specialist tools for supported modality-specific prediction/risk tasks.
+- BioMedParse should be queued as a heavier segmentation fallback for missing modality coverage or 3D tasks.
+- The scheduler must understand combined residency, not only one-model-at-a-time demos.
 
 ## Computer-Use-Like UI Control
 
@@ -622,19 +632,24 @@ Goal:
 
 - Replace local-only chat state with a backend-mediated session while preserving current UI feel.
 
+Current tranche:
+
+- A first backend-bound sidebar spine exists: `GET /api/ai/sidebar/capabilities`, `POST /api/ai/sidebar/sessions`, and `POST /api/ai/sidebar/sessions/{sessionId}/messages`.
+- The OHIF sidebar connects to that spine when authenticated, audits study-bound turns, keeps local fallback behavior, and returns deterministic stub replies. SSE, persistence, real model inference, and tool proposals remain future work.
+
 Tasks:
 
 - [ ] Add `backend/clinical/ai.py` or equivalent governed service module if clinical-owned.
-- [ ] Add contracts in `backend/clinical/contracts.py` or a dedicated AI contracts module.
+- [x] Add first `AISidebar*` contracts in `backend/clinical/contracts.py` and mirror them in `packages/clinical-web/src/contracts.ts`.
 - [ ] Add repository support for AI sessions/messages in local SQLite/dev persistence.
-- [ ] Add `GET /api/ai/capabilities`.
-- [ ] Add `POST /api/ai/sessions`.
-- [ ] Add `POST /api/ai/sessions/{sessionId}/messages`.
+- [x] Add first sidebar capability endpoint at `GET /api/ai/sidebar/capabilities`.
+- [x] Add first sidebar session endpoint at `POST /api/ai/sidebar/sessions`.
+- [x] Add first sidebar message endpoint at `POST /api/ai/sidebar/sessions/{sessionId}/messages`.
 - [ ] Add `GET /api/ai/sessions/{sessionId}/events` with stubbed streaming.
-- [ ] Return deterministic mock assistant replies for now.
-- [ ] Add audit records for AI session creation and message submission.
-- [ ] Update OHIF sidebar to connect to backend when AI is enabled.
-- [ ] Keep a frontend-only fallback for standalone research/local only if backend unavailable.
+- [x] Return deterministic mock assistant replies for now.
+- [x] Add audit records for study-bound AI sidebar message submission.
+- [x] Update OHIF sidebar to connect to backend when authenticated.
+- [x] Keep a local fallback for standalone research/local only if backend unavailable.
 
 Exit criteria:
 
@@ -794,11 +809,17 @@ Goal:
 
 - Make the voice affordance real.
 
+Current tranche:
+
+- The sidebar UI is voice-first and still uses browser speech recognition as a temporary local transcript source. The backend receives final submitted voice turns as text through the sidebar message contract. True backend streaming audio, partial transcript events, and ASR worker scheduling remain future work.
+
 Tasks:
 
 - [ ] Add backend audio session contract.
 - [ ] Add renderer microphone permission and audio capture state.
-- [ ] Implement push-to-talk as the default voice mode and dictation as an editable transcript mode.
+- [x] Make the sidebar voice-first while keeping the editable text composer.
+- [x] Implement browser-side voice dictation as editable transcript input for the first UI pass.
+- [ ] Implement backend-owned push-to-talk/audio streaming as the default governed voice mode.
 - [ ] Implement local ASR adapter interface.
 - [ ] Test Nemotron ASR partial/final transcript events.
 - [ ] Add transcript streaming to sidebar.

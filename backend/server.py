@@ -77,6 +77,11 @@ try:
     from backend.clinical.config import get_settings
     from backend.clinical.contracts import (
         AIJobCreateRequest,
+        AISidebarCapabilities,
+        AISidebarMessageRequest,
+        AISidebarSessionCreateRequest,
+        AISidebarSessionResponse,
+        AISidebarTurnResponse,
         AuditAction,
         AuthMode,
         ClinicalPlatformConfig,
@@ -113,6 +118,11 @@ except ModuleNotFoundError:
     from clinical.config import get_settings
     from clinical.contracts import (
         AIJobCreateRequest,
+        AISidebarCapabilities,
+        AISidebarMessageRequest,
+        AISidebarSessionCreateRequest,
+        AISidebarSessionResponse,
+        AISidebarTurnResponse,
         AuditAction,
         AuthMode,
         ClinicalPlatformConfig,
@@ -791,6 +801,40 @@ async def submit_ai_job(request: AIJobCreateRequest, http_request: Request):
     """Queue an AI job under governance rules."""
     actor = _require_session(http_request)
     return clinical_service.submit_ai_job(
+        request,
+        actor=actor,
+        source_ip=_client_ip(http_request),
+    )
+
+
+@app.get("/api/ai/sidebar/capabilities", response_model=AISidebarCapabilities)
+async def get_ai_sidebar_capabilities(http_request: Request):
+    """Return the backend-bound voice-first sidebar contract."""
+    _require_session(http_request)
+    return clinical_service.get_ai_sidebar_capabilities()
+
+
+@app.post("/api/ai/sidebar/sessions", response_model=AISidebarSessionResponse)
+async def create_ai_sidebar_session(request: AISidebarSessionCreateRequest, http_request: Request):
+    """Create an ephemeral backend session for the OHIF AI sidebar."""
+    actor = _require_session(http_request)
+    return clinical_service.create_ai_sidebar_session(
+        request,
+        actor=actor,
+        source_ip=_client_ip(http_request),
+    )
+
+
+@app.post("/api/ai/sidebar/sessions/{session_id}/messages", response_model=AISidebarTurnResponse)
+async def submit_ai_sidebar_message(
+    session_id: str,
+    request: AISidebarMessageRequest,
+    http_request: Request,
+):
+    """Submit a voice or composer turn from the OHIF AI sidebar."""
+    actor = _require_session(http_request)
+    return clinical_service.submit_ai_sidebar_message(
+        session_id,
         request,
         actor=actor,
         source_ip=_client_ip(http_request),

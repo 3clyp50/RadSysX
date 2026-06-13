@@ -875,6 +875,12 @@ async function verifyAiChatPanel(cdp) {
     "RadSysX AI chat composer",
     30000,
   );
+  await waitForRendererCondition(
+    cdp,
+    `document.querySelector("radsysx-ai-chat-panel")?.state?.backendStatus !== "connecting"`,
+    "RadSysX AI backend binding",
+    30000,
+  );
 
   const chatState = await evaluateInRenderer(
     cdp,
@@ -883,6 +889,7 @@ async function verifyAiChatPanel(cdp) {
       const textarea = panel?.querySelector("textarea");
       const mentionButton = panel?.querySelector("[data-action='toggle-mention']");
       const voiceButton = panel?.querySelector("[data-action='voice']");
+      const voiceCard = panel?.querySelector(".radsysx-ai-voice-card");
       const sendButton = panel?.querySelector("button[type='submit']");
       mentionButton?.click();
       return {
@@ -890,7 +897,10 @@ async function verifyAiChatPanel(cdp) {
         composerPresent: Boolean(textarea),
         mentionButtonPresent: Boolean(mentionButton),
         voiceButtonPresent: Boolean(voiceButton),
+        voiceCardPresent: Boolean(voiceCard),
         sendButtonPresent: Boolean(sendButton),
+        backendStatus: panel?.state?.backendStatus ?? null,
+        backendSessionPresent: Boolean(panel?.state?.backendSessionId),
         mentionMenuOpen: panel?.querySelector(".radsysx-ai-mention-menu")?.getAttribute("data-open") === "true",
         roiOptionPresent: Boolean(panel?.querySelector("[data-attachment-kind='roi']")),
         segmentationOptionPresent: Boolean(panel?.querySelector("[data-attachment-kind='segmentation']"))
@@ -904,7 +914,10 @@ async function verifyAiChatPanel(cdp) {
     !chatState.composerPresent ||
     !chatState.mentionButtonPresent ||
     !chatState.voiceButtonPresent ||
+    !chatState.voiceCardPresent ||
     !chatState.sendButtonPresent ||
+    chatState.backendStatus !== "ready" ||
+    !chatState.backendSessionPresent ||
     !chatState.mentionMenuOpen ||
     !chatState.roiOptionPresent ||
     !chatState.segmentationOptionPresent

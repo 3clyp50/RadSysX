@@ -2,6 +2,11 @@ import { getBackendBaseUrl } from "./env";
 import type {
   AIJobRecord,
   AIJobRequest,
+  AISidebarCapabilities,
+  AISidebarMessageRequest,
+  AISidebarSessionCreateRequest,
+  AISidebarSessionResponse,
+  AISidebarTurnResponse,
   AuditStudyResponse,
   BiomedParseDemoCapabilities,
   BiomedParseDemoRunRequest,
@@ -162,6 +167,27 @@ export function createClinicalApi(options?: ClinicalApiOptions) {
 
     createAIJob(payload: AIJobRequest): Promise<AIJobRecord> {
       return requestJson("/api/ai/jobs", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, options);
+    },
+
+    getAISidebarCapabilities(): Promise<AISidebarCapabilities> {
+      return requestJson("/api/ai/sidebar/capabilities", undefined, options);
+    },
+
+    createAISidebarSession(payload: AISidebarSessionCreateRequest = {}): Promise<AISidebarSessionResponse> {
+      return requestJson("/api/ai/sidebar/sessions", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }, options);
+    },
+
+    submitAISidebarMessage(
+      sessionId: string,
+      payload: AISidebarMessageRequest,
+    ): Promise<AISidebarTurnResponse> {
+      return requestJson(`/api/ai/sidebar/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
         body: JSON.stringify(payload),
       }, options);

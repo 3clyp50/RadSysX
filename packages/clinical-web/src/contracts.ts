@@ -13,6 +13,20 @@ export type AIJobStatus =
   | "completed"
   | "failed"
   | "withdrawn";
+export type AISidebarLaneStatus =
+  | "planned"
+  | "stub"
+  | "available"
+  | "disabled";
+export type AISidebarOrchestrationMode =
+  | "stub"
+  | "local"
+  | "api"
+  | "hybrid";
+export type AISidebarInputSource =
+  | "typed"
+  | "voice"
+  | "context";
 export type ReportStatus =
   | "new"
   | "in_review"
@@ -318,6 +332,82 @@ export type AIJobRequest = {
   inputHash: string;
   outputRefs?: string[];
   traceId?: string;
+};
+
+export type AISidebarModelLane = {
+  lane: string;
+  status: AISidebarLaneStatus;
+  role: string;
+  modelId?: string | null;
+};
+
+export type AISidebarCapabilities = {
+  backendBound: boolean;
+  voiceFirst: boolean;
+  textComposer: boolean;
+  contextAttachments: boolean;
+  orchestrationMode: AISidebarOrchestrationMode;
+  eventTransport: "http" | "sse" | "websocket";
+  audioInputModes: string[];
+  modelLanes: AISidebarModelLane[];
+  safetyNote: string;
+};
+
+export type AISidebarViewerContext = {
+  studyInstanceUID?: string | null;
+  seriesInstanceUID?: string | null;
+  sopInstanceUID?: string | null;
+  route?: string | null;
+  privacyClass?: "local-only" | "deidentified" | "phi-bearing" | "unknown";
+};
+
+export type AISidebarSessionCreateRequest = {
+  viewerContext?: AISidebarViewerContext | null;
+  traceId?: string | null;
+};
+
+export type AISidebarSessionResponse = {
+  sessionId: string;
+  status: "ready" | "fallback";
+  createdAt: string;
+  backendBound: boolean;
+  voiceFirst: boolean;
+  orchestrationMode: AISidebarOrchestrationMode;
+  message: string;
+};
+
+export type AISidebarAttachment = {
+  id: string;
+  kind: string;
+  label: string;
+  metadata: Record<string, unknown>;
+};
+
+export type AISidebarMessageRequest = {
+  text?: string;
+  inputSource?: AISidebarInputSource;
+  attachments?: AISidebarAttachment[];
+  viewerContext?: AISidebarViewerContext | null;
+  traceId?: string | null;
+};
+
+export type AISidebarAssistantMessage = {
+  role: "assistant";
+  text: string;
+  createdAt: string;
+  modelId: string;
+  modelVersion: string;
+};
+
+export type AISidebarTurnResponse = {
+  sessionId: string;
+  turnId: string;
+  status: "completed";
+  assistantMessage: AISidebarAssistantMessage;
+  route: string[];
+  auditTraceId: string;
+  persisted: boolean;
+  warnings: string[];
 };
 
 export type DerivedDicomObject = {
